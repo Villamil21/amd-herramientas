@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.1.0",
+    "date": "2026-09-27",
+    "notes": [
+      "La aplicación ahora se llama AMD Módulos.",
+      "Tarjetas de módulos más limpias y sin iconos.",
+      "Un punto verde indica los módulos disponibles y uno gris los que están en preparación."
+    ]
+  },
+  {
     "version": "1.0.0",
     "date": "2026-09-27",
     "notes": [

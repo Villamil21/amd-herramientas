@@ -9,5 +9,6 @@ export { Field, Input, Select, Textarea } from "./Field";
 export { Loader } from "./Loader";
 export { Modal } from "./Modal";
 export { PageHeader } from "./PageHeader";
+export { StatusDot } from "./StatusDot";
 export { Stepper } from "./Stepper";
 export { ToastProvider, useToast } from "./Toast";

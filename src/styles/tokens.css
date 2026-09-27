@@ -41,6 +41,8 @@
   --color-success-soft: #ecfdf3;
   --color-info: #175cd3;
   --color-info-soft: #eff8ff;
+  --color-status-on: #17b26a; /* punto de módulo disponible */
+  --color-status-off: #c3c6cc; /* punto de módulo en preparación */
 
   /* Tipografía */
   --font-display: "Sora", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;

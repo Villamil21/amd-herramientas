@@ -1,4 +1,4 @@
-import { Building2, FolderOpen, Percent } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { ModuleTile } from "../components/ModuleTile";
 import { Button, Card, PageHeader } from "../components/ui";
@@ -16,8 +16,8 @@ export function SettingsPage() {
       <PageHeader eyebrow="Configuración" title="Configuración" description="Datos compartidos, copias de seguridad y actualizaciones." />
 
       <div className="tile-grid">
-        <ModuleTile icon={Building2} title="Empresas" description="Empresas emisoras, sus datos y logos." available hideStatus meta="Administrar" onOpen={() => navigate(paths.companies)} />
-        <ModuleTile icon={Percent} title="Conceptos de retención" description="Conceptos, tipos y tarifas predeterminadas." available hideStatus meta="Administrar" onOpen={() => navigate(paths.concepts)} />
+        <ModuleTile title="Empresas" description="Empresas emisoras, sus datos y logos." available hideStatus meta="Administrar" onOpen={() => navigate(paths.companies)} />
+        <ModuleTile title="Conceptos de retención" description="Conceptos, tipos y tarifas predeterminadas." available hideStatus meta="Administrar" onOpen={() => navigate(paths.concepts)} />
       </div>
 
       <BackupSection />

@@ -18,7 +18,7 @@ export function HomePage() {
       <section className="hero">
         <div>
           <h1>
-            AMD <span>Herramientas</span>
+            AMD <span>Módulos</span>
           </h1>
           <p>Centro de herramientas administrativas y contables. Elige un módulo para comenzar.</p>
         </div>
@@ -60,7 +60,6 @@ export function HomePage() {
           return (
             <ModuleTile
               key={m.id}
-              icon={m.icon}
               title={m.name}
               description={m.description}
               available={ready > 0}

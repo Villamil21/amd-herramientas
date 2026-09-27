@@ -62,8 +62,7 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
         <div className="sidebar__brand" data-tauri-drag-region>
           <div className="brand-mark">A</div>
           <div className="brand-text">
-            AMD <span>Herramientas</span>
-            <small>SOLUCIONES INTEGRALES</small>
+            AMD <span>Módulos</span>
           </div>
         </div>
         <nav className="sidebar__nav">

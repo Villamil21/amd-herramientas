@@ -47,7 +47,7 @@ export async function renderWithholdingPdf(
     preloadedLogo !== undefined ? preloadedLogo : loadLogo(doc.issuer.logoDataUrl),
   ]);
   const pdf = new jsPDF({ unit: "pt", format: [PAGE.width, PAGE.height], compress: true });
-  pdf.setProperties({ title: doc.title, subject: doc.info[1]?.value ?? "", creator: "AMD Herramientas" });
+  pdf.setProperties({ title: doc.title, subject: doc.info[1]?.value ?? "", creator: "AMD Módulos" });
 
   // Logo
   if (logo) {

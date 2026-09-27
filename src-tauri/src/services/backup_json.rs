@@ -101,9 +101,9 @@ pub fn build(conn: &Connection, logos_dir: &Path, app_version: &str) -> AppResul
 
 pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
     let file: BackupFile = serde_json::from_slice(bytes)
-        .map_err(|_| AppError::user("El archivo no es un backup válido de AMD Herramientas."))?;
+        .map_err(|_| AppError::user("El archivo no es un backup válido de AMD Módulos."))?;
     if file.format != FORMAT {
-        return Err(AppError::user("El archivo no es un backup válido de AMD Herramientas."));
+        return Err(AppError::user("El archivo no es un backup válido de AMD Módulos."));
     }
     if file.format_version > FORMAT_VERSION {
         return Err(AppError::user(

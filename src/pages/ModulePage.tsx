@@ -22,7 +22,6 @@ export function ModulePage({ module }: { module: ModuleDef }) {
           {module.submodules.map((s) => (
             <ModuleTile
               key={s.id}
-              icon={s.icon}
               title={s.name}
               description={s.description}
               available={Boolean(s.component)}

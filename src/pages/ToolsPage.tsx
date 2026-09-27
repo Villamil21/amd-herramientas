@@ -13,7 +13,6 @@ export function ToolsPage() {
           return (
             <ModuleTile
               key={m.id}
-              icon={m.icon}
               title={m.name}
               description={m.description}
               available={ready > 0}
