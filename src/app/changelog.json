@@ -1,0 +1,12 @@
+[
+  {
+    "version": "1.0.0",
+    "date": "2026-09-27",
+    "notes": [
+      "Nuevo módulo de certificados de retención en la fuente e ICA.",
+      "Gestión de empresas emisoras con logo y de conceptos de retención.",
+      "Copias de seguridad: exportar e importar datos.",
+      "Actualizaciones automáticas sin perder información."
+    ]
+  }
+]

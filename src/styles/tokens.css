@@ -1,0 +1,90 @@
+/*
+ * Sistema visual tomado de AMD Soluciones (davinzifc.github.io/AMD-soluciones):
+ * tinta profunda #0D141A + dorado #CFBB66, Sora para títulos y DM Sans para texto.
+ * Adaptación a escritorio: navegación oscura como la del sitio y un área de
+ * trabajo clara (mist/blanco) cómoda para jornadas largas.
+ */
+:root {
+  /* Marca */
+  --color-primary: #cfbb66;
+  --color-primary-hover: #e5d59a;
+  --color-primary-ink: #7d6e27; /* dorado legible sobre fondos claros */
+  --color-primary-soft: rgba(207, 187, 102, 0.14);
+  --color-secondary: #0d141a;
+  --color-secondary-soft: #1d1e20;
+
+  /* Superficies */
+  --color-background: #f2f3f6;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f8fa;
+  --color-sidebar: #0d141a;
+  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-border: rgba(255, 255, 255, 0.08);
+  --color-sidebar-text: rgba(245, 246, 248, 0.72);
+
+  /* Texto */
+  --color-text: #0d141a;
+  --color-text-on-dark: #f5f6f8;
+  --color-muted: #56585e;
+  --color-subtle: #8a8d94;
+
+  /* Bordes */
+  --color-border: rgba(13, 20, 26, 0.09);
+  --color-border-strong: rgba(13, 20, 26, 0.18);
+
+  /* Estados */
+  --color-danger: #b42318;
+  --color-danger-soft: #fef3f2;
+  --color-warning: #a15c07;
+  --color-warning-soft: #fffaeb;
+  --color-success: #067647;
+  --color-success-soft: #ecfdf3;
+  --color-info: #175cd3;
+  --color-info-soft: #eff8ff;
+
+  /* Tipografía */
+  --font-display: "Sora", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* Espaciado */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Formas */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(13, 20, 26, 0.05);
+  --shadow-md: 0 6px 20px rgba(13, 20, 26, 0.08);
+  --shadow-lg: 0 18px 48px rgba(13, 20, 26, 0.18);
+  --focus-ring: 0 0 0 3px rgba(207, 187, 102, 0.45);
+
+  /* Movimiento (mismo easing del sitio de referencia) */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-fast: 0.15s;
+
+  /* Estructura */
+  --sidebar-width: 236px;
+  --sidebar-collapsed: 80px;
+  --topbar-height: 52px;
+  --content-max: 1180px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0s;
+  }
+}
