@@ -32,7 +32,12 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
   const logoBox = contain(logo, width / 2 - S(48), y, S(96), S(38));
   pdf.addImage(logo.data, logo.format, logoBox.x, logoBox.y, logoBox.width, logoBox.height, undefined, "FAST");
   y += S(63); text("COMPOSICIÓN ACCIONARIA", width / 2, y, 22, "center", true); y += S(27);
-  const paragraph = (value: string) => { for (const line of pdf.splitTextToSize(value, right - margin)) { text(line, margin, y, 10.5); y += S(14); } };
+  const paragraph = (value: string) => {
+    // splitTextToSize usa la fuente actual; establécela antes de medir para que
+    // el salto de línea y el texto dibujado tengan exactamente la misma escala.
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(10.5));
+    for (const line of pdf.splitTextToSize(value, right - margin)) { text(line, margin, y, 10.5); y += S(14); }
+  };
   paragraph(`Mediante el presente documento y obrando en mi calidad de Contadora Pública titulada mediante resolución expedida por el Ministerio de educación Nacional a través la Junta Central de Contadores bajo la Matrícula T-${doc.professionalNumber}`);
   y += S(9);
   paragraph(`Que la sociedad ${doc.company.razonSocial}, identificada con NIT ${formatNumber(Number(doc.company.nit.replace(/\D/g, "")))}-${doc.company.dv}. Tiene un capital accionario dividido de la siguiente manera:`);
@@ -55,6 +60,7 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
     text("TOTAL", (cols[1] + cols[4]) / 2, rowY + S(14), 8.5, "center", true);
     text(formatNumber(capital.totalShares), (cols[4] + cols[5]) / 2, rowY + S(14), 8.5, "center", true);
     text(formatMoney(capital.totalShares * capital.nominalValue), (cols[5] + cols[6]) / 2, rowY + S(14), 8.5, "center", true);
+    pdf.line(left, bottom, tableRight, bottom);
     y = bottom;
   };
   table(doc.subscribed); table(doc.paid); y += S(20); paragraph(doc.dateText); y += S(7);
