@@ -16,7 +16,8 @@ Primer módulo funcional: **Certificados → Certificado de retención**.
 |---|---|
 | `npm install` | Instala dependencias (una vez). |
 | `npm run app:dev` | Abre la app en modo desarrollo. |
-| `npm test` | Pruebas de cálculos (casos 1–9 del requerimiento y el Excel de referencia). |
+| `npm test` | Pruebas de cálculos (certificado de retención y análisis de extractos). |
+| `BANCOLOMBIA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Prueba el parser con extractos reales de Bancolombia (varios archivos separados por `:`). Los PDF no se guardan en el repositorio. |
 | `cd src-tauri && cargo test` | Pruebas de Rust: migraciones, backups, conservación de datos al actualizar, lectura de Excel. |
 | `npm run app:build` | Compila `.app` y `.dmg` (requiere la clave de firma del actualizador; ver abajo). |
 | `npm run version:bump -- minor` | Sube la versión (`patch` / `minor` / `major` / `X.Y.Z`). |
@@ -63,11 +64,14 @@ Decisiones:
 ```text
 src/
 ├── app/            App, enrutador (hash), registro de módulos, actualizador, changelog
-├── components/     Sistema de diseño (components/ui) y piezas compartidas
+├── components/     Sistema de diseño (components/ui) y piezas compartidas (BankCard)
 ├── layouts/        Estructura: menú lateral + barra superior
 ├── pages/          Inicio, Herramientas, Empresas, Conceptos, Configuración
 ├── modules/
-│   ├── bank-analysis/      (próximamente)
+│   ├── bank-analysis/      Análisis de extractos bancarios
+│   │   ├── shared/         pdf/ (texto con coordenadas y filas), agrupación, validación,
+│   │   │                   resumen, exportación a Excel y componentes de resultados
+│   │   └── bancolombia/    parser/ del formato Bancolombia (+ pruebas) y su página
 │   ├── social-security/    (próximamente)
 │   ├── certificates/
 │   │   └── withholding/    Certificado de retención
@@ -77,13 +81,14 @@ src/
 │   └── sales-orders/       (próximamente)
 ├── services/       Llamadas a Rust (empresas, conceptos, archivos, backup, actualizaciones)
 ├── hooks/  utils/  types/  styles/ (tokens.css = variables de diseño)
+Logos/              Logos de bancos (Bancolombia.png …), incluidos en el build
 src-tauri/
 ├── migrations/     001_initial.sql …
 └── src/
     ├── commands/   Comandos expuestos al frontend
     ├── database/   Conexión, migraciones, repositorios
     ├── models/     Empresa, Concepto (+ validación)
-    ├── services/   rutas, Excel, logos, backups, tiempo
+    ├── services/   rutas, Excel (lectura y escritura), logos, backups, tiempo
     └── startup.rs  Arranque: copia → migraciones → last_run_version
 ```
 
@@ -117,5 +122,19 @@ Atajos: `⌘O` importar Excel (en el certificado), `⌘S` generar PDF (en la vis
 - Título según los tipos de los conceptos (ICA / Retención / Retención e ICA).
 - Columna de tarifa: `TASA %`, `TASA ‰` o `TASA` con la unidad en cada fila si se mezclan, para que la presentación no sea engañosa.
 - Base cero o negativa bloquea la generación.
+
+## Análisis de extractos — Bancolombia
+
+- Todo se procesa en el equipo con pdf.js (texto real del PDF, sin OCR ni servicios externos). El PDF no se copia ni se guarda.
+- Las filas se reconstruyen por **coordenadas**: el PDF puede entregar el texto fila por fila o columna por columna. Las columnas se ubican con el encabezado `FECHA | DESCRIPCIÓN | SUCURSAL | DCTO. | VALOR | SALDO` de cada página.
+- Se ignoran el RESUMEN, los datos de la cuenta, los encabezados repetidos, los pies de página y `FIN ESTADO DE CUENTA`.
+- Importes con coma de miles y punto decimal (`-126,530.60`), manejados en centavos enteros.
+- Agrupación **estricta** por descripción exacta + signo (solo se normalizan espacios). Positivos y negativos de una misma descripción son grupos distintos y nunca se netean.
+- Controles: saldo anterior + valor = saldo de cada fila; total positivo = TOTAL ABONOS; total negativo = TOTAL CARGOS; saldo final = SALDO ACTUAL; suma de grupos = suma de movimientos. Si algo no cuadra se advierte y no se marca como validado; los datos no se alteran.
+- Exporta a Excel (hojas Resumen y Movimientos) con el diálogo nativo.
+
+**Agregar un banco:** poner su logo en `Logos/` con el nombre exacto (ej. `Davivienda.png`), declarar `logo: "Davivienda.png"` y el `component` en el submódulo de `src/modules/bank-analysis/index.ts`, y escribir su parser en `src/modules/bank-analysis/<banco>/` produciendo un `ParsedStatement`. La agrupación, validación, resumen, interfaz y exportación se reutilizan.
+
+---
 
 Actualizaciones, claves y publicación: **[docs/ACTUALIZACIONES.md](docs/ACTUALIZACIONES.md)**.

@@ -7,6 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::commands::to_path;
 use crate::error::{AppError, AppResult};
 use crate::services::excel::{self, Workbook};
+use crate::services::xlsx_export::{self, ExportSheet};
 use crate::state::AppState;
 
 const MAX_PDF_BYTES: usize = 20 * 1024 * 1024;
@@ -87,6 +88,46 @@ pub async fn save_pdf(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// Nombre sugerido seguro con la extensión indicada (reutiliza la limpieza de PDF).
+fn sanitize_with_extension(name: &str, ext: &str) -> String {
+    let stem = name.trim().trim_end_matches(&format!(".{ext}")).trim_end_matches(&format!(".{}", ext.to_uppercase()));
+    let pdf = sanitize_file_name(stem);
+    format!("{}.{ext}", pdf.trim_end_matches(".pdf"))
+}
+
+/// Genera un .xlsx con las hojas indicadas y lo guarda donde elija el usuario.
+#[tauri::command]
+pub async fn save_excel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    sheets: Vec<ExportSheet>,
+    suggested_name: String,
+) -> AppResult<Option<String>> {
+    let bytes = xlsx_export::build_workbook(&sheets)?;
+    let Some(fp) = app
+        .dialog()
+        .file()
+        .set_title("Exportar a Excel")
+        .set_file_name(sanitize_with_extension(&suggested_name, "xlsx"))
+        .add_filter("Excel", &["xlsx"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let mut path = to_path(fp)?;
+    if path.extension().map_or(true, |e| !e.eq_ignore_ascii_case("xlsx")) {
+        path.set_extension("xlsx");
+    }
+    std::fs::write(&path, &bytes).map_err(|e| {
+        eprintln!("[xlsx] {e}");
+        AppError::user("No se pudo guardar el archivo Excel en la ubicación elegida. Verifica los permisos de la carpeta.")
+    })?;
+    if let Ok(mut saved) = state.saved_files.lock() {
+        saved.push(path.clone());
+    }
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 fn ensure_saved(state: &AppState, path: &Path) -> AppResult<()> {
     let allowed = state
         .saved_files
@@ -117,7 +158,7 @@ pub fn open_saved_file(state: State<'_, AppState>, path: String, reveal: bool) -
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_file_name;
+    use super::{sanitize_file_name, sanitize_with_extension};
 
     #[test]
     fn sanitizes_names() {
@@ -127,5 +168,11 @@ mod tests {
         );
         assert_eq!(sanitize_file_name("../../etc/passwd"), "etc_passwd.pdf");
         assert_eq!(sanitize_file_name("///"), "documento.pdf");
+    }
+
+    #[test]
+    fn sanitizes_excel_names() {
+        assert_eq!(sanitize_with_extension("Análisis Extracto 01 2026.pdf", "xlsx"), "An_lisis_Extracto_01_2026.xlsx");
+        assert_eq!(sanitize_with_extension("Resumen.xlsx", "xlsx"), "Resumen.xlsx");
     }
 }

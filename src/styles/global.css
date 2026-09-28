@@ -594,6 +594,36 @@ a {
   gap: 6px;
 }
 
+/* Tarjetas con logo (selección de banco) */
+.bank-card__logo {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bank-card__logo img {
+  max-height: 48px;
+  max-width: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.bank-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.bank-card__title .status-dot {
+  align-self: center;
+}
+
+.bank-card p {
+  margin-top: 4px;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -881,6 +911,93 @@ a {
 .table__secondary {
   font-size: var(--text-xs);
   color: var(--color-muted);
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.th-sort:hover,
+.th-sort.is-active {
+  color: var(--color-text);
+}
+
+.group-detail .table td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+/* Filtro de opciones excluyentes (Todos / Positivos / Negativos) */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.segmented button {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--color-text);
+}
+
+.segmented button.is-active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Signo de un valor: punto discreto + texto */
+.sign-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sign-label__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-status-off);
+}
+
+.sign-label--positive .sign-label__dot {
+  background: var(--color-status-on);
+}
+
+.sign-label--negative .sign-label__dot {
+  background: var(--color-sign-negative);
+}
+
+.amount--positive {
+  color: var(--color-success);
+}
+
+.amount--negative {
+  color: var(--color-danger);
 }
 
 /* ------------------------------------------------------------------ */

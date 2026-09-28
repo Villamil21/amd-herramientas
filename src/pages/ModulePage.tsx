@@ -1,5 +1,6 @@
 import { Clock } from "lucide-react";
 import { navigate, paths } from "../app/router";
+import { BankCard } from "../components/BankCard";
 import { ModuleTile } from "../components/ModuleTile";
 import { Button, Card, EmptyState, PageHeader } from "../components/ui";
 import type { ModuleDef } from "../types/modules";
@@ -19,15 +20,26 @@ export function ModulePage({ module }: { module: ModuleDef }) {
         </Card>
       ) : (
         <div className="tile-grid">
-          {module.submodules.map((s) => (
-            <ModuleTile
-              key={s.id}
-              title={s.name}
-              description={s.description}
-              available={Boolean(s.component)}
-              onOpen={() => navigate(paths.submodule(module.id, s.id))}
-            />
-          ))}
+          {module.submodules.map((s) =>
+            module.submoduleCards === "logo" ? (
+              <BankCard
+                key={s.id}
+                name={s.name}
+                logo={s.logo}
+                description={s.description}
+                available={Boolean(s.component)}
+                onOpen={() => navigate(paths.submodule(module.id, s.id))}
+              />
+            ) : (
+              <ModuleTile
+                key={s.id}
+                title={s.name}
+                description={s.description}
+                available={Boolean(s.component)}
+                onOpen={() => navigate(paths.submodule(module.id, s.id))}
+              />
+            ),
+          )}
         </div>
       )}
     </>

@@ -1,0 +1,61 @@
+import { Modal } from "../../../../components/ui";
+import { formatMoneyCents } from "../../../../utils/format";
+import type { MovementGroup } from "../types";
+import { SignLabel } from "./SignLabel";
+
+export function GroupDetailModal({ group, onClose }: { group: MovementGroup | null; onClose: () => void }) {
+  if (!group) return null;
+  const { movements } = group;
+  const showBalance = movements.every((m) => m.balanceCents !== undefined);
+  const showBranch = movements.some((m) => m.branch);
+  const showDocument = movements.some((m) => m.document);
+
+  return (
+    <Modal
+      open
+      size="lg"
+      title={group.description}
+      description={
+        <span className="row">
+          <SignLabel sign={group.sign} />
+          <span>·</span>
+          <span>
+            {group.count} {group.count === 1 ? "movimiento" : "movimientos"}
+          </span>
+          <span>·</span>
+          <strong className={`amount--${group.sign}`}>{formatMoneyCents(group.totalCents)}</strong>
+        </span>
+      }
+      onClose={onClose}
+    >
+      <div className="table-wrap group-detail">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Descripción</th>
+              {showBranch && <th>Sucursal</th>}
+              {showDocument && <th>Dcto.</th>}
+              <th className="num">Valor</th>
+              {showBalance && <th className="num">Saldo</th>}
+              <th className="num">Página</th>
+            </tr>
+          </thead>
+          <tbody>
+            {movements.map((m) => (
+              <tr key={m.index}>
+                <td>{m.fullDate ?? m.date}</td>
+                <td className="selectable">{m.description}</td>
+                {showBranch && <td>{m.branch ?? ""}</td>}
+                {showDocument && <td>{m.document ?? ""}</td>}
+                <td className={`num amount--${m.sign}`}>{formatMoneyCents(m.valueCents)}</td>
+                {showBalance && <td className="num muted">{formatMoneyCents(m.balanceCents!)}</td>}
+                <td className="num muted">{m.page}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
+  );
+}

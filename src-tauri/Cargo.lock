@@ -34,12 +34,13 @@ dependencies = [
 
 [[package]]
 name = "amd-herramientas"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "calamine",
  "getrandom 0.3.4",
  "rusqlite",
+ "rust_xlsxwriter",
  "serde",
  "serde_json",
  "tauri",
@@ -2877,6 +2878,15 @@ dependencies = [
  "libsqlite3-sys",
  "smallvec",
  "sqlite-wasm-rs",
+]
+
+[[package]]
+name = "rust_xlsxwriter"
+version = "0.99.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34f2d2cda7223168a14fb86bc7411dbc3379bd7d49749ecc53b91ed98585b6b0"
+dependencies = [
+ "zip 8.6.0",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ pub mod backup;
 pub mod companies;
 pub mod concepts;
 pub mod files;
+pub mod statements;
 
 use std::path::PathBuf;
 
