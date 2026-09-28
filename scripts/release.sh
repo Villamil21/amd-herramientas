@@ -27,6 +27,14 @@ echo "→ Pruebas"
 npm test
 (cd src-tauri && cargo test --quiet)
 
+# Un instalador ya abierto (/Volumes/AMD Herramientas) impide crear el .dmg nuevo con el mismo nombre.
+for vol in /Volumes/AMD\ Herramientas*; do
+  [[ -d "$vol" ]] || continue
+  echo "→ Expulsando instalador montado: $vol"
+  diskutil eject "$vol" >/dev/null
+done
+rm -f src-tauri/target/universal-apple-darwin/release/bundle/macos/rw.*.dmg
+
 echo "→ Compilación universal (Apple Silicon + Intel)"
 rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
 npx tauri build --target universal-apple-darwin --bundles app,dmg
