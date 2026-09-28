@@ -23,7 +23,7 @@ Primer módulo funcional: **Certificados → Certificado de retención**.
 | `cd src-tauri && cargo test` | Pruebas de Rust: migraciones, backups, conservación de datos al actualizar, lectura de Excel. |
 | `npm run app:build` | Compila `.app` y `.dmg` (requiere la clave de firma del actualizador; ver abajo). |
 | `npm run version:bump -- minor` | Sube la versión (`patch` / `minor` / `major` / `X.Y.Z`). |
-| `./scripts/release.sh` | Compila, firma y deja lista una versión para publicar. |
+| `./scripts/release.sh` | Compila, firma y deja lista una versión para publicar. Lee la contraseña de la clave del Llavero de macOS (servicio `amd-herramientas-signing`; guardarla una vez con `security add-generic-password -a "$USER" -s amd-herramientas-signing -w`) o la pregunta. |
 
 Compilación local sin firmar (solo para probar el instalador):
 

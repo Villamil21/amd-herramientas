@@ -17,6 +17,12 @@ if [[ ! -f "$KEY_PATH" ]]; then
   exit 1
 fi
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_PATH")"
+# Contraseña: variable de entorno, o el Llavero de macOS (servicio "amd-herramientas-signing"), o se pregunta.
+#   Guardarla una vez: security add-generic-password -a "$USER" -s amd-herramientas-signing -w
+if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+x}" ]] && KEYCHAIN_PASSWORD="$(security find-generic-password -a "$USER" -s amd-herramientas-signing -w 2>/dev/null)"; then
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$KEYCHAIN_PASSWORD"
+  unset KEYCHAIN_PASSWORD
+fi
 if [[ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+x}" ]]; then
   read -rsp "Contraseña de la clave de firma: " TAURI_SIGNING_PRIVATE_KEY_PASSWORD
   echo
