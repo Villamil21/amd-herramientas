@@ -33,11 +33,11 @@ export function GroupDetailModal({ group, labels = DEFAULT_GROUP_LABELS, onClose
         <table className="table">
           <thead>
             <tr>
-              <th>Fecha</th>
+              <th>{labels.date ?? "Fecha"}</th>
               <th>{labels.description}</th>
               {showBranch && <th>{labels.branch}</th>}
               {showDocument && <th>{labels.document}</th>}
-              <th className="num">Valor</th>
+              <th className="num">{labels.value ?? "Valor"}</th>
               {showBalance && <th className="num">Saldo</th>}
               <th className="num">Página</th>
             </tr>

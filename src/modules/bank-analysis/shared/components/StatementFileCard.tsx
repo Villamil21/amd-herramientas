@@ -43,6 +43,11 @@ export function StatementFileCard({ state, details, picking, busy, exportedPath,
                 {state.status === "analyzing" && (
                   <span className="row">
                     <span className="spinner" aria-hidden /> Analizando extracto…
+                    {state.page !== undefined && state.pageCount !== undefined && state.pageCount > 1 && (
+                      <span>
+                        Página {state.page} de {state.pageCount}
+                      </span>
+                    )}
                   </span>
                 )}
                 {state.status === "error" && <span>No se pudo analizar</span>}

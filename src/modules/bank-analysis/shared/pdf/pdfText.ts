@@ -6,8 +6,10 @@ import type { PdfDocumentText, PdfPageText, PdfTextItem } from "./pdfTypes";
  * fragmento. No depende del orden en que el PDF guarda el texto (a veces por
  * filas, a veces columna por columna): los parsers reconstruyen las filas
  * con las coordenadas.
+ *
+ * `onPage` avisa cada página leída (para mostrar el avance en PDF largos).
  */
-export async function readDocumentText(doc: PDFDocumentProxy): Promise<PdfDocumentText> {
+export async function readDocumentText(doc: PDFDocumentProxy, onPage?: (page: number, total: number) => void): Promise<PdfDocumentText> {
   const pages: PdfPageText[] = [];
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
@@ -23,6 +25,7 @@ export async function readDocumentText(doc: PDFDocumentProxy): Promise<PdfDocume
     }
     pages.push({ pageNumber: n, width: viewport.width, height: viewport.height, items });
     page.cleanup();
+    onPage?.(n, doc.numPages);
   }
   return { pageCount: doc.numPages, pages };
 }

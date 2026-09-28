@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.5.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo módulo: análisis de extractos bancarios de Iris Bank en PDF.",
+      "Agrupa los movimientos por descripción exacta, separando positivos y negativos.",
+      "Valida el resultado contra Total Abonos, Total Cargos, el Saldo Actual y la secuencia de saldos.",
+      "Muestra la página que se está leyendo al analizar extractos largos.",
+      "Búsqueda, filtros, orden por tipo, detalle de cada grupo y exportación a Excel."
+    ]
+  },
+  {
+    "version": "1.5.0",
+    "date": "2026-09-28",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.4.0",
     "date": "2026-09-28",
     "notes": [

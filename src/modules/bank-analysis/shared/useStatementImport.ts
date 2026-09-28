@@ -9,7 +9,7 @@ import { StatementError } from "./types";
 
 export type ImportState<A> =
   | { status: "idle" }
-  | { status: "analyzing"; fileName: string; pageCount?: number }
+  | { status: "analyzing"; fileName: string; pageCount?: number; /** Última página leída. */ page?: number }
   | { status: "error"; fileName: string; pageCount?: number; message: string }
   | { status: "done"; fileName: string; pageCount: number; analysis: A };
 
@@ -47,7 +47,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
       setState({ status: "analyzing", fileName });
       let pageCount: number | undefined;
       try {
-        const text = await extractPdfText(picked.data);
+        const text = await extractPdfText(picked.data, (page, total) => setState({ status: "analyzing", fileName, pageCount: total, page }));
         pageCount = text.pageCount;
         setState({ status: "done", fileName, pageCount, analysis: analyze(text) });
       } catch (e) {

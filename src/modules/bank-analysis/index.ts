@@ -33,6 +33,14 @@ export const bankAnalysisModule: ModuleDef = {
       logo: "Davivienda.png",
       component: lazy(() => import("./davivienda/DaviviendaStatementPage")),
     },
+    {
+      id: "iris-bank",
+      name: "Iris Bank",
+      description: "Análisis de extractos bancarios.",
+      icon: Landmark,
+      logo: "Iris.png",
+      component: lazy(() => import("./iris-bank/IrisBankStatementPage")),
+    },
     { id: "banco-de-bogota", name: "Banco de Bogotá", description: "Extractos del Banco de Bogotá.", icon: Landmark },
   ],
 };

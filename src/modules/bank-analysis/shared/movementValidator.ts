@@ -38,7 +38,7 @@ export function groupingCheck(statement: ParsedStatement, groups: MovementGroup[
 }
 
 /** Saldo anterior + valor = saldo de cada fila (detecta filas omitidas o mal leídas). */
-function balanceChain({ movements, totals }: ParsedStatement): ValidationCheck {
+export function balanceChain({ movements, totals }: ParsedStatement): ValidationCheck {
   const label = "Secuencia de saldos";
   if (movements.length === 0 || movements.some((m) => m.balanceCents === undefined)) {
     return { id: "balances", label, status: "unavailable", detail: "El extracto no incluye el saldo de cada movimiento." };

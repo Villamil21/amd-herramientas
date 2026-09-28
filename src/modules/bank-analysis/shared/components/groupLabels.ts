@@ -5,6 +5,10 @@ export interface GroupLabels {
   tableDescription: string;
   branch: string;
   document: string;
+  /** Título de la columna de fecha en el detalle (por defecto «Fecha»). */
+  date?: string;
+  /** Título de la columna del importe en el detalle (por defecto «Valor»). */
+  value?: string;
   /** Permite ordenar también por Tipo (signo). */
   sortableType?: boolean;
 }

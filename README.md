@@ -20,6 +20,7 @@ Primer módulo funcional: **Certificados → Certificado de retención**.
 | `BANCOLOMBIA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Prueba el parser con extractos reales de Bancolombia (varios archivos separados por `:`). Los PDF no se guardan en el repositorio. |
 | `COOPCENTRAL_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Coopcentral. |
 | `DAVIVIENDA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Davivienda. |
+| `IRIS_BANK_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Iris Bank. |
 | `cd src-tauri && cargo test` | Pruebas de Rust: migraciones, backups, conservación de datos al actualizar, lectura de Excel. |
 | `npm run app:build` | Compila `.app` y `.dmg` (requiere la clave de firma del actualizador; ver abajo). |
 | `npm run version:bump -- minor` | Sube la versión (`patch` / `minor` / `major` / `X.Y.Z`). |
@@ -75,7 +76,8 @@ src/
 │   │   │                   resumen, exportación a Excel y componentes de resultados
 │   │   ├── bancolombia/    parser/ del formato Bancolombia (+ pruebas) y su página
 │   │   ├── coopcentral/    parser/, services/, components/ y página del formato Coopcentral
-│   │   └── davivienda/     parser/, services/ y página del formato Davivienda (modelo con signo de shared/)
+│   │   ├── davivienda/     parser/, services/ y página del formato Davivienda (modelo con signo de shared/)
+│   │   └── iris-bank/      parser/, services/ y página del formato Iris Bank (modelo con signo de shared/)
 │   ├── social-security/    (próximamente)
 │   ├── certificates/
 │   │   └── withholding/    Certificado de retención
@@ -153,6 +155,15 @@ Atajos: `⌘O` importar Excel (en el certificado), `⌘S` generar PDF (en la vis
 - Una línea sin fecha, valor ni documento justo debajo de un movimiento continúa su Clase (p. ej. `TRANSFERENCIA TERCEROS`) o su Oficina.
 - Reutiliza el modelo con signo de `shared/` (agrupación por clase exacta + signo, resumen, tabla, detalle); validación y exportación propias.
 - Controles: total positivo = Más Créditos; total negativo = Menos Débitos; Saldo Anterior + Más Créditos − Menos Débitos = Nuevo Saldo; Saldo Anterior + neto = Nuevo Saldo; suma de grupos = suma de movimientos.
+
+## Análisis de extractos — Iris Bank
+
+- Columnas DÍA | REFERENCIA | DESCRIPCIÓN | MOVIMIENTOS | SALDO. Día, Referencia y Descripción están alineados a la izquierda bajo su título; Movimientos y Saldo, a la derecha. Cada importe se asigna a la columna cuyo borde derecho está más cerca.
+- MOVIMIENTOS trae el signo delante (`$ -2,223,606.00`, `$ 409,488,572.00`); el tipo sale siempre del signo, nunca del texto de la descripción.
+- Las descripciones largas ocupan varias líneas **centradas verticalmente** en la fila: con dos líneas, una queda encima y otra debajo de la línea del día y el valor. Cada línea suelta se une a la fila más cercana si no hay un salto mayor que el interlineado; si no pertenece a ninguna fila dentro de la tabla, se reporta.
+- El bloque de tasas (`PLAN ACTUAL | TASA E.A.`) y el pie `página N de M` no son movimientos. El avance de lectura se muestra por página («Página 18 de 69»).
+- Reutiliza el modelo con signo de `shared/` (agrupación por descripción exacta + signo, resumen, tabla, detalle); validación y exportación propias. El logo `Logos/Iris.png` es el original recortado de sus márgenes transparentes y reducido (el original mide 7200×7200 px).
+- Controles: total positivo = Total Abonos; total negativo = Total Cargos; Saldo Mes Anterior + Total Abonos − Total Cargos = Saldo Actual; Saldo Mes Anterior + neto = Saldo Actual; secuencia de saldos fila a fila; saldo del último movimiento = Saldo Actual; suma de grupos = suma de movimientos.
 
 **Agregar un banco:** poner su logo en `Logos/` con el nombre exacto (ej. `Davivienda.png`), declarar `logo: "Davivienda.png"` y el `component` en el submódulo de `src/modules/bank-analysis/index.ts`, y escribir su parser en `src/modules/bank-analysis/<banco>/`. Si el extracto usa una columna VALOR con signo, produce un `ParsedStatement` y reutiliza agrupación, validación, resumen, interfaz y exportación de `shared/`. Si usa columnas separadas de créditos y débitos, sigue el modelo de `coopcentral/`. En ambos casos se comparten el flujo de importación (`useStatementImport`), la tarjeta del archivo, la lectura del PDF, los controles de tabla y el guardado del Excel.
 
