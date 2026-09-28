@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.7.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo certificado: Certificados → Composición Accionaria, con vista previa y exportación en una sola página Carta.",
+      "Empresas ahora guardan DV, capital suscrito y pagado, y socios o accionistas con sus porcentajes.",
+      "Nueva gestión de Firmas: firma PNG, nombre, cargo y documento profesional reutilizables.",
+      "El certificado calcula acciones y valores por socio, conserva el valor nominal unitario y valida que la participación sume 100%.",
+      "El diseño ajusta márgenes, tablas, logo y firma dinámicamente para una presentación profesional."
+    ]
+  },
+  {
     "version": "1.6.0",
     "date": "2026-09-28",
     "notes": [
