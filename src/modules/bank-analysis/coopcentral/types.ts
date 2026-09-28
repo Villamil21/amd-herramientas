@@ -6,9 +6,9 @@
  *
  * Importes en centavos enteros y siempre positivos, tal como en el PDF.
  */
-import type { CheckStatus, ParseIssue } from "../shared/types";
+import type { CheckStatus, DebitCreditSummary, ParseIssue, TransactionType } from "../shared/types";
 
-export type TransactionType = "credit" | "debit";
+export { TYPE_LABEL, TYPE_ORDER, type TransactionType } from "../shared/types";
 
 export interface CoopcentralMovement {
   /** Orden dentro del extracto, contando también las filas anómalas. */
@@ -80,17 +80,7 @@ export interface CoopcentralGroup {
   movements: CoopcentralMovement[];
 }
 
-export interface CoopcentralSummary {
-  movementCount: number;
-  /** Conceptos únicos sin importar si aparecen como crédito o débito. */
-  conceptCount: number;
-  creditGroups: number;
-  debitGroups: number;
-  totalCreditsCents: number;
-  totalDebitsCents: number;
-  /** Total créditos − total débitos. */
-  netCents: number;
-}
+export type CoopcentralSummary = DebitCreditSummary;
 
 export interface CoopcentralCheck {
   id: string;
@@ -105,6 +95,3 @@ export interface CoopcentralValidation {
   validated: boolean;
   checks: CoopcentralCheck[];
 }
-
-export const TYPE_LABEL: Record<TransactionType, string> = { credit: "Crédito", debit: "Débito" };
-export const TYPE_ORDER: Record<TransactionType, number> = { credit: 0, debit: 1 };

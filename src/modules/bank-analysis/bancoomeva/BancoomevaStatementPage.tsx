@@ -3,26 +3,26 @@ import { Button, PageHeader } from "../../../components/ui";
 import { DebitCreditSummaryCards } from "../shared/components/DebitCreditSummaryCards";
 import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
-import { CoopcentralGroupsTable } from "./components/CoopcentralGroupsTable";
-import { CoopcentralValidationPanel } from "./components/CoopcentralValidationPanel";
-import { analyzeCoopcentral, type CoopcentralAnalysis } from "./services/analysis";
-import { exportCoopcentralExcel } from "./services/excelExport";
+import { BancoomevaGroupsTable } from "./components/BancoomevaGroupsTable";
+import { BancoomevaValidationPanel } from "./components/BancoomevaValidationPanel";
+import { analyzeBancoomeva, type BancoomevaAnalysis } from "./services/analysis";
+import { exportBancoomevaExcel } from "./services/excelExport";
 
-const exportAnalysis = (a: CoopcentralAnalysis, fileName: string) => exportCoopcentralExcel(a.statement, a.groups, fileName);
+const exportAnalysis = (a: BancoomevaAnalysis, fileName: string) => exportBancoomevaExcel(a.statement, a.groups, fileName);
 
-export default function CoopcentralStatementPage() {
+export default function BancoomevaStatementPage() {
   const { state, picking, busy, exporting, exportedPath, pick, exportExcel } = useStatementImport({
-    analyze: analyzeCoopcentral,
+    analyze: analyzeBancoomeva,
     exportExcel: exportAnalysis,
-    fallbackError: "No fue posible analizar el extracto. Verifica que sea un extracto de Coopcentral en PDF.",
-    logTag: "coopcentral",
+    fallbackError: "No fue posible analizar el extracto. Verifica que sea un extracto de Bancoomeva en PDF.",
+    logTag: "bancoomeva",
   });
 
   return (
     <>
       <PageHeader
         eyebrow="Análisis de extractos bancarios"
-        title="Coopcentral"
+        title="Bancoomeva"
         description="Importa un extracto bancario en PDF para analizar sus movimientos."
         actions={
           state.status === "done" && (
@@ -44,9 +44,9 @@ export default function CoopcentralStatementPage() {
 
       {state.status === "done" && (
         <>
-          <CoopcentralValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
+          <BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
           <DebitCreditSummaryCards summary={state.analysis.summary} />
-          <CoopcentralGroupsTable groups={state.analysis.groups} />
+          <BancoomevaGroupsTable groups={state.analysis.groups} />
         </>
       )}
     </>

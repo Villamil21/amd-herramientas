@@ -1,8 +1,9 @@
 import { formatInteger, formatMoneyCents } from "../../../../utils/format";
-import { Stat } from "../../shared/components/Stat";
-import type { CoopcentralSummary } from "../types";
+import type { DebitCreditSummary } from "../types";
+import { Stat } from "./Stat";
 
-export function CoopcentralSummaryCards({ summary }: { summary: CoopcentralSummary }) {
+/** Resumen de extractos con columnas de crédito y débito. */
+export function DebitCreditSummaryCards({ summary }: { summary: DebitCreditSummary }) {
   return (
     <div className="stack stack--sm">
       <div className="stat-row">

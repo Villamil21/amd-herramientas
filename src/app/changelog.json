@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.8.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo banco: Análisis de extractos bancarios → Bancoomeva.",
+      "Lee todas las páginas del extracto PDF y clasifica cada movimiento como Crédito o Débito según la columna VALOR CREDITO o VALOR DEBITO, nunca por el texto.",
+      "Agrupa por descripción exacta y tipo, con búsqueda, filtros, orden y detalle de movimientos (fecha, oficina, valor, saldo y página).",
+      "Valida contra TOTAL DEBITO, TOTAL CREDITO, la secuencia de saldos y saldo inicial + créditos − débitos = saldo final.",
+      "Exportación a Excel con hojas Resumen y Movimientos."
+    ]
+  },
+  {
+    "version": "1.8.0",
+    "date": "2026-09-28",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.7.2",
     "date": "2026-09-28",
     "notes": [

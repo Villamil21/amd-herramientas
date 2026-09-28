@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { Card } from "../../../../components/ui";
 import { formatInteger, formatMoneyCents } from "../../../../utils/format";
 import { SearchBox, SegmentedFilter, SortableTh, type SortDirection } from "../../shared/components/tableControls";
-import { sortCoopcentralGroups, type CoopcentralSortKey } from "../services/grouping";
-import type { CoopcentralGroup, TransactionType } from "../types";
-import { CoopcentralGroupDetailModal } from "./CoopcentralGroupDetailModal";
 import { amountClass, TypeLabel } from "../../shared/components/TypeLabel";
+import type { TransactionType } from "../../shared/types";
+import { sortBancoomevaGroups, type BancoomevaSortKey } from "../services/grouping";
+import type { BancoomevaGroup } from "../types";
+import { BancoomevaGroupDetailModal } from "./BancoomevaGroupDetailModal";
 
 type Filter = "all" | TransactionType;
 
@@ -15,23 +16,23 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "debit", label: "Débitos" },
 ];
 
-export function CoopcentralGroupsTable({ groups }: { groups: CoopcentralGroup[] }) {
+export function BancoomevaGroupsTable({ groups }: { groups: BancoomevaGroup[] }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [sort, setSort] = useState<{ key: CoopcentralSortKey; direction: SortDirection }>({ key: "concept", direction: "asc" });
-  const [selected, setSelected] = useState<CoopcentralGroup | null>(null);
+  const [sort, setSort] = useState<{ key: BancoomevaSortKey; direction: SortDirection }>({ key: "description", direction: "asc" });
+  const [selected, setSelected] = useState<BancoomevaGroup | null>(null);
 
   const visible = useMemo(() => {
     // Solo filtra la vista: los grupos originales no se modifican.
     const q = query.trim().toLocaleUpperCase("es");
-    const filtered = groups.filter((g) => (filter === "all" || g.transactionType === filter) && (!q || g.concept.toLocaleUpperCase("es").includes(q)));
-    return sortCoopcentralGroups(filtered, sort.key, sort.direction);
+    const filtered = groups.filter((g) => (filter === "all" || g.transactionType === filter) && (!q || g.description.toLocaleUpperCase("es").includes(q)));
+    return sortBancoomevaGroups(filtered, sort.key, sort.direction);
   }, [groups, query, filter, sort]);
 
-  const toggleSort = (key: CoopcentralSortKey) =>
-    setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "concept" || key === "type" ? "asc" : "desc" }));
+  const toggleSort = (key: BancoomevaSortKey) =>
+    setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "description" || key === "type" ? "asc" : "desc" }));
 
-  const header = (key: CoopcentralSortKey, label: string, numeric = false) => (
+  const header = (key: BancoomevaSortKey, label: string, numeric = false) => (
     <SortableTh label={label} active={sort.key === key} direction={sort.direction} numeric={numeric} onToggle={() => toggleSort(key)} />
   );
 
@@ -39,10 +40,10 @@ export function CoopcentralGroupsTable({ groups }: { groups: CoopcentralGroup[] 
     <Card
       flush
       title="Movimientos agrupados"
-      description="Agrupados por concepto exacto y tipo (crédito o débito). Haz clic en un grupo para ver sus movimientos."
+      description="Agrupados por descripción exacta y tipo (crédito o débito). Haz clic en un grupo para ver sus movimientos."
       actions={
         <>
-          <SearchBox placeholder="Buscar concepto..." value={query} onChange={setQuery} />
+          <SearchBox placeholder="Buscar descripción..." value={query} onChange={setQuery} />
           <SegmentedFilter label="Filtrar por tipo" options={FILTERS} value={filter} onChange={setFilter} />
         </>
       }
@@ -51,7 +52,7 @@ export function CoopcentralGroupsTable({ groups }: { groups: CoopcentralGroup[] 
         <table className="table">
           <thead>
             <tr>
-              {header("concept", "Concepto")}
+              {header("description", "Descripción")}
               {header("type", "Tipo")}
               {header("count", "Cantidad", true)}
               {header("total", "Total", true)}
@@ -60,7 +61,7 @@ export function CoopcentralGroupsTable({ groups }: { groups: CoopcentralGroup[] 
           <tbody>
             {visible.map((g) => (
               <tr key={g.key} className="is-clickable" onClick={() => setSelected(g)}>
-                <td className="table__primary">{g.concept}</td>
+                <td className="table__primary">{g.description}</td>
                 <td>
                   <TypeLabel type={g.transactionType} />
                 </td>
@@ -78,7 +79,7 @@ export function CoopcentralGroupsTable({ groups }: { groups: CoopcentralGroup[] 
           </tbody>
         </table>
       </div>
-      <CoopcentralGroupDetailModal group={selected} onClose={() => setSelected(null)} />
+      <BancoomevaGroupDetailModal group={selected} onClose={() => setSelected(null)} />
     </Card>
   );
 }

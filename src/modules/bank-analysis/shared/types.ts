@@ -90,5 +90,27 @@ export interface StatementValidation {
   checks: ValidationCheck[];
 }
 
+// ---------------------------------------------------------------------------
+// Extractos con columnas separadas de crédito y débito (Coopcentral, Bancoomeva)
+// ---------------------------------------------------------------------------
+
+/** El tipo lo decide la columna que trae el valor, nunca el texto de la descripción. */
+export type TransactionType = "credit" | "debit";
+
+export const TYPE_LABEL: Record<TransactionType, string> = { credit: "Crédito", debit: "Débito" };
+export const TYPE_ORDER: Record<TransactionType, number> = { credit: 0, debit: 1 };
+
+export interface DebitCreditSummary {
+  movementCount: number;
+  /** Descripciones únicas sin importar si aparecen como crédito o débito. */
+  conceptCount: number;
+  creditGroups: number;
+  debitGroups: number;
+  totalCreditsCents: number;
+  totalDebitsCents: number;
+  /** Total créditos − total débitos. */
+  netCents: number;
+}
+
 /** Error con un mensaje listo para mostrar al usuario. */
 export class StatementError extends Error {}

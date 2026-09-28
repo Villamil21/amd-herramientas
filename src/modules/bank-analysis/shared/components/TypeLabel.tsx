@@ -1,5 +1,5 @@
-import { DotLabel } from "../../shared/components/tableControls";
 import { TYPE_LABEL, type TransactionType } from "../types";
+import { DotLabel } from "./tableControls";
 
 /** ● Crédito (verde suave) / ● Débito (rojo suave). */
 export function TypeLabel({ type }: { type: TransactionType }) {
