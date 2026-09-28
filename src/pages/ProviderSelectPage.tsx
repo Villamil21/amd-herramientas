@@ -8,7 +8,7 @@ import type { ModuleDef, SubmoduleDef } from "../types/modules";
 export function ProviderSelectPage({ module, submodule }: { module: ModuleDef; submodule: SubmoduleDef }) {
   return (
     <>
-      <PageHeader eyebrow={module.name} title={submodule.name} description="Selecciona el proveedor de la planilla." />
+      <PageHeader eyebrow={module.name} title={submodule.name} description={submodule.providersDescription ?? "Selecciona el proveedor de la planilla."} />
       <div className="tile-grid">
         {(submodule.providers ?? []).map((p) => (
           <BankCard

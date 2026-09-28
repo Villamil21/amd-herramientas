@@ -61,6 +61,7 @@ pub fn run() {
             commands::files::save_excel,
             commands::files::open_saved_file,
             commands::statements::pick_statement_pdf,
+            commands::statements::pick_report_txt,
             commands::backup::export_backup,
             commands::backup::pick_backup_file,
             commands::backup::apply_pending_backup,

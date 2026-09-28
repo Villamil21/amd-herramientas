@@ -15,6 +15,8 @@ export interface SubmoduleDef {
    * Aportes en Línea / Mi Planilla). Se muestran como tarjetas con logo.
    */
   providers?: SubmoduleDef[];
+  /** Texto de la pantalla de selección de proveedores (por defecto, el de planillas). */
+  providersDescription?: string;
 }
 
 export interface ModuleDef {

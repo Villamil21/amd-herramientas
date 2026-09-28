@@ -943,6 +943,32 @@ a {
   white-space: nowrap;
 }
 
+/* UIAF: vista previa de 26 columnas, una línea por registro */
+.uiaf-toolbar {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.uiaf-table th,
+.uiaf-table td {
+  white-space: pre;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.uiaf-table__empty {
+  text-align: center;
+  padding: var(--space-6) !important;
+}
+
+.uiaf-pager {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+
 /* Filtro de opciones excluyentes (Todos / Positivos / Negativos) */
 .segmented {
   display: inline-flex;

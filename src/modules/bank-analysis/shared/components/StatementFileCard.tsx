@@ -43,7 +43,7 @@ export function StatementFileCard({ state, details, picking, busy, exportedPath,
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="file-chip__name selectable">{state.fileName}</div>
               <div className="muted row" style={{ fontSize: "var(--text-sm)" }}>
-                {state.pageCount !== undefined && <span>{state.pageCount === 1 ? "1 página" : `${state.pageCount} páginas`}</span>}
+                {Boolean(state.pageCount) && <span>{state.pageCount === 1 ? "1 página" : `${state.pageCount} páginas`}</span>}
                 {state.status === "analyzing" && (
                   <span className="row">
                     <span className="spinner" aria-hidden /> {labels.analyzing}

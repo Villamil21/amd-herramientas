@@ -1,5 +1,24 @@
 [
   {
+    "version": "1.9.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo módulo: Reportes regulatorios → UIAF → Conversión TXT a Excel.",
+      "Lee el TXT del reporte UIAF (encabezado, registros separados por | y cierre) y organiza los 26 campos en columnas, con una hoja por Código Tipo (Transacciones = 2, Sheet1 = 3).",
+      "Todos los datos se conservan como texto, exactamente como en el TXT: ceros a la izquierda, wallets e identificadores largos sin notación científica, -1 y espacios.",
+      "Valida la estructura, los 26 campos por fila, la cantidad declarada en el encabezado y el cierre, los Códigos Tipo y la numeración de registros.",
+      "Vista previa por Código Tipo con buscador y exportación a Excel con autofiltro. El archivo se procesa en el equipo y no se guarda.",
+      "Las exportaciones a Excel ya no muestran el aviso «número almacenado como texto» en las columnas de texto."
+    ]
+  },
+  {
+    "version": "1.9.0",
+    "date": "2026-09-28",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.8.2",
     "date": "2026-09-28",
     "notes": [

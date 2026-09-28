@@ -2,15 +2,18 @@
 //!
 //! El frontend decide qué hojas, columnas y filas exportar (ya calculadas y
 //! probadas allá); aquí solo se da formato: encabezado, números con separador
-//! de miles y dos decimales, filtro y primera fila fija.
+//! de miles y dos decimales, filtro y primera fila fija. Las columnas de texto
+//! se escriben siempre como texto (identificadores largos, ceros a la
+//! izquierda) y sin el aviso de Excel «número almacenado como texto».
 
-use rust_xlsxwriter::{Color, Format, FormatAlign, FormatBorder, Workbook, XlsxError};
+use rust_xlsxwriter::{Color, Format, FormatAlign, FormatBorder, IgnoreError, Workbook, XlsxError};
 use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 
 const MAX_SHEETS: usize = 10;
-const MAX_ROWS: usize = 200_000;
+/// Excel admite 1.048.576 filas por hoja (una es el encabezado).
+const MAX_ROWS: usize = 1_048_575;
 const MAX_COLUMNS: usize = 30;
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
@@ -116,6 +119,15 @@ pub fn build_workbook(sheets: &[ExportSheet]) -> AppResult<Vec<u8>> {
                 }
             }
         }
+        if !sheet.rows.is_empty() {
+            let last_row = sheet.rows.len() as u32;
+            for (c, col) in sheet.columns.iter().enumerate() {
+                if col.kind == ColumnKind::Text {
+                    ws.ignore_error_range(1, c as u16, last_row, c as u16, IgnoreError::NumberStoredAsText)
+                        .map_err(xlsx_error)?;
+                }
+            }
+        }
         let last_col = (sheet.columns.len() - 1) as u16;
         ws.autofilter(0, 0, sheet.rows.len() as u32, last_col).map_err(xlsx_error)?;
         ws.set_freeze_panes(1, 0).map_err(xlsx_error)?;
@@ -154,6 +166,37 @@ mod tests {
         assert_eq!(sheet_name("Movimientos: 2026/01"), "Movimientos  2026 01");
         assert_eq!(sheet_name("  "), "Hoja");
         assert_eq!(sheet_name(&"x".repeat(40)).len(), 31);
+    }
+
+    /// Compara un libro generado con un Excel de referencia, celda por celda y
+    /// exigiendo texto. Los archivos tienen datos de clientes y no se guardan
+    /// en el repositorio: las hojas las escribe la prueba del frontend
+    /// (uiafTxtParser.realFile, variable UIAF_SHEETS_OUT).
+    ///
+    ///   UIAF_SHEETS_JSON=/ruta/hojas.json UIAF_REFERENCE_XLSX=/ruta/ref.xlsx cargo test reference_workbook
+    #[test]
+    fn matches_reference_workbook() {
+        use calamine::{open_workbook_auto, Data, Reader};
+        let (Ok(json), Ok(reference)) = (std::env::var("UIAF_SHEETS_JSON"), std::env::var("UIAF_REFERENCE_XLSX")) else {
+            return;
+        };
+        let sheets: Vec<ExportSheet> = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
+        let out = std::env::temp_dir().join(format!("amd-reference-check-{}.xlsx", std::process::id()));
+        std::fs::write(&out, build_workbook(&sheets).unwrap()).unwrap();
+        let mut ours = open_workbook_auto(&out).unwrap();
+        let mut expected = open_workbook_auto(&reference).unwrap();
+        assert_eq!(ours.sheet_names(), expected.sheet_names());
+        for name in expected.sheet_names() {
+            let (a, b) = (ours.worksheet_range(&name).unwrap(), expected.worksheet_range(&name).unwrap());
+            assert_eq!(a.get_size(), b.get_size(), "tamaño de la hoja {name}");
+            for (row, (ra, rb)) in a.rows().zip(b.rows()).enumerate() {
+                for (col, (ca, cb)) in ra.iter().zip(rb.iter()).enumerate() {
+                    assert!(matches!(ca, Data::String(_) | Data::Empty), "{name} fila {row} columna {col}: no es texto ({ca:?})");
+                    assert_eq!(ca, cb, "{name} fila {row} columna {col}");
+                }
+            }
+        }
+        std::fs::remove_file(out).ok();
     }
 
     #[test]
