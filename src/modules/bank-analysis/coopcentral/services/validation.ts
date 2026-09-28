@@ -1,4 +1,5 @@
 import { formatMoneyCents } from "../../../../utils/format";
+import type { ParseIssue } from "../../shared/types";
 import type { CoopcentralCheck, CoopcentralGroup, CoopcentralStatement, CoopcentralSummary, CoopcentralValidation } from "../types";
 
 const MAX_LISTED = 5;
@@ -22,11 +23,32 @@ export function validateCoopcentral(statement: CoopcentralStatement, groups: Coo
     });
   }
   if (statement.issues.length > 0) {
-    checks.push({ id: "issues", label: "Filas sin interpretar", status: "failed", detail: `Se encontraron ${statement.issues.length} fila(s) en la tabla cuyo contenido no pudo interpretarse.` });
+    checks.push({ id: "issues", label: "Filas sin interpretar", status: "failed", detail: `${issuesTitle(statement.issues.length)} ${groupIssues(statement.issues).map((g) => `${g.count} × ${g.reason}`).join(" ")}` });
   }
   const required = checks.filter((c) => !c.informative);
   const validated = required.some((c) => c.id === "reconciliation" && c.status === "ok") && required.every((c) => c.status !== "failed");
   return { validated, checks };
+}
+
+export const issuesTitle = (count: number) =>
+  count === 1 ? "Se encontró 1 fila que no pudo interpretarse." : `Se encontraron ${count} filas que no pudieron interpretarse.`;
+
+export interface IssueGroup {
+  reason: string;
+  count: number;
+  /** Primera fila con esta causa, como ejemplo para revisar en el extracto. */
+  example: ParseIssue;
+}
+
+/** Agrupa las filas sin interpretar por causa, para no repetir el mismo mensaje cientos de veces. */
+export function groupIssues(issues: ParseIssue[]): IssueGroup[] {
+  const groups = new Map<string, IssueGroup>();
+  for (const issue of issues) {
+    const group = groups.get(issue.reason);
+    if (group) group.count += 1;
+    else groups.set(issue.reason, { reason: issue.reason, count: 1, example: issue });
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count);
 }
 
 /** Suma de los grupos = suma de los movimientos, por tipo (error interno si no). */

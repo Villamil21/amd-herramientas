@@ -1,6 +1,6 @@
 import { Alert } from "../../../../components/ui";
 import { formatMoneyCents } from "../../../../utils/format";
-import { RECONCILIATION_WARNING } from "../services/validation";
+import { RECONCILIATION_WARNING, groupIssues, issuesTitle } from "../services/validation";
 import type { CoopcentralStatement, CoopcentralValidation } from "../types";
 
 const MAX_LISTED = 8;
@@ -30,23 +30,27 @@ export function CoopcentralValidationPanel({ statement, validation }: { statemen
     );
   }
 
+  const issueGroups = groupIssues(statement.issues);
   const reconciliationFailed = failed.some((c) => c.id === "reconciliation" || c.id === "balances");
   const items = [
     ...failed.filter((c) => c.id !== "issues" && c.id !== "anomalies").map((c) => `${c.label}: ${c.detail ?? "no coincide."}`),
     ...statement.anomalies.slice(0, MAX_LISTED).map(
       (a) => `Página ${a.page}: «${a.concept}» tiene crédito ${formatMoneyCents(a.creditCents)} y débito ${formatMoneyCents(a.debitCents)}; no se clasificó ni se sumó.`,
     ),
-    ...statement.issues.slice(0, MAX_LISTED).map((i) => `Página ${i.page}: «${i.text}». ${i.reason}`),
+    ...issueGroups
+      .slice(0, MAX_LISTED)
+      .map((g) => (g.count === 1 ? `Página ${g.example.page}: «${g.example.text}». ${g.reason}` : `${g.count} filas: ${g.reason} Primera en la página ${g.example.page}: «${g.example.text}».`)),
     ...unavailable.map((c) => `${c.label}: ${c.detail ?? "no disponible."}`),
   ];
-  const hidden = Math.max(0, statement.anomalies.length - MAX_LISTED) + Math.max(0, statement.issues.length - MAX_LISTED);
+  const hiddenIssues = issueGroups.slice(MAX_LISTED).reduce((sum, g) => sum + g.count, 0);
+  const hidden = Math.max(0, statement.anomalies.length - MAX_LISTED) + hiddenIssues;
   if (hidden > 0) items.push(`… y ${hidden} fila(s) más por revisar.`);
 
   const title =
     statement.anomalies.length > 0
       ? "Hay filas con valor en CREDITOS y DEBITOS a la vez. Revísalas antes de usar el resultado."
       : statement.issues.length > 0
-        ? "Se encontraron filas cuyo contenido no pudo interpretarse."
+        ? issuesTitle(statement.issues.length)
         : reconciliationFailed
           ? RECONCILIATION_WARNING
           : "No fue posible validar el análisis contra los saldos del extracto.";

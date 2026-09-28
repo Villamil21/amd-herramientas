@@ -4,9 +4,9 @@ import { StatementError } from "../../shared/types";
 import { analyzeCoopcentral } from "../services/analysis";
 import { buildCoopcentralSheets, suggestedCoopcentralName } from "../services/excelExport";
 import { groupCoopcentralMovements, sortCoopcentralGroups, summarizeCoopcentral } from "../services/grouping";
-import { RECONCILIATION_WARNING } from "../services/validation";
+import { RECONCILIATION_WARNING, groupIssues, issuesTitle } from "../services/validation";
 import type { CoopcentralMovement } from "../types";
-import { COOPCENTRAL_MESSAGES, parseCoopcentralStatement } from "./coopcentralParser";
+import { COOPCENTRAL_MESSAGES, parseCoopcentralMoney, parseCoopcentralStatement } from "./coopcentralParser";
 
 // ---------------------------------------------------------------------------
 // PDF sintético con la geometría del formato Coopcentral (fuente monoespaciada
@@ -17,6 +17,15 @@ import { COOPCENTRAL_MESSAGES, parseCoopcentralStatement } from "./coopcentralPa
 const mono = (text: string, x: number, y: number, cw = 3, height = 5): PdfTextItem => ({ text, x, y, width: text.length * cw, height });
 const right = (text: string, rightEdge: number, y: number) => mono(text, rightEdge - text.length * 3, y);
 const title = (text: string, x: number, y: number) => mono(text, x, y, 4.8, 8);
+/**
+ * Celda de importe. Con "- 211,048,700.00" (signo, espacio, número) el signo
+ * sale como un texto aparte en el borde izquierdo de la celda, como en los
+ * extractos reales con saldo negativo.
+ */
+const amountCell = (text: string, rightEdge: number, y: number, signX: number) => {
+  const m = /^([-\u2212]) (.+)$/.exec(text);
+  return m ? [mono(m[1], signX, y), right(m[2], rightEdge, y)] : [right(text, rightEdge, y)];
+};
 
 const header = (y = 600) => [
   title("CONCEPTO", 67.8, y),
@@ -46,9 +55,9 @@ function tableItems(rows: Row[], { startY = 570, pitch = 7, byColumns = false } 
       mono(doc, 130, y),
       ...(special ? [] : [mono("2026/02/10", 195, y), mono("2026/02/11", 235, y)]),
       ...(trans ? [mono(trans, 275, y)] : []),
-      right(credit, 435, y),
-      right(debit, 510, y),
-      right(balance, 583, y),
+      ...amountCell(credit, 435, y, 422),
+      ...amountCell(debit, 510, y, 440),
+      ...amountCell(balance, 583, y, 517),
     ];
   });
   if (!byColumns) return cells.flat();
@@ -275,6 +284,93 @@ describe("parser Coopcentral", () => {
 
   it("sin movimientos informa que no se encontraron", () => {
     expect(() => parseCoopcentralStatement(single([OPEN, close("1,000.00")]))).toThrow(COOPCENTRAL_MESSAGES.noMovements);
+  });
+});
+
+describe("saldos negativos con el signo separado del número", () => {
+  const OPEN_REAL: Row = ["SALDO INICIAL", "INIC.", "0.00", "0.00", "399,702,290.00"];
+  const PAQ = "NO PAQ.-0000000000-0000000000";
+
+  it("parseCoopcentralMoney acepta signo pegado, separado o Unicode y rechaza un '-' aislado", () => {
+    expect(parseCoopcentralMoney("0.00")).toBe(0);
+    expect(parseCoopcentralMoney("2,380.00")).toBe(238000);
+    expect(parseCoopcentralMoney("500,000,000.00")).toBe(50000000000);
+    expect(parseCoopcentralMoney("-211,048,700.00")).toBe(-21104870000);
+    expect(parseCoopcentralMoney("- 211,048,700.00")).toBe(-21104870000);
+    expect(parseCoopcentralMoney("\u2212 211,048,700.00")).toBe(-21104870000);
+    expect(parseCoopcentralMoney("\u2212211,048,700.00")).toBe(-21104870000);
+    expect(parseCoopcentralMoney("-")).toBeNull();
+    expect(parseCoopcentralMoney("\u2212")).toBeNull();
+    expect(parseCoopcentralMoney("PAQ.-0000000000-0000000000")).toBeNull();
+  });
+
+  it("saldo positivo: la primera fila después de SALDO INICIAL sigue funcionando", () => {
+    const { statement, validation } = analyzeCoopcentral(single([OPEN_REAL, ["ND COMIS. NACIONAL", "TMONO", "0.00", "2,380.00", "399,699,910.00", PAQ], close("399,699,910.00")]));
+    expect(statement.movements[0]).toMatchObject({ concept: "ND COMIS. NACIONAL", transactionType: "debit", debitCents: 238000, balanceCents: 39969991000, electronicTransfer: PAQ });
+    expect(validation.validated).toBe(true);
+  });
+
+  it("cruce a saldo negativo, negativo continuo, crédito y débito con saldo negativo y regreso a positivo", () => {
+    const rows: Row[] = [
+      ["SALDO INICIAL", "INIC.", "0.00", "0.00", "288,951,300.00"],
+      ["ND TRANSACC ELECTRON", "TRETN", "0.00", "500,000,000.00", "- 211,048,700.00"],
+      ["ND TRANSACC ELECTRON", "TRETN", "0.00", "125,000,000.00", "- 336,048,700.00"],
+      ["ND COMIS. NACIONAL", "TMONO", "0.00", "2,380.00", "- 336,051,080.00", PAQ],
+      ["default description", "TMINK", "0.00", "4,273,000.00", "- 340,324,080.00", PAQ],
+      ["NC TRAN ELEC INTERNA", "TRETN", "200,000,000.00", "0.00", "- 140,324,080.00", "NO PAQ.-0005313761-0037540047"],
+      ["TDB-POS", "97539", "0.00", "21,000,000.00", "- 161,324,080.00"],
+      ["NC TRAN ELEC INTERNA", "TRETN", "200,000,000.00", "0.00", "38,675,920.00", "NO PAQ.-0005314352-0037556068"],
+      close("38,675,920.00"),
+    ];
+    const { statement, validation } = analyzeCoopcentral(single(rows));
+    expect(statement.issues).toEqual([]);
+    expect(statement.movements.map((m) => [m.concept, m.transactionType, m.amountCents, m.balanceCents])).toEqual([
+      ["ND TRANSACC ELECTRON", "debit", 50000000000, -21104870000],
+      ["ND TRANSACC ELECTRON", "debit", 12500000000, -33604870000],
+      ["ND COMIS. NACIONAL", "debit", 238000, -33605108000],
+      ["default description", "debit", 427300000, -34032408000],
+      ["NC TRAN ELEC INTERNA", "credit", 20000000000, -14032408000],
+      ["TDB-POS", "debit", 2100000000, -16132408000],
+      ["NC TRAN ELEC INTERNA", "credit", 20000000000, 3867592000],
+    ]);
+    // El guion de PAQ.-…-… es texto de TRANS. ELECTRONICA, no un signo.
+    expect(statement.movements[2].electronicTransfer).toBe(PAQ);
+    expect(validation.checks.find((c) => c.id === "balances")!.status).toBe("ok");
+    expect(validation.checks.find((c) => c.id === "reconciliation")!.status).toBe("ok");
+    expect(validation.validated).toBe(true);
+  });
+
+  it("saldo final negativo en varias páginas: no se reinicia el saldo y el cierre es el de la última página", () => {
+    const p1 = page(1, [...header(), ...tableItems([OPEN_REAL, ["ND TRANSACC ELECTRON", "TRETN", "0.00", "500,000,000.00", "- 100,297,710.00"]])]);
+    const p2 = page(2, [...header(), ...tableItems([["TDB-POS", "1", "0.00", "1,000.00", "- 100,298,710.00"], close("- 100,298,710.00")])]);
+    const { statement, validation } = analyzeCoopcentral(doc(p1, p2));
+    expect(statement.closingBalanceCents).toBe(-10029871000);
+    expect(statement.movementsByPage).toEqual({ 1: 1, 2: 1 });
+    expect(validation.validated).toBe(true);
+  });
+
+  it("un signo pegado ('-211,048,700.00') o Unicode ('− 211,048,700.00') también se reconoce", () => {
+    const rows: Row[] = [OPEN_REAL, ["TDB-POS", "1", "0.00", "610,751,000.00", "-211,048,710.00"], ["TDB-POS", "2", "0.00", "10.00", "\u2212 211,048,720.00"], close("-211,048,720.00")];
+    const { statement, validation } = analyzeCoopcentral(single(rows));
+    expect(statement.movements.map((m) => m.balanceCents)).toEqual([-21104871000, -21104872000]);
+    expect(validation.validated).toBe(true);
+  });
+
+  it("un '-' sin importe a su derecha sigue siendo una fila sin interpretar", () => {
+    const items = [...header(), ...tableItems([OPEN_REAL, ["TDB-POS", "1", "0.00", "10.00", "399,702,280.00"], close("399,702,280.00")])];
+    items.push(mono("TDB-POS", 47, 570 - 3 * 7), mono("1", 130, 570 - 3 * 7), right("5.00", 510, 570 - 3 * 7), mono("-", 575, 570 - 3 * 7));
+    const s = parseCoopcentralStatement(doc(page(1, items)));
+    expect(s.issues.some((i) => i.reason === 'Valor no interpretable: "-".')).toBe(true);
+  });
+
+  it("las filas sin interpretar con la misma causa se agrupan en un solo mensaje", () => {
+    const issues = Array.from({ length: 943 }, (_, i) => ({ page: 1 + (i % 24), text: `fila ${i}`, reason: 'Valor no interpretable: "-".' }));
+    issues.push({ page: 3, text: "otra", reason: "La fila no tiene CONCEPTO." });
+    expect(groupIssues(issues).map((g) => [g.count, g.reason, g.example.text])).toEqual([
+      [943, 'Valor no interpretable: "-".', "fila 0"],
+      [1, "La fila no tiene CONCEPTO.", "otra"],
+    ]);
+    expect(issuesTitle(944)).toBe("Se encontraron 944 filas que no pudieron interpretarse.");
   });
 });
 

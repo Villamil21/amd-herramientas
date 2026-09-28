@@ -37,8 +37,8 @@ describe.skipIf(files.length === 0)("extracto Coopcentral real", () => {
         expect(m.transactionType).toBe(m.creditCents > 0 ? "credit" : "debit");
         expect(m.applicationDate).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
       }
-      // Ninguna fila procesada dos veces (misma página y mismo texto de fila con mismo saldo).
-      const keys = statement.movements.map((m) => `${m.page}|${m.concept}|${m.document}|${m.amountCents}|${m.balanceCents}`);
+      // Ninguna fila procesada dos veces (misma página y mismas celdas, incluido TRANS. ELECTRONICA y el saldo).
+      const keys = statement.movements.map((m) => `${m.page}|${m.concept}|${m.document}|${m.electronicTransfer}|${m.transactionType}|${m.amountCents}|${m.balanceCents}`);
       expect(new Set(keys).size).toBe(keys.length);
       expect(statement.issues).toEqual([]);
       expect(statement.anomalies).toEqual([]);

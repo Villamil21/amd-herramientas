@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.8.1",
+    "date": "2026-09-28",
+    "notes": [
+      "Corregido: Análisis de extractos bancarios → Coopcentral ya lee extractos con saldos negativos (antes mostraba «Se encontraron filas cuyo contenido no pudo interpretarse» y «Valor no interpretable: \"-\"»).",
+      "El signo menos que el PDF escribe separado del número en la columna SALDO se une a su valor; también se aceptan el signo pegado y el menos Unicode (−).",
+      "Se validan las transiciones de saldo positivo a negativo y de negativo a positivo, en todas las páginas del extracto.",
+      "Si quedan filas sin interpretar, se agrupan por causa («Se encontraron X filas que no pudieron interpretarse») en lugar de listar cientos de mensajes iguales."
+    ]
+  },
+  {
     "version": "1.8.0",
     "date": "2026-09-28",
     "notes": [
@@ -11,13 +21,6 @@
     ]
   },
   {
-    "version": "1.8.0",
-    "date": "2026-09-28",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
-    ]
-  },
-  {
     "version": "1.7.2",
     "date": "2026-09-28",
     "notes": [
@@ -25,13 +28,6 @@
       "Las secciones de la planilla se ubican por su título, sin depender del número de páginas.",
       "Se conserva el tipo de documento real de cada empleado (CC, PT, CE…).",
       "Mensajes más precisos cuando la tabla se encuentra pero alguna fila no se puede interpretar."
-    ]
-  },
-  {
-    "version": "1.7.2",
-    "date": "2026-09-28",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {

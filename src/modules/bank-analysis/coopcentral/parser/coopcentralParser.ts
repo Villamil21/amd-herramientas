@@ -27,7 +27,7 @@
  */
 import { normalizeKey } from "../../../../utils/text";
 import { normalizeDescription } from "../../shared/groupingService";
-import { isStatementAmount, parseStatementAmount } from "../../shared/money";
+import { parseStatementAmount } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText } from "../../shared/pdf/pdfTypes";
 import { buildRows, center, joinWords, type TextRow, type Word } from "../../shared/pdf/rows";
 import { StatementError, type ParseIssue } from "../../shared/types";
@@ -60,6 +60,61 @@ const PERIOD_TOTAL_LABELS: [keyof CoopcentralPeriodTotals, string][] = [
 ];
 
 const wordKey = (w: Word) => normalizeKey(w.text).replace(/[.:]+$/, "");
+
+// ---------------------------------------------------------------------------
+// Importes
+// ---------------------------------------------------------------------------
+
+/** Signo menos ASCII, Unicode (−) o guiones tipográficos que algunos PDF usan como menos. */
+const MINUS_SIGNS = /^[-−‒–﹣－]$/;
+const LEADING_MINUS = /^[−‒–﹣－]/;
+
+const isMinusSign = (text: string) => MINUS_SIGNS.test(text.trim());
+
+/** Normaliza el signo menos y quita el espacio entre signo y número ("- 211,048,700.00" → "-211,048,700.00"). */
+function normalizeMoneyText(text: string): string {
+  return text.trim().replace(LEADING_MINUS, "-").replace(/^-\s+/, "-");
+}
+
+/**
+ * Importe de Coopcentral en centavos: "0.00", "2,380.00", "-211,048,700.00",
+ * "- 211,048,700.00" o "− 211,048,700.00". null si no es un importe (un "-"
+ * aislado nunca lo es).
+ */
+export function parseCoopcentralMoney(text: string): number | null {
+  return parseStatementAmount(normalizeMoneyText(text));
+}
+
+const isCoopcentralMoney = (text: string) => parseCoopcentralMoney(text) !== null;
+
+/**
+ * En los saldos negativos el PDF escribe el signo en el borde izquierdo de la
+ * celda SALDO y el número alineado a la derecha, como dos textos separados
+ * ("-" y "211,048,700.00"). Une cada signo aislado de la zona de importes con
+ * el importe que tiene inmediatamente a su derecha, siempre que ambos queden en
+ * la misma celda: el signo debe estar a la derecha del final del título de la
+ * columna anterior (si no, pertenecería a otra columna).
+ */
+function joinSignedAmounts(words: Word[], h: Header): Word[] {
+  const sorted = [...words].sort((a, b) => a.x - b.x);
+  const out: Word[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const w = sorted[i];
+    const next = sorted[i + 1];
+    if (isMinusSign(w.text) && next && isCoopcentralMoney(next.text) && !/^[-−]/.test(normalizeMoneyText(next.text))) {
+      const column = amountColumnOf(next, h);
+      const k = AMOUNT_COLUMNS.indexOf(column);
+      const cellStart = k === 0 ? h.amountsStart : h.amountRights[AMOUNT_COLUMNS[k - 1]];
+      if (w.x >= cellStart && w.right <= next.x) {
+        out.push({ ...next, text: `-${next.text}`, x: w.x });
+        i += 1;
+        continue;
+      }
+    }
+    out.push(w);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Encabezado y columnas
@@ -154,14 +209,18 @@ function classifyRow(row: TextRow, page: number, h: Header): RowResult {
   const cells = new Map<TextColumn, Word[]>();
   const amounts: Record<AmountColumn, Word[]> = { creditos: [], debitos: [], saldo: [] };
   const unreadable: Word[] = [];
+  const amountZone: Word[] = [];
   for (const w of row.words) {
     if (center(w) >= h.amountsStart) {
-      if (isStatementAmount(w.text)) amounts[amountColumnOf(w, h)].push(w);
-      else unreadable.push(w);
+      amountZone.push(w);
     } else {
       const column = textColumnOf(w, h);
       cells.set(column, [...(cells.get(column) ?? []), w]);
     }
+  }
+  for (const w of joinSignedAmounts(amountZone, h)) {
+    if (isCoopcentralMoney(w.text)) amounts[amountColumnOf(w, h)].push(w);
+    else unreadable.push(w);
   }
   const cell = (c: TextColumn) => (cells.has(c) ? joinWords(cells.get(c)!) : undefined);
 
@@ -183,23 +242,44 @@ function classifyRow(row: TextRow, page: number, h: Header): RowResult {
           : null;
   if (reason) return { kind: "issue", issue: { page, text, reason } };
 
-  const cents = (c: AmountColumn) => (amounts[c].length ? parseStatementAmount(amounts[c][0].text)! : undefined);
-  return {
-    kind: "row",
-    draft: {
-      page,
-      text,
-      concept: normalizeDescription(cell("concepto")!),
-      creditCents: cents("creditos"),
-      debitCents: cents("debitos"),
-      balanceCents: cents("saldo"),
-      document: cell("doct"),
-      office: cell("oficina"),
-      applicationDate: toDayMonthYear(cell("f.apli")),
-      operationDate: toDayMonthYear(cell("f.oper")),
-      electronicTransfer: cell("trans"),
-    },
+  const cents = (c: AmountColumn) => (amounts[c].length ? parseCoopcentralMoney(amounts[c][0].text)! : undefined);
+  const draft: RowDraft = {
+    page,
+    text,
+    concept: normalizeDescription(cell("concepto")!),
+    creditCents: cents("creditos"),
+    debitCents: cents("debitos"),
+    balanceCents: cents("saldo"),
+    document: cell("doct"),
+    office: cell("oficina"),
+    applicationDate: toDayMonthYear(cell("f.apli")),
+    operationDate: toDayMonthYear(cell("f.oper")),
+    electronicTransfer: cell("trans"),
   };
+  logRow(page, row, amounts, draft);
+  return { kind: "row", draft };
+}
+
+/** Diagnóstico solo en desarrollo: fila original, tokens y columnas reconstruidas (activar con localStorage.debugCoopcentral = "1"). */
+function logRow(page: number, row: TextRow, amounts: Record<AmountColumn, Word[]>, draft: RowDraft) {
+  if (!import.meta.env?.DEV) return;
+  let enabled = false;
+  try {
+    enabled = globalThis.localStorage?.getItem("debugCoopcentral") === "1";
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return;
+  console.debug("[coopcentral]", {
+    page,
+    text: joinWords(row.words),
+    tokens: row.words.map((w) => w.text),
+    columns: Object.fromEntries(AMOUNT_COLUMNS.map((c) => [c, amounts[c].map((w) => w.text)])),
+    concept: draft.concept,
+    creditCents: draft.creditCents,
+    debitCents: draft.debitCents,
+    balanceCents: draft.balanceCents,
+  });
 }
 
 interface PageResult {
@@ -305,11 +385,11 @@ function readPeriodTotals(rows: TextRow[]): CoopcentralPeriodTotals {
   const titleX = afterTitle >= 3 ? rows[titleRow].words[afterTitle - 3].x : 0;
   for (const row of rows.slice(titleRow + 1)) {
     const words = row.words.filter((w) => w.x >= titleX - 2);
-    const amount = words.filter((w) => isStatementAmount(w.text));
+    const amount = words.filter((w) => isCoopcentralMoney(w.text));
     if (amount.length !== 1) continue;
     const label = normalizeKey(joinWords(words.filter((w) => w !== amount[0])));
     const field = PERIOD_TOTAL_LABELS.find(([, l]) => l === label)?.[0];
-    if (field && totals[field] === undefined) totals[field] = parseStatementAmount(amount[0].text)!;
+    if (field && totals[field] === undefined) totals[field] = parseCoopcentralMoney(amount[0].text)!;
   }
   return totals;
 }
