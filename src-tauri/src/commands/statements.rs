@@ -1,4 +1,4 @@
-//! Extractos bancarios: Rust solo abre el diálogo nativo y entrega los bytes
+//! Extractos bancarios y planillas en PDF: Rust solo abre el diálogo nativo y entrega los bytes
 //! del PDF. La lectura y el análisis ocurren en el frontend, en el equipo;
 //! el archivo no se copia ni se guarda en la base de datos.
 
@@ -20,11 +20,11 @@ pub struct PickedPdf {
 }
 
 #[tauri::command]
-pub async fn pick_statement_pdf(app: AppHandle) -> AppResult<Option<PickedPdf>> {
+pub async fn pick_statement_pdf(app: AppHandle, title: Option<String>) -> AppResult<Option<PickedPdf>> {
     let Some(fp) = app
         .dialog()
         .file()
-        .set_title("Seleccionar extracto PDF")
+        .set_title(title.as_deref().unwrap_or("Seleccionar extracto PDF"))
         .add_filter("PDF", &["pdf"])
         .blocking_pick_file()
     else {
@@ -36,7 +36,7 @@ pub async fn pick_statement_pdf(app: AppHandle) -> AppResult<Option<PickedPdf>> 
     }
     let size = std::fs::metadata(&path)?.len();
     if size > MAX_STATEMENT_BYTES {
-        return Err(AppError::user("El archivo es demasiado grande para ser un extracto bancario (máximo 50 MB)."));
+        return Err(AppError::user("El archivo PDF es demasiado grande (máximo 50 MB)."));
     }
     let bytes = std::fs::read(&path)?;
     if !is_pdf(&bytes) {
@@ -45,7 +45,7 @@ pub async fn pick_statement_pdf(app: AppHandle) -> AppResult<Option<PickedPdf>> 
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "extracto.pdf".into());
+        .unwrap_or_else(|| "documento.pdf".into());
     Ok(Some(PickedPdf { file_name, data_base64: STANDARD.encode(bytes) }))
 }
 

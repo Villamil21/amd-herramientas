@@ -1,4 +1,5 @@
 import { Clock } from "lucide-react";
+import { isAvailable } from "../app/modules";
 import { navigate, paths } from "../app/router";
 import { BankCard } from "../components/BankCard";
 import { ModuleTile } from "../components/ModuleTile";
@@ -27,7 +28,7 @@ export function ModulePage({ module }: { module: ModuleDef }) {
                 name={s.name}
                 logo={s.logo}
                 description={s.description}
-                available={Boolean(s.component)}
+                available={isAvailable(s)}
                 onOpen={() => navigate(paths.submodule(module.id, s.id))}
               />
             ) : (
@@ -35,7 +36,7 @@ export function ModulePage({ module }: { module: ModuleDef }) {
                 key={s.id}
                 title={s.name}
                 description={s.description}
-                available={Boolean(s.component)}
+                available={isAvailable(s)}
                 onOpen={() => navigate(paths.submodule(module.id, s.id))}
               />
             ),

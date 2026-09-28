@@ -12,14 +12,18 @@ interface Props {
   busy: boolean;
   exportedPath: string | null;
   onPick: () => void;
+  /** Textos para otros documentos (ej. planillas); por defecto, los de extractos. */
+  labels?: { pick: string; pickAnother: string; analyzing: string };
 }
 
+const STATEMENT_LABELS = { pick: "Seleccionar extracto PDF", pickAnother: "Seleccionar otro PDF", analyzing: "Analizando extracto…" };
+
 /** Selección del PDF y estado del archivo: nombre, páginas y avance del análisis. */
-export function StatementFileCard({ state, details, picking, busy, exportedPath, onPick }: Props) {
+export function StatementFileCard({ state, details, picking, busy, exportedPath, onPick, labels = STATEMENT_LABELS }: Props) {
   const toast = useToast();
   const pickButton = (
     <Button variant={state.status === "idle" ? "primary" : "secondary"} icon={<Upload size={15} />} onClick={onPick} loading={picking} disabled={busy}>
-      {state.status === "idle" ? "Seleccionar extracto PDF" : "Seleccionar otro PDF"}
+      {state.status === "idle" ? labels.pick : labels.pickAnother}
     </Button>
   );
 
@@ -42,7 +46,7 @@ export function StatementFileCard({ state, details, picking, busy, exportedPath,
                 {state.pageCount !== undefined && <span>{state.pageCount === 1 ? "1 página" : `${state.pageCount} páginas`}</span>}
                 {state.status === "analyzing" && (
                   <span className="row">
-                    <span className="spinner" aria-hidden /> Analizando extracto…
+                    <span className="spinner" aria-hidden /> {labels.analyzing}
                     {state.page !== undefined && state.pageCount !== undefined && state.pageCount > 1 && (
                       <span>
                         Página {state.page} de {state.pageCount}

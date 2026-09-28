@@ -21,3 +21,9 @@ export function formatRate(rate: number): string {
 export function formatInteger(n: number): string {
   return groupThousands(String(Math.trunc(n)));
 }
+
+/** Pesos enteros → "$1.684.000" (estilo colombiano, sin decimales). */
+export function formatPesos(pesos: number): string {
+  const rounded = Math.round(pesos);
+  return `${rounded < 0 ? "-" : ""}$${groupThousands(String(Math.abs(rounded)))}`;
+}

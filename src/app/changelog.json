@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.6.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo módulo: Seguridad social → Resumen de planilla, con selección de proveedor (Aportes en Línea; Mi Planilla en preparación).",
+      "Lee la planilla PDF de Aportes en Línea: periodo de pensión, fecha y valor de pago, y el detalle de cada empleado (días e IBC de pensión y aportes a pensión, salud, CCF y riesgos).",
+      "Calcula los intereses de mora y valida contra Total Afiliados y el Resumen de pago de la planilla.",
+      "Búsqueda y orden de empleados, y exportación a Excel (hojas Resumen y Empleados)."
+    ]
+  },
+  {
     "version": "1.5.0",
     "date": "2026-09-28",
     "notes": [
@@ -8,13 +18,6 @@
       "Valida el resultado contra Total Abonos, Total Cargos, el Saldo Actual y la secuencia de saldos.",
       "Muestra la página que se está leyendo al analizar extractos largos.",
       "Búsqueda, filtros, orden por tipo, detalle de cada grupo y exportación a Excel."
-    ]
-  },
-  {
-    "version": "1.5.0",
-    "date": "2026-09-28",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {

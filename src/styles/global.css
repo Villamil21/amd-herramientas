@@ -1758,3 +1758,14 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Resumen de planilla: detalle por empleado */
+.payroll-table__id {
+  white-space: nowrap;
+}
+
+.payroll-table tfoot td {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 0;
+  background: var(--color-surface-alt);
+}

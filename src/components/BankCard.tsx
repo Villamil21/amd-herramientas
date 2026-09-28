@@ -37,7 +37,7 @@ export function BankCard({ name, logo, description, available, onOpen }: Props) 
           <h3>{name}</h3>
           <StatusDot available={available} />
         </div>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
       </div>
     </button>
   );

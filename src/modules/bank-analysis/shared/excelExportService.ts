@@ -2,7 +2,8 @@ import { call } from "../../../services/tauri";
 import { SIGN_LABEL } from "./money";
 import type { MovementGroup, ParsedStatement } from "./types";
 
-type ColumnKind = "text" | "money" | "integer";
+/** "money": pesos con centavos (#,##0.00); "pesos": pesos enteros (#,##0). */
+type ColumnKind = "text" | "money" | "pesos" | "integer";
 type Cell = string | number | null;
 
 export interface ExportSheet {

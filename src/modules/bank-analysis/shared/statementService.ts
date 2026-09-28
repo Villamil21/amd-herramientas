@@ -14,8 +14,8 @@ function fromBase64(base64: string): Uint8Array {
 
 export const statementService = {
   /** Diálogo nativo de macOS (solo .pdf). null si el usuario cancela. Nada se guarda. */
-  async pickPdf(): Promise<PickedStatement | null> {
-    const picked = await call<{ fileName: string; dataBase64: string } | null>("pick_statement_pdf");
+  async pickPdf(title?: string): Promise<PickedStatement | null> {
+    const picked = await call<{ fileName: string; dataBase64: string } | null>("pick_statement_pdf", { title: title ?? null });
     return picked && { fileName: picked.fileName, data: fromBase64(picked.dataBase64) };
   },
 };

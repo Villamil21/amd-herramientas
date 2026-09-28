@@ -19,6 +19,8 @@ pub enum ColumnKind {
     Text,
     /// Valor monetario en pesos con centavos (#,##0.00).
     Money,
+    /// Pesos enteros con separador de miles (#,##0), ej. planillas de seguridad social.
+    Pesos,
     Integer,
 }
 
@@ -77,6 +79,7 @@ pub fn build_workbook(sheets: &[ExportSheet]) -> AppResult<Vec<u8>> {
         .set_border_bottom(FormatBorder::Thin)
         .set_align(FormatAlign::Center);
     let money = Format::new().set_num_format("#,##0.00");
+    let pesos = Format::new().set_num_format("#,##0");
     let integer = Format::new().set_num_format("0");
 
     let mut book = Workbook::new();
@@ -97,6 +100,9 @@ pub fn build_workbook(sheets: &[ExportSheet]) -> AppResult<Vec<u8>> {
                     (None, _) => {}
                     (Some(ExportCell::Number(n)), ColumnKind::Money) => {
                         ws.write_number_with_format(r, col, *n, &money).map_err(xlsx_error)?;
+                    }
+                    (Some(ExportCell::Number(n)), ColumnKind::Pesos) => {
+                        ws.write_number_with_format(r, col, *n, &pesos).map_err(xlsx_error)?;
                     }
                     (Some(ExportCell::Number(n)), ColumnKind::Integer) => {
                         ws.write_number_with_format(r, col, *n, &integer).map_err(xlsx_error)?;
@@ -130,11 +136,13 @@ mod tests {
                 ExportColumn { header: "Descripción".into(), kind: ColumnKind::Text },
                 ExportColumn { header: "Cantidad".into(), kind: ColumnKind::Integer },
                 ExportColumn { header: "Total".into(), kind: ColumnKind::Money },
+                ExportColumn { header: "Aporte".into(), kind: ColumnKind::Pesos },
             ],
             rows: vec![vec![
                 Some(ExportCell::Text("ABONO".into())),
                 Some(ExportCell::Number(2.0)),
                 Some(ExportCell::Number(-126530.6)),
+                Some(ExportCell::Number(429600.0)),
             ]],
         }];
         let bytes = build_workbook(&sheets).unwrap();

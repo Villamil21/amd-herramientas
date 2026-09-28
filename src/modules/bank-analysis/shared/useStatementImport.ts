@@ -21,6 +21,8 @@ interface Options<A> {
   /** Mensaje cuando el error no es un StatementError (ya pensado para el usuario). */
   fallbackError: string;
   logTag: string;
+  /** Título del diálogo de selección (por defecto «Seleccionar extracto PDF»). */
+  pickTitle?: string;
 }
 
 /**
@@ -28,7 +30,7 @@ interface Options<A> {
  * las páginas → analizar → exportar. El PDF solo vive en memoria: nada se
  * guarda ni se envía.
  */
-export function useStatementImport<A>({ analyze, exportExcel, fallbackError, logTag }: Options<A>) {
+export function useStatementImport<A>({ analyze, exportExcel, fallbackError, logTag, pickTitle }: Options<A>) {
   const toast = useToast();
   const [state, setState] = useState<ImportState<A>>({ status: "idle" });
   const [picking, setPicking] = useState(false);
@@ -40,7 +42,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
     if (busy) return;
     setPicking(true);
     try {
-      const picked = await statementService.pickPdf();
+      const picked = await statementService.pickPdf(pickTitle);
       if (!picked) return;
       setExportedPath(null);
       const { fileName } = picked;
@@ -60,7 +62,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
     } finally {
       setPicking(false);
     }
-  }, [busy, toast, analyze, fallbackError, logTag]);
+  }, [busy, toast, analyze, fallbackError, logTag, pickTitle]);
 
   const runExport = useCallback(async () => {
     if (state.status !== "done" || exporting) return;

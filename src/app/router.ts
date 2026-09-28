@@ -38,6 +38,7 @@ export const paths = {
   tools: "/herramientas",
   module: (moduleId: string) => `/herramientas/${moduleId}`,
   submodule: (moduleId: string, subId: string) => `/herramientas/${moduleId}/${subId}`,
+  provider: (moduleId: string, subId: string, providerId: string) => `/herramientas/${moduleId}/${subId}/${providerId}`,
   companies: "/empresas",
   concepts: "/conceptos",
   settings: "/configuracion",

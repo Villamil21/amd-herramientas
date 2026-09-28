@@ -12,6 +12,7 @@ import { WhatsNewModal } from "./WhatsNewModal";
 import { HomePage } from "../pages/HomePage";
 import { ToolsPage } from "../pages/ToolsPage";
 import { ModulePage } from "../pages/ModulePage";
+import { ProviderSelectPage } from "../pages/ProviderSelectPage";
 import { ComingSoonPage } from "../pages/ComingSoonPage";
 import { CompaniesPage } from "../pages/CompaniesPage";
 import { ConceptsPage } from "../pages/ConceptsPage";
@@ -22,7 +23,7 @@ const home: Crumb = { label: "Inicio", onClick: () => navigate(paths.home) };
 const tools: Crumb = { label: "Herramientas", onClick: () => navigate(paths.tools) };
 
 function resolve(segments: string[]) {
-  const [section, moduleId, subId] = segments;
+  const [section, moduleId, subId, providerId] = segments;
   switch (section) {
     case undefined:
       return { active: "home", crumbs: [{ label: "Inicio" }], page: <HomePage /> };
@@ -34,16 +35,25 @@ function resolve(segments: string[]) {
       if (!subId) return { active: "tools", crumbs: [home, tools, { label: mod.name }], page: <ModulePage module={mod} /> };
       const sub = mod.submodules.find((s) => s.id === subId);
       if (!sub) break;
-      const Page = sub.component;
+      if (sub.providers && !providerId) {
+        return { active: "tools", crumbs: [home, tools, modCrumb, { label: sub.name }], page: <ProviderSelectPage module={mod} submodule={sub} /> };
+      }
+      const provider = providerId ? sub.providers?.find((p) => p.id === providerId) : undefined;
+      if (providerId && !provider) break;
+      const target = provider ?? sub;
+      const subCrumbs: Crumb[] = provider
+        ? [{ label: sub.name, onClick: () => navigate(paths.submodule(mod.id, sub.id)) }, { label: provider.name }]
+        : [{ label: sub.name }];
+      const Page = target.component;
       return {
         active: "tools",
-        crumbs: [home, tools, modCrumb, { label: sub.name }],
+        crumbs: [home, tools, modCrumb, ...subCrumbs],
         page: Page ? (
           <Suspense fallback={<Loader />}>
             <Page />
           </Suspense>
         ) : (
-          <ComingSoonPage title={sub.name} backTo={paths.module(mod.id)} />
+          <ComingSoonPage title={target.name} backTo={provider ? paths.submodule(mod.id, sub.id) : paths.module(mod.id)} />
         ),
       };
     }

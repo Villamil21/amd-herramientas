@@ -10,6 +10,11 @@ export interface SubmoduleDef {
   logo?: string;
   /** Sin componente = "Próximamente". Se carga de forma diferida (lazy). */
   component?: LazyExoticComponent<ComponentType>;
+  /**
+   * Tercer nivel: pantalla para escoger proveedor (ej. Resumen de planilla →
+   * Aportes en Línea / Mi Planilla). Se muestran como tarjetas con logo.
+   */
+  providers?: SubmoduleDef[];
 }
 
 export interface ModuleDef {
