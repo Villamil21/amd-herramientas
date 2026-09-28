@@ -29,14 +29,18 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
   const text = (value: string, x: number, yPos: number, size: number, align: "left" | "center" = "left", bold = false) => {
     pdf.setFont("helvetica", bold ? "bold" : "normal"); pdf.setFontSize(S(size)); pdf.text(value, x, yPos, { align });
   };
-  const logoBox = contain(logo, width / 2 - S(48), y, S(96), S(38));
+  const logoBox = contain(logo, width / 2 - S(100), y, S(200), S(60));
   pdf.addImage(logo.data, logo.format, logoBox.x, logoBox.y, logoBox.width, logoBox.height, undefined, "FAST");
-  y += S(63); text("COMPOSICIÓN ACCIONARIA", width / 2, y, 22, "center", true); y += S(27);
+  y += S(78); text("COMPOSICIÓN ACCIONARIA", width / 2, y, 22, "center", true); y += S(27);
   const paragraph = (value: string) => {
     // splitTextToSize usa la fuente actual; establécela antes de medir para que
     // el salto de línea y el texto dibujado tengan exactamente la misma escala.
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(10.5));
-    for (const line of pdf.splitTextToSize(value, right - margin)) { text(line, margin, y, 10.5); y += S(14); }
+    const lines = pdf.splitTextToSize(value, right - margin);
+    lines.forEach((line: string, index: number) => {
+      pdf.text(line, margin, y, { align: index === lines.length - 1 ? "left" : "justify", maxWidth: right - margin });
+      y += S(14);
+    });
   };
   paragraph(`Mediante el presente documento y obrando en mi calidad de Contadora Pública titulada mediante resolución expedida por el Ministerio de educación Nacional a través la Junta Central de Contadores bajo la Matrícula T-${doc.professionalNumber}`);
   y += S(9);
@@ -46,15 +50,27 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
     y += S(15); text(capital.title, width / 2, y, 13, "center", true); y += S(9);
     // Ancho acotado: las celdas ya no dejan columnas visualmente vacías.
     const left = 72, tableRight = 540, cols = [left, left + 25, left + 160, left + 257, left + 330, left + 398, tableRight];
-    const headerHeight = S(27), rowHeight = S(22), bottom = y + headerHeight + rowHeight * (capital.rows.length + 1);
+    const headerHeight = S(27), totalHeight = S(22);
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(8.5));
+    const rowLayouts = capital.rows.map((row) => {
+      const nameLines = pdf.splitTextToSize(row.shareholder.name, cols[2] - cols[1] - 8) as string[];
+      return { row, nameLines, height: Math.max(S(22), nameLines.length * S(10) + S(10)) };
+    });
+    const bottom = y + headerHeight + totalHeight + rowLayouts.reduce((sum, row) => sum + row.height, 0);
     pdf.setFillColor(180, 180, 180); pdf.rect(left, y, tableRight - left, headerHeight, "F"); pdf.setDrawColor(35);
     for (const x of cols) pdf.line(x, y, x, bottom);
     pdf.line(left, y, tableRight, y); pdf.line(left, y + headerHeight, tableRight, y + headerHeight);
     ["No", "Accionista", "Doc Identidad", "Vlr Nominal", "No Acciones", "Vlr Acciones"].forEach((label, index) => text(label, (cols[index] + cols[index + 1]) / 2, y + S(17), 7.6, "center", true));
     let rowY = y + headerHeight;
-    for (const row of capital.rows) {
-      const values = [String(row.index), row.shareholder.name, row.shareholder.identityDocument, formatMoney(row.nominal), formatNumber(row.shares), formatMoney(row.value)];
-      values.forEach((value, index) => { pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(8.5)); pdf.text(value, (cols[index] + cols[index + 1]) / 2, rowY + S(14), { align: "center", maxWidth: cols[index + 1] - cols[index] - 4 }); });
+    for (const { row, nameLines, height: rowHeight } of rowLayouts) {
+      const baseline = rowY + rowHeight / 2 + S(3);
+      const values = [String(row.index), "", row.shareholder.identityDocument, formatMoney(row.nominal), formatNumber(row.shares), formatMoney(row.value)];
+      values.forEach((value, index) => {
+        if (index === 1) return;
+        pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(8.5));
+        pdf.text(value, (cols[index] + cols[index + 1]) / 2, baseline, { align: "center", maxWidth: cols[index + 1] - cols[index] - 4 });
+      });
+      pdf.text(nameLines, (cols[1] + cols[2]) / 2, rowY + (rowHeight - nameLines.length * S(10)) / 2 + S(8), { align: "center" });
       rowY += rowHeight; pdf.line(left, rowY, tableRight, rowY);
     }
     text("TOTAL", (cols[1] + cols[4]) / 2, rowY + S(14), 8.5, "center", true);
