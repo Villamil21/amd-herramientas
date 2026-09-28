@@ -55,7 +55,8 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
   const table = (capital: typeof doc.subscribed) => {
     y += S(tableIndex++ === 0 ? 15 : 28); text(capital.title, width / 2, y, 13, "center", true); y += S(9);
     // Ancho acotado: las celdas ya no dejan columnas visualmente vacías.
-    const left = 72, tableRight = 540, cols = [left, left + 25, left + 160, left + 257, left + 330, left + 398, tableRight];
+    // La tabla comparte exactamente el mismo ancho útil de los párrafos.
+    const left = margin, tableRight = right, cols = [left, left + 28, left + 184, left + 272, left + 344, left + 419, tableRight];
     const headerHeight = S(27), totalHeight = S(22);
     pdf.setFont("helvetica", "normal"); pdf.setFontSize(S(8.5));
     const rowLayouts = capital.rows.map((row) => {
