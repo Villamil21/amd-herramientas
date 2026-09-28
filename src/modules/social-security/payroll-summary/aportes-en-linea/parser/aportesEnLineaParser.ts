@@ -1,7 +1,9 @@
 /**
  * Parser de la «Planilla Resumen» de Aportes en Línea (PDF).
  *
- * Estructura del PDF (analizada sobre una planilla real de 2 páginas):
+ * Estructura del PDF (analizada sobre planillas reales de 1 y 2 páginas). Las
+ * secciones se localizan por su título, nunca por número de página: todas
+ * pueden estar en la misma página o repartidas en varias.
  *
  * - DATOS GENERALES DE LA LIQUIDACION (en cada página): tres filas.
  *     Periodo | Clave | Tipo | Fecha        | Pago
@@ -14,16 +16,20 @@
  * - LIQUIDACION DETALLADA DE APORTES: fila de secciones (EMPLEADO, NOVEDADES,
  *   PENSION, SALUD, CCF, RIESGOS, PARAFISCALES) y fila de columnas
  *   (No. Identificación Nombre … Codigo Días IBC Aporte ×4 … Total Aportes).
+ *   Algunas planillas parten rótulos en celdas angostas («Codig» y debajo
+ *   «o»): los pedazos de las líneas de abajo se unen al rótulo de encima
+ *   cuando juntos forman un rótulo conocido.
  *   Las columnas de cada sección se toman del grupo «Codigo … Aporte» que
  *   queda debajo del título de esa sección, así Pensión, Salud, CCF y Riesgos
  *   nunca se confunden. Cada valor va a la columna cuyo encabezado empieza a
  *   su izquierda más cerca (los importes están alineados a la derecha y
  *   pueden empezar antes que su encabezado, por eso se usa el centro).
  *   Un empleado empieza en la fila con el número de la columna No.; el nombre
- *   continúa en líneas de abajo que solo tienen texto en la zona del nombre.
+ *   continúa en líneas de abajo que solo tienen texto en la zona del nombre
+ *   o el final de un código partido («23030» / «1», «EPS03» / «7»).
  *   La tabla termina en «Total Afiliados(n)», que trae los totales.
  *
- * - RESUMEN DE PAGO (segunda página): subtotales por riesgo (AFP, ARL, CCF,
+ * - RESUMEN DE PAGO: subtotales por riesgo (AFP, ARL, CCF,
  *   EPS) y fila TOTAL con VALOR LIQUIDADO, INTERESES MORA y VALOR A PAGAR.
  *   Solo se usa para validar; nunca se toma como empleado.
  *
@@ -38,6 +44,7 @@ import type { PaymentSummary, PayrollDetailTotals, PayrollEmployee, PayrollIssue
 export const MESSAGES = {
   format: "El archivo no coincide con el formato de Aportes en Línea soportado.",
   detail: "No fue posible identificar la tabla de liquidación detallada.",
+  detailRows: "Se encontró la tabla de liquidación, pero no fue posible reconstruir las filas de empleados.",
   noEmployees: "No se encontraron empleados en la planilla.",
   payment: "No fue posible identificar el valor pagado.",
   period: "No fue posible identificar el periodo de pensión de la planilla.",
@@ -53,6 +60,11 @@ export const norm = (s: string) =>
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
+
+/** Registro de desarrollo (consola del modo dev); nunca se muestra en la interfaz. */
+const devLog = (...args: unknown[]) => {
+  if (import.meta.env?.DEV && import.meta.env.MODE !== "test") console.debug("[aportes-en-linea]", ...args);
+};
 
 // ---------------------------------------------------------------------------
 // Filas visuales
@@ -95,6 +107,28 @@ function buildPageRows(page: PdfPageText): Row[] {
 
 const isFooter = (row: Row) => /^PAGINA \d+ DE \d+/.test(norm(row.text));
 
+const HEADINGS = {
+  contributor: "DATOS GENERALES DEL APORTANTE",
+  general: "DATOS GENERALES DE LA LIQUIDACION",
+  detail: "LIQUIDACION DETALLADA DE APORTES",
+  payment: "RESUMEN DE PAGO",
+};
+const compact = (s: string) => norm(s).replace(/ /g, "");
+
+/**
+ * Índice de la fila con el título de una sección, sin importar tildes,
+ * espacios ni que el título quede partido en dos líneas seguidas.
+ */
+function findHeading(rows: Row[], heading: string, from = 0): number {
+  const target = compact(heading);
+  for (let i = from; i < rows.length; i++) {
+    const text = compact(rows[i].text);
+    if (text.includes(target)) return i;
+    if (i + 1 < rows.length && target.startsWith(text) && text.length >= 6 && (text + compact(rows[i + 1].text)).includes(target)) return i;
+  }
+  return -1;
+}
+
 function nearest<T>(list: T[], x: number, pos: (t: T) => number): T | undefined {
   let best: T | undefined;
   for (const t of list) if (best === undefined || Math.abs(pos(t) - x) < Math.abs(pos(best) - x)) best = t;
@@ -115,7 +149,7 @@ const PERIOD = /^\d{4}-\d{2}$/;
 const DATE = /^\d{4}\/\d{2}\/\d{2}$/;
 
 function parseGeneralData(rows: Row[]): GeneralData | undefined {
-  const title = rows.findIndex((r) => r.cells.some((c) => c.key === "DATOS GENERALES DE LA LIQUIDACION"));
+  const title = findHeading(rows, HEADINGS.general);
   if (title < 0) return undefined;
   // Fila de títulos (Periodo … Fecha … Pago), subtítulos y valores, en ese orden.
   const top = rows.findIndex((r, i) => i > title && i <= title + 3 && ["PERIODO", "FECHA", "PAGO"].every((k) => r.cells.some((c) => c.key === k)));
@@ -165,13 +199,35 @@ interface DetailLayout {
 
 const REQUIRED_COLUMNS = ["PENSION.dias", "PENSION.ibc", "PENSION.aporte", "SALUD.aporte", "CCF.aporte", "RIESGOS.aporte", "total"];
 
+/** Rótulos de la fila de columnas; sirven para reconocer rótulos partidos. */
+const LABELS = new Set(["NO", "NO.", "IDENTIFICACION", "NOMBRE", "CODIGO", "DIAS", "IBC", "APORTE", "TARIFA", "EXONERADO", "TOTAL", "APORTES"]);
+
+/** No exige «Codigo»: en algunas planillas llega partido («Codig» + «o»). */
 const isColumnHeader = (r: Row) => {
   const keys = new Set(r.words.map((w) => norm(w.text)));
-  return keys.has("IDENTIFICACION") && keys.has("NOMBRE") && keys.has("CODIGO") && keys.has("APORTES");
+  return keys.has("IDENTIFICACION") && keys.has("NOMBRE") && keys.has("APORTES");
 };
 
+/**
+ * Palabras de la fila de columnas con los rótulos partidos ya unidos: un
+ * pedazo de las dos líneas de abajo que cae dentro de un rótulo se le agrega
+ * solo si juntos forman un rótulo conocido («Codig» + «o» → «Codigo»).
+ */
+function headerWords(rows: Row[], headerIndex: number): Word[] {
+  const header = rows[headerIndex].words.map((w) => ({ ...w }));
+  const lineHeight = Math.max(...header.map((w) => w.height));
+  for (let i = headerIndex + 1; i < rows.length && rows[headerIndex].y - rows[i].y <= 2.2 * lineHeight; i++) {
+    for (const piece of rows[i].words) {
+      const c = center(piece);
+      const target = header.find((w) => c >= w.x && c <= w.right && !LABELS.has(norm(w.text)) && LABELS.has(norm(w.text + piece.text)));
+      if (target) target.text += piece.text;
+    }
+  }
+  return header;
+}
+
 function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined {
-  const header = rows[headerIndex].words;
+  const header = headerWords(rows, headerIndex);
   // Fila de secciones: la más cercana por encima de la de columnas.
   let titleRow: Row | undefined;
   for (let i = headerIndex - 1; i >= 0 && i >= headerIndex - 3; i--) {
@@ -230,15 +286,21 @@ function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined
   return { identificationLeft: identification.x, noveltyLeft, dataLeft, columns };
 }
 
+/** Columna de valores de una palabra (la de encabezado más cercano a su izquierda). */
+function columnOf(w: Word, layout: DetailLayout): string | undefined {
+  const c = center(w);
+  if (c < layout.dataLeft) return undefined;
+  let column = layout.columns[0];
+  for (const col of layout.columns) if (col.left <= c) column = col;
+  return column.key;
+}
+
 /** Palabras de la zona de valores agrupadas por columna. */
 function byColumn(words: Word[], layout: DetailLayout): Map<string, Word[]> {
   const map = new Map<string, Word[]>();
   for (const w of words) {
-    const c = center(w);
-    if (c < layout.dataLeft) continue;
-    let column = layout.columns[0];
-    for (const col of layout.columns) if (col.left <= c) column = col;
-    map.set(column.key, [...(map.get(column.key) ?? []), w]);
+    const key = columnOf(w, layout);
+    if (key) map.set(key, [...(map.get(key) ?? []), w]);
   }
   return map;
 }
@@ -260,7 +322,12 @@ interface RawEmployee {
 }
 
 interface DetailResult {
+  /** Se encontró el título LIQUIDACION DETALLADA DE APORTES. */
+  titleFound: boolean;
+  /** Se reconstruyó la fila de columnas. */
   found: boolean;
+  /** Filas que empiezan un empleado (con número en la columna No.). */
+  detectedRows: number;
   employees: PayrollEmployee[];
   totals: PayrollDetailTotals;
   issues: PayrollIssue[];
@@ -268,28 +335,44 @@ interface DetailResult {
 }
 
 function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult {
-  const result: DetailResult = { found: false, employees: [], totals: {}, issues: [], joinedNames: 0 };
+  const result: DetailResult = { titleFound: false, found: false, detectedRows: 0, employees: [], totals: {}, issues: [], joinedNames: 0 };
   let finished = false;
+  let layout: DetailLayout | undefined;
 
   for (const { page, rows } of pages) {
     if (finished) break;
-    const headerIndex = rows.findIndex(isColumnHeader);
-    if (headerIndex < 0) continue;
-    const layout = buildLayout(rows, headerIndex);
-    if (!layout) continue;
+    const title = findHeading(rows, HEADINGS.detail);
+    if (title >= 0) result.titleFound = true;
+    // La fila de columnas se busca en toda la página (puede repetirse sin título
+    // en las páginas siguientes). Si la tabla continúa sin encabezado, se usa
+    // la última distribución de columnas vista.
+    const headerIndex = rows.findIndex((r, i) => i > title && isColumnHeader(r));
+    let start: number;
+    if (headerIndex >= 0) {
+      const pageLayout = buildLayout(rows, headerIndex);
+      if (!pageLayout) {
+        devLog(`página ${page.pageNumber}: fila de columnas sin reconstruir`, rows[headerIndex].text);
+        continue;
+      }
+      layout = pageLayout;
+      start = headerIndex + 1;
+    } else if (layout && result.found) {
+      start = 0;
+    } else continue;
     result.found = true;
+    const current = layout;
     const issue = (text: string, reason: string) => result.issues.push({ page: page.pageNumber, text, reason });
 
     // Clasificar filas: inicio de empleado, línea de nombre, total o fin de tabla.
     // El nombre empieza en la línea de la fila y sigue hacia abajo, así que
     // cada línea suelta pertenece al último empleado visto.
     const raws: RawEmployee[] = [];
-    for (let i = headerIndex + 1; i < rows.length; i++) {
+    for (let i = start; i < rows.length; i++) {
       const row = rows[i];
-      if (isFooter(row)) break;
+      if (isFooter(row) || findHeading([row], HEADINGS.payment) === 0) break;
       const total = TOTAL_ROW.exec(norm(row.text));
       if (total) {
-        const cols = byColumn(row.words, layout);
+        const cols = byColumn(row.words, current);
         const amount = (key: string) => {
           const t = cellText(cols, key);
           return t === undefined ? undefined : (parsePesoAmount(t) ?? undefined);
@@ -307,25 +390,33 @@ function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult 
         break;
       }
       const first = row.words[0];
-      if (first && /^\d+$/.test(first.text) && center(first) < layout.identificationLeft) {
+      if (first && /^\d+$/.test(first.text) && center(first) < current.identificationLeft) {
         raws.push({ page: page.pageNumber, y: row.y, row, nameLines: [] });
         continue;
       }
       // Filas antes del primer empleado: rótulos de novedades y parafiscales.
       if (raws.length === 0) continue;
-      const nameWords = row.words.filter((w) => center(w) < layout.noveltyLeft);
-      const dataWords = row.words.filter((w) => center(w) >= layout.dataLeft);
-      if (nameWords.length) raws[raws.length - 1].nameLines.push({ y: row.y, words: nameWords });
-      if (dataWords.length) issue(row.text, "Texto inesperado entre las filas de empleados; no se asignó a ningún empleado.");
+      const last = raws[raws.length - 1];
+      const nameWords = row.words.filter((w) => center(w) < current.noveltyLeft);
+      if (nameWords.length) last.nameLines.push({ y: row.y, words: nameWords });
+      // Final de un código partido en dos líneas («23030» / «1»): no es un valor nuevo.
+      const lastCols = byColumn(last.row.words, current);
+      const unexpected = row.words.filter((w) => {
+        const key = columnOf(w, current);
+        return key !== undefined && !(key.endsWith(".codigo") && lastCols.has(key));
+      });
+      if (unexpected.length) issue(row.text, "Texto inesperado entre las filas de empleados; no se asignó a ningún empleado.");
     }
+    devLog(`página ${page.pageNumber}: ${raws.length} fila(s) de empleado detectadas`);
 
     // Interpretar cada empleado.
+    result.detectedRows += raws.length;
     for (const raw of raws) {
-      const employee = parseEmployee(raw, layout, issue);
+      const employee = parseEmployee(raw, current, issue);
       if (employee) {
         if (raw.nameLines.length) result.joinedNames++;
         result.employees.push(employee);
-      }
+      } else devLog("fila descartada", raw.row.text);
     }
   }
   return result;
@@ -406,7 +497,7 @@ function parseEmployee(raw: RawEmployee, layout: DetailLayout, issue: (text: str
 const RISK_ROW = /^([A-Z]+) \(ADMINISTRADORAS/;
 
 function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
-  const title = rows.findIndex((r) => r.cells.some((c) => c.key === "RESUMEN DE PAGO"));
+  const title = findHeading(rows, HEADINGS.payment);
   if (title < 0) return undefined;
   const header = rows.findIndex((r, i) => i > title && r.cells.some((c) => c.key === "VALOR LIQUIDADO") && r.cells.some((c) => c.key === "VALOR A PAGAR"));
   if (header < 0) return undefined;
@@ -444,9 +535,10 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
 
 export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
   const pages = doc.pages.map((page) => ({ page, rows: buildPageRows(page) }));
-  const has = (key: string) => pages.some(({ rows }) => rows.some((r) => r.cells.some((c) => c.key === key)));
-  const detailTitle = has("LIQUIDACION DETALLADA DE APORTES");
-  if (!has("DATOS GENERALES DE LA LIQUIDACION") || (!detailTitle && !has("DATOS GENERALES DEL APORTANTE"))) {
+  const has = (heading: string) => pages.some(({ rows }) => findHeading(rows, heading) >= 0);
+  const sections = Object.fromEntries(Object.entries(HEADINGS).map(([k, heading]) => [k, has(heading)]));
+  devLog(`${doc.pageCount} página(s); secciones:`, sections);
+  if (!sections.general || (!sections.detail && !sections.contributor)) {
     throw new StatementError(MESSAGES.format);
   }
 
@@ -460,8 +552,12 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
   }
 
   const detail = parseDetail(pages);
-  if (!detail.found) throw new StatementError(MESSAGES.detail);
-  if (detail.employees.length === 0) throw new StatementError(detail.issues.length ? `${MESSAGES.noEmployees} ${detail.issues[0].reason}` : MESSAGES.noEmployees);
+  devLog(`filas detectadas: ${detail.detectedRows}; empleados reconstruidos: ${detail.employees.length}; descartadas: ${detail.detectedRows - detail.employees.length}; totales:`, detail.totals);
+  if (!detail.found) throw new StatementError(detail.titleFound ? MESSAGES.detailRows : MESSAGES.detail);
+  if (detail.employees.length === 0) {
+    if (detail.detectedRows > 0) throw new StatementError(`${MESSAGES.detailRows} ${detail.issues[0]?.reason ?? ""}`.trim());
+    throw new StatementError(detail.issues.length ? `${MESSAGES.noEmployees} ${detail.issues[0].reason}` : MESSAGES.noEmployees);
+  }
   if (general.paymentAmount === undefined) throw new StatementError(MESSAGES.payment);
   if (!general.period) throw new StatementError(MESSAGES.period);
   if (!general.paymentDate) throw new StatementError(MESSAGES.paymentDate);
@@ -473,6 +569,7 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
     paymentSummary = parsePaymentSummary(rows);
     if (paymentSummary) break;
   }
+  devLog("datos generales:", general, "resumen de pago:", paymentSummary);
 
   return {
     provider: "aportes-en-linea",
@@ -483,6 +580,7 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
     totalContributions,
     lateInterest: general.paymentAmount - totalContributions,
     employeeCount: detail.employees.length,
+    detectedRows: detail.detectedRows,
     employees: detail.employees,
     detailTotals: detail.totals,
     paymentSummary,

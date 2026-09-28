@@ -357,13 +357,103 @@ describe("parser Aportes en Línea", () => {
     expect(validation.validated).toBe(true);
   });
 
+  it("procesa una planilla de 1 página con rótulos y códigos partidos en dos líneas", () => {
+    // Geometría de una planilla real de 1 página: todas las secciones en la
+    // misma página, «Codig» / «o» en el encabezado, códigos «23030» / «1» y
+    // «EPS03» / «7», columna Tarifa en Riesgos y un documento PT.
+    const H = 467.7;
+    const header: PdfTextItem[] = [
+      t("LIQUIDACION DETALLADA DE APORTES", 23.4, 488.8, 6),
+      ...[["EMPLEADO", 50.6], ["NOVEDADES", 148.7], ["PENSION", 251.6], ["SALUD", 339], ["CCF", 427.8], ["RIESGOS", 514.4], ["PARAFISCALES", 604.8]].map(([x, px]) => t(x as string, px as number, 478.3, 6)),
+      ...[["Codig", 223.1], ["Días", 236.6], ["Codig", 307.1], ["Dias", 321.4], ["Codigo Días", 391.5], ["Codig", 477.3], ["Días", 490.9], ["Tarifa", 532.1], ["Días", 577], ["Exonerado", 648.8], ["Total Aportes", 677.7]].map(([x, px]) => t(x as string, px as number, H)),
+      ...[["No", 25.1], ["Identificación", 36.8], ["Nombre", 80.9], ["IBC", 257.1], ["Aporte", 283], ["IBC", 342.3], ["Aporte", 368.2], ["IBC", 427.6], ["Aporte", 453.5], ["IBC", 511.5], ["Aporte", 553.5], ["IBC", 597.5], ["Aporte", 623.4]].map(([x, px]) => t(x as string, px as number, H - 0.5, 5)),
+      ...[["in", 110], ["re", 115.8], ["td", 122.2], ["vi", 217]].map(([x, px]) => t(x as string, px as number, H - 2.8)),
+      ...[227.4, 311.4, 481.6].map((x) => t("o", x, H - 5.3)),
+      t("SENA e ICBF", 647.9, H - 5.3),
+      t(".", 27.2, H - 6.2, 5),
+      ...[["g", 110.8], ["t", 117.1], ["p", 217.5]].map(([x, px]) => t(x as string, px as number, H - 8.1)),
+    ];
+    const row = (no: number, doc: string, name: string[], y: number): PdfTextItem[] => {
+      const [docType, docNumber] = doc.split(" ");
+      return [
+        t(String(no), 26.9, y),
+        t(docType, 34.3, y),
+        t(docNumber, 43.3, y),
+        ...name.map((line, i) => t(line, 70.9, y - i * 5.3)),
+        t("X", 150.2, y),
+        t("23030", 222.3, y),
+        t("1", 222.3, y - 5.3),
+        t("30", 238.2, y),
+        r("$1,750,905", 275.1, y),
+        t("$280,200 EPS03", 286.8, y),
+        t("7", 317, y - 5.3),
+        t("30", 323.1, y),
+        r("$1,750,905", 360.4, y),
+        r("$70,100", 390.1, y),
+        t("CCF57", 393, y),
+        t("30", 408.7, y),
+        r("$1,750,905", 445.6, y),
+        r("$70,100", 475.4, y),
+        t("14-11", 478.2, y),
+        t("30", 492.6, y),
+        t("$1,750,905 0.522%", 507.3, y),
+        r("$9,200", 575.4, y),
+        t("30", 578.7, y),
+        t("$0", 610.8, y),
+        t("$0", 640.7, y),
+        t("Si", 658.3, y),
+        r("$429,600", 700.4, y),
+      ];
+    };
+    const summaryItems = paymentSummaryPage(
+      Array.from({ length: 3 }, () => ({ ...EMPS[0], total: 429_600 })),
+      11_700,
+    ).map((i) => ({ ...i, y: i.y - 110 }));
+    const d = docOf(
+      page(1, [
+        ...generalBlock(530.7, { period: "2026-01", salud: "2026-02", date: "2026/02/27", value: "$1,300,500" }),
+        ...header,
+        ...row(1, "CC 900001", ["APELLIDO UNO", "NOMBRE"], 447.7),
+        ...row(2, "CC 900002", ["APELLIDO", "DOS NOMBRE", "SEGUNDO"], 433.2),
+        ...row(3, "PT 900003", ["APELLIDO TRES", "OTRO NOMBRE"], 413.4),
+        t("Total", 23.4, 399.2, 5),
+        t("Afiliados( 3)", 49.3, 399.2, 5),
+        r("$5,252,715", 275.1, 398.9),
+        r("$840,600", 304.9, 398.9),
+        r("$210,300", 390.2, 398.9),
+        r("$210,300", 475.4, 398.9),
+        r("$27,600", 575.4, 398.9),
+        r("$1,288,800", 702.4, 398.9),
+        ...summaryItems,
+        t("Página 1 de 1", 24.4, 10, 8),
+      ]),
+    );
+    const { summary: s, validation } = analyzeAportesEnLinea(d);
+    expect(s.issues).toEqual([]);
+    expect(s.employees.map((e) => [e.identification, e.name])).toEqual([
+      ["CC 900001", "APELLIDO UNO NOMBRE"],
+      ["CC 900002", "APELLIDO DOS NOMBRE SEGUNDO"],
+      ["PT 900003", "APELLIDO TRES OTRO NOMBRE"],
+    ]);
+    for (const e of s.employees) {
+      expect(e).toMatchObject({ pensionDays: 30, pensionIbc: 1_750_905, pensionContribution: 280_200, healthContribution: 70_100, ccfContribution: 70_100, riskContribution: 9_200, totalContribution: 429_600 });
+    }
+    expect([s.period, s.paymentDate, s.paymentAmount, s.totalContributions, s.lateInterest, s.employeeCount]).toEqual(["2026-01", "2026/02/27", 1_300_500, 1_288_800, 11_700, 3]);
+    expect(s.paymentSummary).toMatchObject({ liquidated: 1_288_800, lateInterest: 11_700, toPay: 1_300_500 });
+    expect(validation.validated).toBe(true);
+  });
+
   it("rechaza un PDF que no es de Aportes en Línea sin inventar datos", () => {
     const bank = docOf(page(1, [t("EXTRACTO DE CUENTA DE AHORROS", 20, 700, 10), t("SALDO ANTERIOR", 20, 680, 8), t("$1,000", 200, 680, 8)]));
     expectError(() => parseAportesEnLinea(bank), MESSAGES.format);
   });
 
   it("informa si falta la tabla de liquidación detallada", () => {
-    expectError(() => parseAportesEnLinea(docOf(page(1, [...generalBlock(537.6, { value: "$10,000" }), t("LIQUIDACION DETALLADA DE APORTES", 19, 496, 6)]))), MESSAGES.detail);
+    expectError(() => parseAportesEnLinea(docOf(page(1, [...generalBlock(537.6, { value: "$10,000" })]))), MESSAGES.detail);
+  });
+
+  it("distingue la tabla encontrada cuyas filas no se pueden reconstruir", () => {
+    expectError(() => parseAportesEnLinea(docOf(page(1, [...generalBlock(537.6, { value: "$10,000" }), t("LIQUIDACION DETALLADA DE APORTES", 19, 496, 6)]))), MESSAGES.detailRows);
   });
 
   it("informa si no hay empleados", () => {
@@ -397,6 +487,13 @@ describe("validaciones", () => {
 
   it("advierte si Total Afiliados no coincide con los empleados extraídos", () => {
     expect(failed(planilla(EMPS, { declared: 4 }))).toEqual(["employee-count"]);
+  });
+
+  it("indica cuántas filas detectadas no se pudieron interpretar", () => {
+    const emps = [EMPS[0], { ...EMPS[1], doc: "CC SINNUMERO" }, EMPS[2]];
+    const a = analyzeAportesEnLinea(planilla(emps));
+    expect(a.summary.employeeCount).toBe(2);
+    expect(a.validation.checks.find((c) => c.id === "issues")?.detail).toBe("Se detectaron 3 empleados, pero 1 fila(s) no pudieron interpretarse correctamente.");
   });
 
   it("advierte si una fila no suma su Total Aportes", () => {

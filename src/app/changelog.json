@@ -1,5 +1,22 @@
 [
   {
+    "version": "1.7.2",
+    "date": "2026-09-28",
+    "notes": [
+      "Corregido: Seguridad social → Resumen de planilla → Aportes en Línea ya lee planillas de una sola página y las que parten encabezados o códigos en dos líneas (antes mostraba «No fue posible identificar la tabla de liquidación detallada»).",
+      "Las secciones de la planilla se ubican por su título, sin depender del número de páginas.",
+      "Se conserva el tipo de documento real de cada empleado (CC, PT, CE…).",
+      "Mensajes más precisos cuando la tabla se encuentra pero alguna fila no se puede interpretar."
+    ]
+  },
+  {
+    "version": "1.7.2",
+    "date": "2026-09-28",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.7.1",
     "date": "2026-09-28",
     "notes": [

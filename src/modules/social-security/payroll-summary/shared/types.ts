@@ -38,7 +38,7 @@ export interface PayrollDetailTotals {
   totalContribution?: number;
 }
 
-/** Fila TOTAL y subtotales por riesgo del «Resumen de pago» (segunda página). */
+/** Fila TOTAL y subtotales por riesgo del «Resumen de pago». */
 export interface PaymentSummary {
   liquidated?: number;
   lateInterest?: number;
@@ -68,6 +68,8 @@ export interface PayrollSummary {
   /** Valor pagado − total aportes liquidados. */
   lateInterest: number;
   employeeCount: number;
+  /** Filas de empleado detectadas en la tabla (interpretadas o no). */
+  detectedRows: number;
   employees: PayrollEmployee[];
   detailTotals: PayrollDetailTotals;
   paymentSummary?: PaymentSummary;

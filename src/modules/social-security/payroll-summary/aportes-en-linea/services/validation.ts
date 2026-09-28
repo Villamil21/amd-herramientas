@@ -113,7 +113,15 @@ export function validatePayroll(s: PayrollSummary): PayrollValidation {
   checks.push(
     s.issues.length === 0
       ? { id: "issues", label: "Todas las filas interpretadas", status: "ok" }
-      : { id: "issues", label: "Todas las filas interpretadas", status: "failed", detail: `${s.issues.length} fila(s) sin interpretar.` },
+      : {
+          id: "issues",
+          label: "Todas las filas interpretadas",
+          status: "failed",
+          detail:
+            s.detectedRows > s.employees.length
+              ? `Se detectaron ${formatInteger(s.detectedRows)} empleados, pero ${formatInteger(s.detectedRows - s.employees.length)} fila(s) no pudieron interpretarse correctamente.`
+              : `${s.issues.length} texto(s) de la tabla sin interpretar.`,
+        },
   );
 
   const validated = checks.every((c) => c.status === "ok" || (c.status === "unavailable" && !REQUIRED.includes(c.id)));

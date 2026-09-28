@@ -7,7 +7,9 @@
  *
  * Varios archivos se separan con ":". Sin la variable, la prueba se omite.
  * Las reglas generales se verifican en todos los archivos; los valores
- * concretos solo en la planilla de referencia (NIT 901741186, periodo 2026-01).
+ * concretos solo en las planillas de referencia del periodo 2026-01: la de
+ * 2 páginas (pago $1,684,000) y la de 1 página con encabezados partidos
+ * y documento PT (pago $1,300,500).
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -38,6 +40,22 @@ describe.skipIf(files.length === 0)("planilla Aportes en Línea real", () => {
       for (const check of validation.checks) expect(check, check.detail).toMatchObject({ status: "ok" });
       expect(validation.validated).toBe(true);
 
+      if (s.period === "2026-01" && s.paymentAmount === 1_300_500) {
+        const values = { pensionDays: 30, pensionIbc: 1_750_905, pensionContribution: 280_200, healthContribution: 70_100, ccfContribution: 70_100, riskContribution: 9_200, totalContribution: 429_600 };
+        expect(s.pageCount).toBe(1);
+        expect(s.paymentDate).toBe("2026/02/27");
+        expect(s.employees.map((e) => [e.identification, e.name])).toEqual([
+          ["CC 29435823", "CADENA VALLEJO CONSUELO"],
+          ["CC 1112881168", "RODRIGUEZ RODRIGUEZ JUAN DAVID"],
+          ["PT 1030953", "TENEFE ZABALA ALAN ARDITHYS"],
+        ]);
+        for (const e of s.employees) expect(e).toMatchObject(values);
+        expect(s.totalContributions).toBe(1_288_800);
+        expect(s.lateInterest).toBe(11_700);
+        expect(s.detailTotals.declaredEmployees).toBe(3);
+        expect(s.paymentSummary).toMatchObject({ liquidated: 1_288_800, lateInterest: 11_700, toPay: 1_300_500 });
+        return;
+      }
       if (s.period !== "2026-01" || s.paymentAmount !== 1_684_000) return;
 
       // Casos 1–3: Periodo desde Pensión, Fecha desde Fecha Pago, Pago desde Valor.
