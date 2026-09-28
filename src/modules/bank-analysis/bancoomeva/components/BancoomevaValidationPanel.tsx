@@ -18,7 +18,10 @@ export function BancoomevaValidationPanel({ statement, validation }: { statement
   );
 
   if (validation.validated) {
-    const notes = unavailable.map((c) => `No fue posible comprobar: ${c.label}. ${c.detail ?? ""}`);
+    const notes = [
+      ...validation.checks.filter((c) => c.status === "ok" && c.detail).map((c) => `${c.label}: ${c.detail}`),
+      ...unavailable.map((c) => `No fue posible comprobar: ${c.label}. ${c.detail ?? ""}`),
+    ];
     return (
       <Alert tone="success" title="Extracto validado" items={notes}>
         Se revisaron {pages}. Los débitos y créditos coinciden con TOTAL DEBITO y TOTAL CREDITO, la secuencia de saldos cuadra y saldo inicial + créditos − débitos
@@ -43,9 +46,11 @@ export function BancoomevaValidationPanel({ statement, validation }: { statement
       ? "Hay filas con valor en VALOR DEBITO y VALOR CREDITO a la vez. Revísalas antes de usar el resultado."
       : statement.issues.length > 0
         ? "Se encontraron filas cuyo contenido no pudo interpretarse."
-        : failed.some((c) => ["debits", "credits", "reconciliation", "balances"].includes(c.id))
+        : failed.some((c) => ["debits", "credits", "reconciliation"].includes(c.id))
           ? RECONCILIATION_WARNING
-          : "No fue posible validar el análisis contra los totales del extracto.";
+          : failed.some((c) => c.id === "balances" || c.id === "order")
+            ? "Se detectaron inconsistencias en el orden o en la secuencia de saldos de las filas."
+            : "No fue posible validar el análisis contra los totales del extracto.";
 
   return (
     <Alert tone="warning" title={title} items={items}>

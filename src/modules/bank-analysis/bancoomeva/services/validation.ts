@@ -1,5 +1,5 @@
 import { formatMoneyCents } from "../../../../utils/format";
-import type { BancoomevaCheck, BancoomevaGroup, BancoomevaStatement, BancoomevaSummary, BancoomevaValidation } from "../types";
+import type { BancoomevaAnomaly, BancoomevaCheck, BancoomevaGroup, BancoomevaMovement, BancoomevaStatement, BancoomevaSummary, BancoomevaValidation } from "../types";
 
 const MAX_LISTED = 5;
 
@@ -9,8 +9,8 @@ export const RECONCILIATION_WARNING = "Advertencia: los movimientos extraídos n
  * Controles sobre lo extraído. Nunca modifican movimientos: si algo no
  * cuadra, solo se informa. El análisis queda validado únicamente si los
  * débitos y créditos coinciden con TOTAL DEBITO y TOTAL CREDITO, saldo
- * inicial + créditos − débitos = saldo final, la secuencia de saldos cuadra
- * y no hay filas anómalas, sin interpretar ni totales distintos entre páginas.
+ * inicial + créditos − débitos = saldo final, las filas siguen el orden
+ * visual, la secuencia de saldos cuadra y no hay filas anómalas, sin interpretar ni totales distintos entre páginas.
  */
 export function validateBancoomeva(statement: BancoomevaStatement, groups: BancoomevaGroup[], summary: BancoomevaSummary): BancoomevaValidation {
   const t = statement.totals;
@@ -20,6 +20,7 @@ export function validateBancoomeva(statement: BancoomevaStatement, groups: Banco
     compare("credits", "Suma de créditos = TOTAL CREDITO", t.totalCreditsCents, summary.totalCreditsCents),
     reconciliation(statement, summary),
     summaryConsistency(statement),
+    rowOrder(statement),
     balanceChain(statement),
   ];
   if (statement.totalsMismatchPages.length > 0) {
@@ -101,19 +102,75 @@ function summaryConsistency({ totals: t }: BancoomevaStatement): BancoomevaCheck
   return { id, label, status: "failed", detail: `El bloque de totales da ${formatMoneyCents(expected)} y el extracto indica ${formatMoneyCents(closing)} (diferencia ${formatMoneyCents(expected - closing)}).` };
 }
 
+type ChainRow = BancoomevaMovement | BancoomevaAnomaly;
+
+const chainRows = (s: BancoomevaStatement): ChainRow[] => [...s.movements, ...s.anomalies].sort((a, b) => a.index - b.index);
+
+/**
+ * Orden de lectura: cada fila ocupa una posición propia (página + línea) y
+ * las filas avanzan de página en página y de arriba hacia abajo. Descarta
+ * filas leídas dos veces o fuera del orden visual.
+ */
+function rowOrder(s: BancoomevaStatement): BancoomevaCheck {
+  const rows = chainRows(s);
+  const bad = rows.findIndex((r, i) => i > 0 && !(r.page > rows[i - 1].page || (r.page === rows[i - 1].page && r.y < rows[i - 1].y)));
+  const label = "Orden visual de las filas (página y posición)";
+  if (bad < 0) return { id: "order", label, status: "ok" };
+  return { id: "order", label, status: "failed", detail: `La fila de la página ${rows[bad].page} (${rows[bad].date} ${rows[bad].description}) está repetida o fuera del orden del extracto.` };
+}
+
+const sameMovement = (a: ChainRow, b: ChainRow) => a.date === b.date && a.description === b.description && a.debitCents === b.debitCents && a.creditCents === b.creditCents;
+
+/**
+ * El banco a veces imprime, entre movimientos idénticos (misma fecha,
+ * descripción y valores), los saldos en un orden distinto al de aplicación:
+ * «34,589,798 → 34,389,798 → 34,489,798» con débitos de 100,000. Si desde
+ * `start` hay filas idénticas cuyos saldos impresos son exactamente los que
+ * la secuencia espera (ni uno más ni uno menos), las filas están completas y
+ * solo difiere el orden del saldo impreso. Devuelve la última fila de ese
+ * tramo, o -1. Las filas y los importes no se modifican.
+ */
+function permutedRunEnd(rows: ChainRow[], start: number, previous: number): number {
+  const step = rows[start].creditCents - rows[start].debitCents;
+  if (step === 0) return -1;
+  const seen = new Set<number>();
+  let max = 0;
+  for (let k = start; k < rows.length && sameMovement(rows[k], rows[start]); k++) {
+    const position = (rows[k].balanceCents! - previous) / step;
+    if (!Number.isInteger(position) || position < 1 || seen.has(position)) return -1;
+    seen.add(position);
+    max = Math.max(max, position);
+    // Posiciones distintas entre 1 y n, con la mayor igual a n: son exactamente 1…n.
+    if (max === k - start + 1) return k > start ? k : -1;
+  }
+  return -1;
+}
+
 /** Saldo anterior − débito + crédito = saldo de cada fila (detecta filas omitidas, duplicadas o columnas mal leídas). */
 function balanceChain(s: BancoomevaStatement): BancoomevaCheck {
   const label = "Secuencia de saldos";
-  const rows = [...s.movements, ...s.anomalies].sort((a, b) => a.index - b.index);
+  const rows = chainRows(s);
   if (rows.length === 0 || rows.some((r) => r.balanceCents === undefined)) {
     return { id: "balances", label, status: "unavailable", detail: "No todas las filas incluyen el saldo." };
   }
   const breaks: string[] = [];
+  const reordered: { page: number; rows: number }[] = [];
   let previous = s.totals.openingBalanceCents;
-  for (const r of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
     const expected = previous === undefined ? undefined : previous - r.debitCents + r.creditCents;
     if (expected !== undefined && expected !== r.balanceCents) {
+      const end = permutedRunEnd(rows, i, previous!);
+      if (end >= 0) {
+        reordered.push({ page: r.page, rows: end - i + 1 });
+        previous = previous! + (end - i + 1) * (r.creditCents - r.debitCents);
+        i = end;
+        continue;
+      }
       breaks.push(`Página ${r.page}, ${r.date} ${r.description}: se esperaba saldo ${formatMoneyCents(expected)} y el extracto muestra ${formatMoneyCents(r.balanceCents!)}.`);
+      if (import.meta.env.DEV) {
+        console.debug("[bancoomeva] saldo", { page: r.page, rowY: r.y, previousBalance: previous, debit: r.debitCents, credit: r.creditCents, expectedBalance: expected, actualBalance: r.balanceCents });
+      }
     }
     previous = r.balanceCents;
   }
@@ -121,8 +178,13 @@ function balanceChain(s: BancoomevaStatement): BancoomevaCheck {
   if (closing !== undefined && previous !== closing) {
     breaks.push(`El saldo de la última fila (${formatMoneyCents(previous!)}) no coincide con SALDO FINAL (${formatMoneyCents(closing)}).`);
   }
-  if (breaks.length === 0) return { id: "balances", label, status: "ok" };
+  const pages = [...new Set(reordered.map((r) => r.page))].join(", ");
+  const note =
+    reordered.length === 0
+      ? ""
+      : `En ${reordered.length} tramo(s) de movimientos idénticos (misma fecha, descripción y valor; ${reordered.reduce((n, r) => n + r.rows, 0)} filas, página(s) ${pages}) el extracto imprime los saldos en otro orden. Están todos los saldos esperados, así que no falta ni sobra ninguna fila; los datos no se modificaron.`;
+  if (breaks.length === 0) return { id: "balances", label, status: "ok", detail: note || undefined };
   const listed = breaks.slice(0, MAX_LISTED).join(" ");
   const more = breaks.length > MAX_LISTED ? ` (y ${breaks.length - MAX_LISTED} más)` : "";
-  return { id: "balances", label, status: "failed", detail: `${breaks.length} fila(s) no cuadran con el saldo. ${listed}${more}` };
+  return { id: "balances", label, status: "failed", detail: `Se detectaron ${breaks.length} inconsistencia(s) en la secuencia de saldos. ${listed}${more}${note ? ` ${note}` : ""}` };
 }

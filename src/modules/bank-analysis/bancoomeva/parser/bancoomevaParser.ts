@@ -353,7 +353,7 @@ export function parseBancoomevaStatement(doc: PdfDocumentText): BancoomevaStatem
     const description = normalizeDescription(r.description.join(" "));
     const office = normalizeDescription(r.office.join(" ")) || undefined;
     if (r.debitCents > 0 && r.creditCents > 0) {
-      anomalies.push({ index, page: r.page, date: r.date, description, debitCents: r.debitCents, creditCents: r.creditCents, balanceCents: r.balanceCents, text: r.text });
+      anomalies.push({ index, page: r.page, y: r.y, date: r.date, description, debitCents: r.debitCents, creditCents: r.creditCents, balanceCents: r.balanceCents, text: r.text });
       return;
     }
     if (!description) {
@@ -372,6 +372,7 @@ export function parseBancoomevaStatement(doc: PdfDocumentText): BancoomevaStatem
       amountCents: credit ? r.creditCents : r.debitCents,
       balanceCents: r.balanceCents,
       page: r.page,
+      y: r.y,
     });
   });
 

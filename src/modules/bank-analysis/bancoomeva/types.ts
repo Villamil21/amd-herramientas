@@ -22,6 +22,8 @@ export interface BancoomevaMovement {
   amountCents: number;
   balanceCents?: number;
   page: number;
+  /** Línea base de la fila en la página (coordenadas PDF: crece hacia arriba). */
+  y: number;
 }
 
 /** Fila con valor en VALOR DEBITO y VALOR CREDITO a la vez: no se clasifica, se deja para revisión. */
@@ -33,6 +35,7 @@ export interface BancoomevaAnomaly {
   debitCents: number;
   creditCents: number;
   balanceCents?: number;
+  y: number;
   text: string;
 }
 

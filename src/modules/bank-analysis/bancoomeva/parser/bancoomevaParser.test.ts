@@ -168,6 +168,7 @@ describe("parser Bancoomeva", () => {
       amountCents: 2_840_000_000,
       balanceCents: 2_840_000_000,
       page: 1,
+      y: expect.closeTo(606.7),
     });
     expect(s.movements[1]).toMatchObject({ description: "N/DND TRANSACCIONES BRE-B MONO", transactionType: "debit", amountCents: 888_000_000, debitCents: 888_000_000, creditCents: 0 });
     expect(s.accountNumber).toBe("30520000000275");
@@ -258,6 +259,57 @@ describe("parser Bancoomeva", () => {
     const broken = docOf({ ...p, items: p.items.filter((i) => i.y !== y) });
     const { validation } = analyzeBancoomeva(broken);
     expect(validation.checks.filter((c) => c.status === "failed").map((c) => c.id)).toEqual(["debits", "reconciliation", "balances"]);
+    expect(validation.validated).toBe(false);
+  });
+
+  it("acepta saldos impresos en otro orden entre movimientos idénticos, sin reordenar ni cambiar valores", () => {
+    // Como en el extracto real de julio de 2026: débitos idénticos de 100,000 cuyo saldo
+    // impreso sale intercambiado (…589 → …389 → …489 → …289).
+    const same = { date: "01-07-2026", description: "N/DND TRANSACCIONES BRE-B MONO", debit: 10_000_000 };
+    const printed = [3_458_979_800, 3_438_979_800, 3_448_979_800, 3_428_979_800, 3_408_979_800, 3_418_979_800, 3_398_979_800];
+    const movs: Mov[] = [
+      { ...same, debit: 1_661_477_400, balance: 3_458_979_800 },
+      ...printed.slice(1).map((balance) => ({ ...same, balance })),
+      { date: "03-07-2026", description: "N/CNC TRANSACCIONES BRE-B MONO", credit: 1_000_000 },
+    ];
+    const d = statement(movs, { perPage: 4, totals: totalsOf(movs, 5_120_457_200) });
+    const { statement: s, validation } = analyzeBancoomeva(d);
+    // Orden visual y valores tal como están en el PDF.
+    expect(s.movements.map((m) => m.balanceCents)).toEqual([...printed, 3_399_979_800]);
+    expect(s.movements.map((m) => m.page)).toEqual([1, 1, 1, 1, 2, 2, 2, 2]);
+    const balances = validation.checks.find((c) => c.id === "balances")!;
+    expect(balances.status).toBe("ok");
+    expect(balances.detail).toMatch(/En 2 tramo\(s\) de movimientos idénticos .*4 filas, página\(s\) 1, 2/);
+    expect(validation.checks.find((c) => c.id === "order")?.status).toBe("ok");
+    expect(validation.validated).toBe(true);
+  });
+
+  it("no acepta como orden distinto un saldo que no corresponde a ninguna fila", () => {
+    const same = { date: "01-07-2026", description: "N/DND TRANSACCIONES BRE-B MONO", debit: 10_000_000 };
+    // El segundo y tercer saldo repiten el mismo valor: falta uno de los saldos esperados.
+    const movs: Mov[] = [
+      { ...same, balance: 90_000_000 },
+      { ...same, balance: 70_000_000 },
+      { ...same, balance: 70_000_000 },
+    ];
+    const { validation } = analyzeBancoomeva(statement(movs, { totals: { opening: 100_000_000, debit: 30_000_000, credit: 0, closing: 70_000_000 } }));
+    expect(validation.checks.find((c) => c.id === "balances")).toMatchObject({ status: "failed", detail: expect.stringMatching(/^Se detectaron 2 inconsistencia/) });
+    expect(validation.validated).toBe(false);
+  });
+
+  it("no acepta saldos intercambiados entre movimientos distintos", () => {
+    const movs: Mov[] = [
+      { description: "N/DND A", debit: 10_000_000, balance: 80_000_000 },
+      { description: "N/DND B", debit: 20_000_000, balance: 90_000_000 },
+    ];
+    const { validation } = analyzeBancoomeva(statement(movs, { totals: { opening: 100_000_000, debit: 30_000_000, credit: 0, closing: 70_000_000 } }));
+    expect(validation.checks.find((c) => c.id === "balances")?.status).toBe("failed");
+  });
+
+  it("detecta una página leída dos veces, aunque sus filas sean idénticas", () => {
+    const d = statement(REAL);
+    const { validation } = analyzeBancoomeva(docOf(d.pages[0], d.pages[0]));
+    expect(validation.checks.find((c) => c.id === "order")?.status).toBe("failed");
     expect(validation.validated).toBe(false);
   });
 

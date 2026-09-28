@@ -1,5 +1,22 @@
 [
   {
+    "version": "1.8.2",
+    "date": "2026-09-28",
+    "notes": [
+      "Corregido: Análisis de extractos bancarios → Bancoomeva ya valida extractos largos donde el banco imprime los saldos en otro orden entre movimientos idénticos (antes mostraba «los movimientos extraídos no concilian» y errores en «Secuencia de saldos»).",
+      "Las filas se conservan en el orden visual del PDF y con sus valores originales; solo se acepta el orden distinto si están exactamente todos los saldos esperados.",
+      "Nuevo control: cada fila ocupa una posición propia (página y línea), para detectar filas leídas dos veces o fuera de orden.",
+      "La advertencia «no concilian» solo aparece cuando fallan los débitos, los créditos o el saldo final."
+    ]
+  },
+  {
+    "version": "1.8.2",
+    "date": "2026-09-28",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.8.1",
     "date": "2026-09-28",
     "notes": [
