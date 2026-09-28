@@ -937,6 +937,12 @@ a {
   padding-bottom: 7px;
 }
 
+/* Detalle con muchas columnas: una línea por movimiento (desplazamiento horizontal si no cabe). */
+.group-detail--nowrap .table th,
+.group-detail--nowrap .table td {
+  white-space: nowrap;
+}
+
 /* Filtro de opciones excluyentes (Todos / Positivos / Negativos) */
 .segmented {
   display: inline-flex;
@@ -1216,6 +1222,10 @@ a {
 
 .modal--lg {
   max-width: 720px;
+}
+
+.modal--xl {
+  max-width: 1080px;
 }
 
 .modal__header {

@@ -7,7 +7,7 @@ interface ModalProps {
   description?: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   children?: ReactNode;
   /** Evita cerrar con Esc o clic afuera mientras se procesa algo. */
   locked?: boolean;

@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.3.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo módulo: análisis de extractos bancarios de Coopcentral en PDF.",
+      "Separa créditos y débitos según la columna del extracto y agrupa por concepto exacto.",
+      "Valida que saldo inicial + créditos − débitos coincida con el saldo final y con la secuencia de saldos.",
+      "Búsqueda, filtros, detalle de cada grupo y exportación a Excel."
+    ]
+  },
+  {
     "version": "1.2.0",
     "date": "2026-09-28",
     "notes": [

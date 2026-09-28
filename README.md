@@ -18,6 +18,7 @@ Primer módulo funcional: **Certificados → Certificado de retención**.
 | `npm run app:dev` | Abre la app en modo desarrollo. |
 | `npm test` | Pruebas de cálculos (certificado de retención y análisis de extractos). |
 | `BANCOLOMBIA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Prueba el parser con extractos reales de Bancolombia (varios archivos separados por `:`). Los PDF no se guardan en el repositorio. |
+| `COOPCENTRAL_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Coopcentral. |
 | `cd src-tauri && cargo test` | Pruebas de Rust: migraciones, backups, conservación de datos al actualizar, lectura de Excel. |
 | `npm run app:build` | Compila `.app` y `.dmg` (requiere la clave de firma del actualizador; ver abajo). |
 | `npm run version:bump -- minor` | Sube la versión (`patch` / `minor` / `major` / `X.Y.Z`). |
@@ -71,7 +72,8 @@ src/
 │   ├── bank-analysis/      Análisis de extractos bancarios
 │   │   ├── shared/         pdf/ (texto con coordenadas y filas), agrupación, validación,
 │   │   │                   resumen, exportación a Excel y componentes de resultados
-│   │   └── bancolombia/    parser/ del formato Bancolombia (+ pruebas) y su página
+│   │   ├── bancolombia/    parser/ del formato Bancolombia (+ pruebas) y su página
+│   │   └── coopcentral/    parser/, services/, components/ y página del formato Coopcentral
 │   ├── social-security/    (próximamente)
 │   ├── certificates/
 │   │   └── withholding/    Certificado de retención
@@ -133,7 +135,16 @@ Atajos: `⌘O` importar Excel (en el certificado), `⌘S` generar PDF (en la vis
 - Controles: saldo anterior + valor = saldo de cada fila; total positivo = TOTAL ABONOS; total negativo = TOTAL CARGOS; saldo final = SALDO ACTUAL; suma de grupos = suma de movimientos. Si algo no cuadra se advierte y no se marca como validado; los datos no se alteran.
 - Exporta a Excel (hojas Resumen y Movimientos) con el diálogo nativo.
 
-**Agregar un banco:** poner su logo en `Logos/` con el nombre exacto (ej. `Davivienda.png`), declarar `logo: "Davivienda.png"` y el `component` en el submódulo de `src/modules/bank-analysis/index.ts`, y escribir su parser en `src/modules/bank-analysis/<banco>/` produciendo un `ParsedStatement`. La agrupación, validación, resumen, interfaz y exportación se reutilizan.
+## Análisis de extractos — Coopcentral
+
+- Formato de dos columnas: **CREDITOS** (entra dinero) y **DEBITOS** (sale dinero). El tipo lo decide la columna que trae el valor, nunca el texto del concepto. No se usa el modelo `VALOR` con signo de Bancolombia: parser, agrupación, validación y exportación propios en `coopcentral/`.
+- Columnas ubicadas con el encabezado de cada página: las de texto (CONCEPTO, DOCT, OFICINA, F.APLI, F.OPER, TRANS. ELECTRONICA) están alineadas a la izquierda bajo su título; los importes, a la derecha. El concepto es solo la columna CONCEPTO (`TRETN`, `AJUST`, números de voucher… son DOCT).
+- `SALDO INICIAL` y `SALDO FINAL` no son movimientos: dan los saldos de apertura y cierre. El bloque `TOTALES DEL PERIODO` corta la tabla de cada página y solo se usa como control informativo.
+- Agrupación estricta por concepto exacto + tipo; un concepto con créditos y débitos da dos grupos. Neto = total créditos − total débitos.
+- Una fila con valor en CREDITOS y DEBITOS a la vez es una **anomalía**: no se clasifica ni se suma y se muestra para revisión. Una fila 0/0 que no es de saldo se reporta.
+- Controles: saldo inicial + créditos − débitos = saldo final (obligatorio para validar), secuencia de saldos fila a fila, suma de grupos, y comparación informativa con el bloque de totales (Consignaciones + Notas Crédito + Intereses Recibidos; Retiros + Notas Débito + Retención + GMF).
+
+**Agregar un banco:** poner su logo en `Logos/` con el nombre exacto (ej. `Davivienda.png`), declarar `logo: "Davivienda.png"` y el `component` en el submódulo de `src/modules/bank-analysis/index.ts`, y escribir su parser en `src/modules/bank-analysis/<banco>/`. Si el extracto usa una columna VALOR con signo, produce un `ParsedStatement` y reutiliza agrupación, validación, resumen, interfaz y exportación de `shared/`. Si usa columnas separadas de créditos y débitos, sigue el modelo de `coopcentral/`. En ambos casos se comparten el flujo de importación (`useStatementImport`), la tarjeta del archivo, la lectura del PDF, los controles de tabla y el guardado del Excel.
 
 ---
 

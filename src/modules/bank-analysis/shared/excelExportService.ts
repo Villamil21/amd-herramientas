@@ -60,10 +60,12 @@ export function suggestedExportName(statement: ParsedStatement, pdfFileName: str
   return `Analisis_${pdfFileName.replace(/\.pdf$/i, "")}`;
 }
 
+/** Guarda hojas ya construidas con el diálogo nativo. Devuelve la ruta o null si se cancela. */
+export function saveExcelSheets(sheets: ExportSheet[], suggestedName: string) {
+  return call<string | null>("save_excel", { sheets, suggestedName });
+}
+
 /** Diálogo nativo para guardar. Devuelve la ruta o null si se cancela. */
 export function exportStatementExcel(statement: ParsedStatement, groups: MovementGroup[], pdfFileName: string) {
-  return call<string | null>("save_excel", {
-    sheets: buildExportSheets(statement, groups),
-    suggestedName: suggestedExportName(statement, pdfFileName),
-  });
+  return saveExcelSheets(buildExportSheets(statement, groups), suggestedExportName(statement, pdfFileName));
 }

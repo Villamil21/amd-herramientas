@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Search } from "lucide-react";
-import { Card, Input } from "../../../../components/ui";
+import { Card } from "../../../../components/ui";
 import { formatInteger, formatMoneyCents } from "../../../../utils/format";
 import { sortGroups, type GroupSortKey, type SortDirection } from "../groupingService";
 import type { MovementGroup, Sign } from "../types";
 import { GroupDetailModal } from "./GroupDetailModal";
 import { SignLabel } from "./SignLabel";
+import { SearchBox, SegmentedFilter, SortableTh } from "./tableControls";
 
 type Filter = "all" | Sign;
 
@@ -33,18 +33,9 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
   const toggleSort = (key: GroupSortKey) =>
     setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "description" ? "asc" : "desc" }));
 
-  const header = (key: GroupSortKey, label: string, numeric = false) => {
-    const active = sort.key === key;
-    const Arrow = sort.direction === "asc" ? ArrowUp : ArrowDown;
-    return (
-      <th className={numeric ? "num" : undefined} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-        <button className={`th-sort ${active ? "is-active" : ""}`} onClick={() => toggleSort(key)}>
-          {label}
-          {active && <Arrow size={12} />}
-        </button>
-      </th>
-    );
-  };
+  const header = (key: GroupSortKey, label: string, numeric = false) => (
+    <SortableTh label={label} active={sort.key === key} direction={sort.direction} numeric={numeric} onToggle={() => toggleSort(key)} />
+  );
 
   return (
     <Card
@@ -53,17 +44,8 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
       description="Agrupados por descripción exacta y signo del valor. Haz clic en un grupo para ver sus movimientos."
       actions={
         <>
-          <div className="search">
-            <Search size={14} />
-            <Input placeholder="Buscar descripción..." value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          <div className="segmented" role="group" aria-label="Filtrar por tipo">
-            {FILTERS.filter((f) => f.id !== "zero" || hasZero).map((f) => (
-              <button key={f.id} className={filter === f.id ? "is-active" : undefined} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <SearchBox placeholder="Buscar descripción..." value={query} onChange={setQuery} />
+          <SegmentedFilter label="Filtrar por tipo" options={FILTERS.filter((f) => f.id !== "zero" || hasZero)} value={filter} onChange={setFilter} />
         </>
       }
     >
