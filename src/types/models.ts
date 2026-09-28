@@ -8,9 +8,35 @@ export interface Company {
   correo: string;
   infoAdicional: string;
   logoFile: string | null;
+  dv: string;
+  subscribedTotalShares: number | null;
+  subscribedNominalValue: number | null;
+  paidTotalShares: number | null;
+  paidNominalValue: number | null;
+  shareholders: Shareholder[];
   createdAt: string;
   updatedAt: string;
 }
+
+export interface Shareholder {
+  id?: number;
+  name: string;
+  identityDocument: string;
+  percentage: number;
+  sortOrder: number;
+}
+
+export interface CertificateSigner {
+  id: number;
+  name: string;
+  role: string;
+  professionalDocument: string;
+  signatureFile: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CertificateSignerInput = Omit<CertificateSigner, "id" | "createdAt" | "updatedAt">;
 
 export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt">;
 

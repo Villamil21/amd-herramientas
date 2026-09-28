@@ -134,6 +134,12 @@ fn company_input(c: &Company) -> CompanyInput {
         correo: c.correo.clone(),
         info_adicional: c.info_adicional.clone(),
         logo_file: None,
+        dv: c.dv.clone(),
+        subscribed_total_shares: c.subscribed_total_shares,
+        subscribed_nominal_value: c.subscribed_nominal_value,
+        paid_total_shares: c.paid_total_shares,
+        paid_nominal_value: c.paid_nominal_value,
+        shareholders: c.shareholders.clone(),
     }
 }
 
@@ -210,6 +216,12 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, file: &BackupFile) -> Ap
                     correo: v.correo,
                     info_adicional: v.info_adicional,
                     logo_file: logo.clone(),
+                    dv: v.dv,
+                    subscribed_total_shares: v.subscribed_total_shares,
+                    subscribed_nominal_value: v.subscribed_nominal_value,
+                    paid_total_shares: v.paid_total_shares,
+                    paid_nominal_value: v.paid_nominal_value,
+                    shareholders: v.shareholders,
                     created_at: c.company.created_at.clone(),
                     updated_at: c.company.updated_at.clone(),
                 },
@@ -281,6 +293,12 @@ mod tests {
                 correo: String::new(),
                 info_adicional: String::new(),
                 logo_file: Some(logo.clone()),
+                dv: "1".into(),
+                subscribed_total_shares: None,
+                subscribed_nominal_value: None,
+                paid_total_shares: None,
+                paid_nominal_value: None,
+                shareholders: vec![],
             },
         )
         .unwrap();

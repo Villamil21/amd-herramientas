@@ -53,7 +53,7 @@ function book(...rows: RowSpec[]): Workbook {
 
 const company: Company = {
   id: 1, razonSocial: "EMISORA DE PRUEBA", nit: "800000001", direccion: "Calle 1", ciudad: "Cali",
-  telefono: "300", correo: "", infoAdicional: "", logoFile: null, createdAt: "", updatedAt: "",
+  telefono: "300", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, shareholders: [], createdAt: "", updatedAt: "",
 };
 
 const ica: CertificateConceptLine = {

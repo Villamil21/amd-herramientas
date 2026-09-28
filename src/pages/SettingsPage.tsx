@@ -18,6 +18,7 @@ export function SettingsPage() {
       <div className="tile-grid">
         <ModuleTile title="Empresas" description="Empresas emisoras, sus datos y logos." available hideStatus meta="Administrar" onOpen={() => navigate(paths.companies)} />
         <ModuleTile title="Conceptos de retención" description="Conceptos, tipos y tarifas predeterminadas." available hideStatus meta="Administrar" onOpen={() => navigate(paths.concepts)} />
+        <ModuleTile title="Firmas" description="Firmantes e imágenes PNG reutilizables en certificados." available hideStatus meta="Administrar" onOpen={() => navigate(paths.signers)} />
       </div>
 
       <BackupSection />

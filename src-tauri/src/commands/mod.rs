@@ -7,6 +7,7 @@ pub mod companies;
 pub mod concepts;
 pub mod files;
 pub mod statements;
+pub mod signers;
 
 use std::path::PathBuf;
 

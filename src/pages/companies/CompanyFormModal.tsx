@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ImagePlus, Trash2 } from "lucide-react";
+import { ImagePlus, Plus, Trash2 } from "lucide-react";
 import { Alert, Button, Field, Input, Modal, Textarea, useToast } from "../../components/ui";
 import { LogoThumb } from "../../components/LogoThumb";
 import { companyService, getLogoDataUrl } from "../../services/companyService";
 import type { Company, CompanyInput } from "../../types/models";
 
 const EMPTY: CompanyInput = {
-  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null,
+  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, shareholders: [],
 };
 
 interface Props {
@@ -141,6 +141,9 @@ export function CompanyFormModal({ open, company, onClose, onSaved }: Props) {
           <Field label="NIT" required error={errors.nit}>
             {(id) => <Input id={id} value={values.nit} onChange={set("nit")} invalid={!!errors.nit} placeholder="900123456" />}
           </Field>
+          <Field label="DV" hint="Dígito de verificación">
+            {(id) => <Input id={id} value={values.dv} onChange={set("dv")} placeholder="1" />}
+          </Field>
           <Field label="Ciudad" hint="Se usa como «Consignado en» en los certificados.">
             {(id) => <Input id={id} value={values.ciudad} onChange={set("ciudad")} />}
           </Field>
@@ -156,6 +159,25 @@ export function CompanyFormModal({ open, company, onClose, onSaved }: Props) {
           <Field label="Información adicional" className="span-2">
             {(id) => <Textarea id={id} value={values.infoAdicional} onChange={set("infoAdicional")} rows={3} />}
           </Field>
+        </div>
+        <div className="stack stack--sm">
+          <div className="field__label">Capital suscrito</div>
+          <div className="form-grid">
+            <Field label="Número total de acciones">{id => <Input id={id} type="number" min="1" value={values.subscribedTotalShares ?? ""} onChange={e => setValues(v => ({ ...v, subscribedTotalShares: e.target.value ? Number(e.target.value) : null }))}/>}</Field>
+            <Field label="Valor nominal">{id => <Input id={id} type="number" min="1" value={values.subscribedNominalValue ?? ""} onChange={e => setValues(v => ({ ...v, subscribedNominalValue: e.target.value ? Number(e.target.value) : null }))}/>}</Field>
+          </div>
+          <div className="field__hint">Valor total: {values.subscribedTotalShares && values.subscribedNominalValue ? new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(values.subscribedTotalShares * values.subscribedNominalValue) : "—"}</div>
+          <div className="field__label">Capital pagado</div>
+          <div className="form-grid">
+            <Field label="Número total de acciones">{id => <Input id={id} type="number" min="1" value={values.paidTotalShares ?? ""} onChange={e => setValues(v => ({ ...v, paidTotalShares: e.target.value ? Number(e.target.value) : null }))}/>}</Field>
+            <Field label="Valor nominal">{id => <Input id={id} type="number" min="1" value={values.paidNominalValue ?? ""} onChange={e => setValues(v => ({ ...v, paidNominalValue: e.target.value ? Number(e.target.value) : null }))}/>}</Field>
+          </div>
+          <div className="field__hint">Valor total: {values.paidTotalShares && values.paidNominalValue ? new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(values.paidTotalShares * values.paidNominalValue) : "—"}</div>
+        </div>
+        <div className="stack stack--sm">
+          <div className="row row--between"><div className="field__label">Socios / accionistas</div><Button size="sm" variant="secondary" icon={<Plus size={14}/>} onClick={() => setValues(v => ({ ...v, shareholders: [...v.shareholders, { name: "", identityDocument: "", percentage: 0, sortOrder: v.shareholders.length }] }))}>Agregar socio</Button></div>
+          {values.shareholders.map((s, index) => <div className="form-grid" key={index}><Field label={`Accionista ${index + 1}`}>{id => <Input id={id} value={s.name} onChange={e => setValues(v => ({...v, shareholders:v.shareholders.map((x,i)=>i===index?{...x,name:e.target.value}:x)}))}/>}</Field><Field label="Documento">{id => <Input id={id} value={s.identityDocument} onChange={e => setValues(v => ({...v, shareholders:v.shareholders.map((x,i)=>i===index?{...x,identityDocument:e.target.value}:x)}))}/>}</Field><Field label="Porcentaje">{id => <Input id={id} type="number" value={s.percentage || ""} onChange={e => setValues(v => ({...v, shareholders:v.shareholders.map((x,i)=>i===index?{...x,percentage:Number(e.target.value)}:x)}))}/>}</Field><Button size="sm" variant="ghost" icon={<Trash2 size={14}/>} onClick={() => setValues(v=>({...v,shareholders:v.shareholders.filter((_,i)=>i!==index).map((x,i)=>({...x,sortOrder:i}))}))}>Quitar</Button></div>)}
+          <div className="field__hint">Participación total: {values.shareholders.reduce((sum, s) => sum + (s.percentage || 0), 0)}%. Debe sumar 100% para generar el certificado.</div>
         </div>
         <button type="submit" hidden />
       </form>

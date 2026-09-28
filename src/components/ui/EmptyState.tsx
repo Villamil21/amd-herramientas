@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 interface Props {
-  icon: ReactNode;
+  icon?: ReactNode;
   title: string;
   description?: ReactNode;
   action?: ReactNode;

@@ -20,11 +20,10 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: include_str!("../../migrations/001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration { version: 1, name: "initial", sql: include_str!("../../migrations/001_initial.sql") },
+    Migration { version: 2, name: "shareholder_certificates", sql: include_str!("../../migrations/002_shareholder_certificates.sql") },
+];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(

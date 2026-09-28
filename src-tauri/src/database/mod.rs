@@ -3,6 +3,7 @@
 pub mod companies;
 pub mod concepts;
 pub mod migrations;
+pub mod signers;
 
 use std::path::Path;
 use std::sync::Mutex;

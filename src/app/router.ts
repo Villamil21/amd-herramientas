@@ -41,5 +41,6 @@ export const paths = {
   provider: (moduleId: string, subId: string, providerId: string) => `/herramientas/${moduleId}/${subId}/${providerId}`,
   companies: "/empresas",
   concepts: "/conceptos",
+  signers: "/firmas",
   settings: "/configuracion",
 };

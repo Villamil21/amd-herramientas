@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { FileBadge2, FileCheck2 } from "lucide-react";
+import { FileBadge2, FileCheck2, TableProperties } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 export const certificatesModule: ModuleDef = {
@@ -8,6 +8,7 @@ export const certificatesModule: ModuleDef = {
   description: "Certificados tributarios generados a partir de la información contable.",
   icon: FileBadge2,
   submodules: [
+    { id: "composicion-accionaria", name: "Composición Accionaria", description: "Certificado de capital y participación de accionistas.", icon: TableProperties, component: lazy(() => import("./composition/CompositionCertificatePage")) },
     {
       id: "retencion",
       name: "Certificado de retención",
