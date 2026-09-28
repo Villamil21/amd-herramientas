@@ -64,7 +64,7 @@ export function BackupSection() {
           <div>
             <strong>Exportar datos</strong>
             <p className="muted" style={{ fontSize: 13 }}>
-              Genera un archivo .json con empresas (incluidos sus logos), conceptos y configuración.
+              Genera un archivo .json con empresas (incluidos sus logos), conceptos, firmantes (incluidas sus firmas PNG) y configuración.
             </p>
           </div>
           <Button icon={<Download size={15} />} onClick={() => void exportData()} loading={exporting}>
@@ -108,11 +108,13 @@ export function BackupSection() {
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 <li>{pending.companies} empresas</li>
                 <li>{pending.concepts} conceptos</li>
+                {pending.signers !== null && <li>{pending.signers} firmantes (con sus firmas PNG)</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>
-                Las empresas, conceptos y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia automática antes de
-                continuar.
+                {pending.signers !== null ? "Las empresas, conceptos, firmantes y configuración" : "Las empresas, conceptos y configuración"}{" "}
+                actuales <strong>se reemplazarán</strong>. Se guardará una copia automática antes de continuar.
+                {pending.signers === null && " Este backup no incluye firmantes: se conservan los actuales."}
               </span>
             </div>
           )

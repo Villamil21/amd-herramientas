@@ -13,6 +13,9 @@ pub struct CertificateSigner {
     pub signature_file: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Calculado al leer: el PNG existe en el almacenamiento de firmas. No se guarda en SQLite.
+    #[serde(default)]
+    pub signature_available: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]

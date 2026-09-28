@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.7.1",
+    "date": "2026-09-28",
+    "notes": [
+      "Corregido: las firmas PNG ya no se pierden al cerrar y volver a abrir la aplicación. Se guardan como copia propia dentro de los datos de la app, así que borrar o mover el archivo original no las afecta.",
+      "Si un firmante perdió su firma por este error, aparece como «Firma faltante»: vuelve a cargar su PNG una sola vez.",
+      "Composición Accionaria indica claramente cuándo la firma de un firmante no está disponible.",
+      "Las copias de seguridad ahora incluyen los firmantes con sus firmas PNG."
+    ]
+  },
+  {
     "version": "1.7.0",
     "date": "2026-09-28",
     "notes": [

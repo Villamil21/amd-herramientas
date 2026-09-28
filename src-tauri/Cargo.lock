@@ -34,11 +34,12 @@ dependencies = [
 
 [[package]]
 name = "amd-herramientas"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "base64 0.22.1",
  "calamine",
  "getrandom 0.3.4",
+ "png 0.17.16",
  "rusqlite",
  "rust_xlsxwriter",
  "serde",

@@ -34,9 +34,11 @@ export interface CertificateSigner {
   signatureFile: string;
   createdAt: string;
   updatedAt: string;
+  /** El PNG existe en el almacenamiento persistente de firmas. */
+  signatureAvailable: boolean;
 }
 
-export type CertificateSignerInput = Omit<CertificateSigner, "id" | "createdAt" | "updatedAt">;
+export type CertificateSignerInput = Omit<CertificateSigner, "id" | "createdAt" | "updatedAt" | "signatureAvailable">;
 
 export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt">;
 
@@ -86,4 +88,6 @@ export interface BackupSummary {
   companies: number;
   concepts: number;
   settings: number;
+  /** null: backup anterior a las firmas; al restaurarlo se conservan los firmantes actuales. */
+  signers: number | null;
 }

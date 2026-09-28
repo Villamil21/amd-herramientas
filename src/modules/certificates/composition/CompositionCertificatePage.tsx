@@ -19,6 +19,7 @@ export default function CompositionCertificatePage() {
   const [signerId, setSignerId] = useState<number | null>(() => readId(LAST_SIGNER));
   const [logo, setLogo] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  const [signatureMissing, setSignatureMissing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +31,20 @@ export default function CompositionCertificatePage() {
   useEffect(() => { saveId(LAST_COMPANY, companyId); }, [companyId]);
   useEffect(() => { saveId(LAST_SIGNER, signerId); }, [signerId]);
   useEffect(() => { setLogo(null); if (company?.logoFile) void getLogoDataUrl(company.logoFile).then(setLogo); }, [company?.logoFile]);
-  useEffect(() => { setSignature(null); if (signer) void signerService.dataUrl(signer.signatureFile).then(setSignature); }, [signer?.signatureFile]);
+  // Se lee siempre del almacenamiento persistente; no depende de la sesión en que se cargó la firma.
+  useEffect(() => {
+    let current = true;
+    setSignature(null); setSignatureMissing(false);
+    if (signer?.signatureAvailable) {
+      signerService.dataUrl(signer.signatureFile).then(
+        url => { if (!current) return; setSignature(url); setSignatureMissing(!url); },
+        () => { if (current) setSignatureMissing(true); },
+      );
+    }
+    return () => { current = false; };
+  }, [signer?.signatureFile, signer?.signatureAvailable]);
 
-  const errors = validate(company, signer, logo, signature);
+  const errors = validate(company, signer, logo, signature, signatureMissing);
   const doc = useMemo(() => company && signer && logo && signature && errors.length === 0 ? build(company, signer, logo, signature) : null, [company, signer, logo, signature, errors.length]);
   async function generate() {
     if (!doc) return;

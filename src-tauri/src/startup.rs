@@ -8,8 +8,8 @@ use serde::Serialize;
 use crate::database::{self, migrations};
 use crate::error::AppResult;
 use crate::services::backups::{self, KEEP_AUTOMATIC_BACKUPS, PREFIX_BEFORE_IMPORT, PREFIX_BEFORE_MIGRATION};
-use crate::services::logos;
 use crate::services::paths::AppPaths;
+use crate::services::{logos, signatures};
 
 pub const LAST_RUN_VERSION_KEY: &str = "last_run_version";
 
@@ -64,6 +64,16 @@ fn init_inner(paths: &AppPaths, current_version: &str, info: &mut StartupInfo) -
     if info.previous_version.as_deref() != Some(current_version) {
         database::set_setting(&conn, LAST_RUN_VERSION_KEY, current_version)?;
     }
+
+    // Firmas: primero se rescatan las que versiones anteriores guardaban junto a
+    // los logos (la limpieza de logos las borraría) y luego se limpian las
+    // selecciones canceladas. Un firmante sin archivo se conserva como «firma faltante».
+    let signature_files: Vec<String> = conn
+        .prepare("SELECT signature_file FROM certificate_signers")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    signatures::migrate_legacy(&paths.signatures_dir, &paths.logos_dir, &signature_files);
+    signatures::remove_orphans(&paths.signatures_dir, &signature_files);
 
     // Limpieza controlada: logos subidos en formularios que se cancelaron.
     let referenced: Vec<String> = conn
@@ -121,6 +131,37 @@ mod tests {
 
         let (_, info) = init(&paths, "1.1.0");
         assert!(!info.updated, "el segundo arranque de la misma versión no es una actualización");
+        std::fs::remove_dir_all(&paths.data_dir).unwrap();
+    }
+
+    /// Error corregido: la limpieza de logos borraba las firmas al reiniciar.
+    #[test]
+    fn signatures_survive_restart_and_cancelled_ones_are_cleaned() {
+        let paths = temp_paths("signatures");
+        let conn = init(&paths, "1.7.0").0.unwrap();
+        let png = signatures::tests::png_1px();
+        let saved = signatures::import_from_bytes(&paths.signatures_dir, &png).unwrap();
+        let cancelled = signatures::import_from_bytes(&paths.signatures_dir, &png).unwrap();
+        // Firmante de una versión anterior, con la firma dentro de logos/.
+        let legacy = logos::import_from_bytes(&paths.logos_dir, "png", &png).unwrap();
+        for file in [&saved, &legacy] {
+            conn.execute(
+                "INSERT INTO certificate_signers (name, role, professional_document, signature_file, created_at, updated_at)
+                 VALUES ('Leidy', 'Contadora', 'TP-1', ?1, 'x', 'x')",
+                [file],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        for _ in 0..2 {
+            let conn = init(&paths, "1.7.1").0.unwrap();
+            drop(conn);
+            assert!(signatures::read_valid(&paths.signatures_dir, &saved).is_some());
+            assert!(signatures::read_valid(&paths.signatures_dir, &legacy).is_some(), "firma antigua migrada");
+            assert!(!paths.logos_dir.join(&legacy).exists());
+            assert!(!signatures::is_available(&paths.signatures_dir, &cancelled));
+        }
         std::fs::remove_dir_all(&paths.data_dir).unwrap();
     }
 }

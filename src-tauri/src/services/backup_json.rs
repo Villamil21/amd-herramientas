@@ -1,4 +1,5 @@
-//! Backup portable en JSON: empresas (con logos), conceptos y configuración.
+//! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
+//! PNG) y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -7,11 +8,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts};
+use crate::database::{companies, concepts, signers};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
-use crate::services::logos;
+use crate::models::signer::{CertificateSigner, CertificateSignerInput};
+use crate::services::{logos, signatures};
 use crate::services::time::now_iso;
 use crate::startup::LAST_RUN_VERSION_KEY;
 
@@ -35,6 +37,20 @@ pub struct CompanyBackup {
     pub logo: Option<LogoBlob>,
 }
 
+/// Firmante con su PNG embebido: el backup no depende de rutas de este Mac.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SignerBackup {
+    pub id: i64,
+    pub name: String,
+    pub role: String,
+    pub professional_document: String,
+    pub created_at: String,
+    pub updated_at: String,
+    /// PNG en base64; `None` si la firma ya faltaba al exportar.
+    pub signature_png_base64: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupFile {
@@ -46,6 +62,9 @@ pub struct BackupFile {
     pub concepts: Vec<Concept>,
     #[serde(default)]
     pub settings: BTreeMap<String, String>,
+    /// `None` en backups anteriores a las firmas: al restaurarlos no se tocan los firmantes actuales.
+    #[serde(default)]
+    pub signers: Option<Vec<SignerBackup>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -57,9 +76,11 @@ pub struct BackupSummary {
     pub companies: usize,
     pub concepts: usize,
     pub settings: usize,
+    /// `None` si el backup es anterior a las firmas.
+    pub signers: Option<usize>,
 }
 
-pub fn build(conn: &Connection, logos_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
+pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
     let mut out = Vec::new();
     for company in companies::list(conn, None)? {
         let logo = match &company.logo_file {
@@ -96,7 +117,31 @@ pub fn build(conn: &Connection, logos_dir: &Path, app_version: &str) -> AppResul
         companies: out,
         concepts: concepts::list(conn, None)?,
         settings,
+        signers: Some(
+            signers::list(conn, None)?
+                .into_iter()
+                .map(|s| SignerBackup {
+                    signature_png_base64: signatures::read_valid(signatures_dir, &s.signature_file).map(|b| STANDARD.encode(b)),
+                    id: s.id,
+                    name: s.name,
+                    role: s.role,
+                    professional_document: s.professional_document,
+                    created_at: s.created_at,
+                    updated_at: s.updated_at,
+                })
+                .collect(),
+        ),
     })
+}
+
+fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
+    CertificateSignerInput {
+        name: s.name.clone(),
+        role: s.role.clone(),
+        professional_document: s.professional_document.clone(),
+        // Marcador para validar nombre, cargo y documento; el archivo real se asigna al restaurar.
+        signature_file: "-".into(),
+    }
 }
 
 pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
@@ -120,6 +165,11 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
         concept_input(c)
             .validated()
             .map_err(|e| AppError::user(format!("Concepto «{}» del backup: {}", c.nombre, e.0)))?;
+    }
+    for s in file.signers.iter().flatten() {
+        signer_input(s)
+            .validated()
+            .map_err(|e| AppError::user(format!("Firmante «{}» del backup: {}", s.name, e.0)))?;
     }
     Ok(file)
 }
@@ -160,14 +210,45 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         companies: file.companies.len(),
         concepts: file.concepts.len(),
         settings: file.settings.len(),
+        signers: file.signers.as_ref().map(Vec::len),
     }
 }
 
-/// Reemplaza empresas, conceptos y configuración en una sola transacción.
-pub fn restore(conn: &mut Connection, logos_dir: &Path, file: &BackupFile) -> AppResult<()> {
-    // 1. Escribir logos nuevos (si algo falla después, se eliminan).
+/// Escribe las firmas del backup en el almacenamiento actual. Si una falla, borra las ya escritas.
+fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<Vec<String>> {
+    let mut written: Vec<String> = Vec::new();
+    for s in list {
+        let result = match &s.signature_png_base64 {
+            Some(data) => STANDARD
+                .decode(data)
+                .map_err(|_| AppError::user(format!("La firma de «{}» en el backup está dañada.", s.name)))
+                .and_then(|bytes| signatures::import_from_bytes(signatures_dir, &bytes)),
+            // Ya faltaba al exportar: el firmante se restaura como «firma faltante».
+            None => Ok(String::new()),
+        };
+        match result {
+            Ok(name) => written.push(name),
+            Err(e) => {
+                written.iter().for_each(|n| signatures::remove(signatures_dir, n));
+                return Err(e);
+            }
+        }
+    }
+    Ok(written)
+}
+
+/// Reemplaza empresas, conceptos, firmantes y configuración en una sola transacción.
+pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
+    // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
+    let new_signatures = match &file.signers {
+        Some(list) => write_signatures(signatures_dir, list)?,
+        None => Vec::new(),
+    };
     let mut new_logos: Vec<Option<String>> = Vec::new();
-    let cleanup = |names: &[Option<String>]| names.iter().flatten().for_each(|n| logos::remove(logos_dir, n));
+    let cleanup = |names: &[Option<String>]| {
+        names.iter().flatten().for_each(|n| logos::remove(logos_dir, n));
+        new_signatures.iter().for_each(|n| signatures::remove(signatures_dir, n));
+    };
     for c in &file.companies {
         let name = match &c.logo {
             Some(blob) => {
@@ -191,6 +272,13 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, file: &BackupFile) -> Ap
         .prepare("SELECT logo_file FROM companies WHERE logo_file IS NOT NULL")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
+    let old_signatures: Vec<String> = match &file.signers {
+        Some(_) => conn
+            .prepare("SELECT signature_file FROM certificate_signers")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?,
+        None => Vec::new(),
+    };
 
     // 2. Reemplazar datos en transacción.
     let result = (|| -> AppResult<()> {
@@ -242,6 +330,25 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, file: &BackupFile) -> Ap
                 },
             )?;
         }
+        if let Some(list) = &file.signers {
+            tx.execute("DELETE FROM certificate_signers", [])?;
+            for (s, signature_file) in list.iter().zip(&new_signatures) {
+                let v = signer_input(s).validated()?;
+                signers::insert_full(
+                    &tx,
+                    &CertificateSigner {
+                        id: s.id,
+                        name: v.name,
+                        role: v.role,
+                        professional_document: v.professional_document,
+                        signature_file: signature_file.clone(),
+                        created_at: s.created_at.clone(),
+                        updated_at: s.updated_at.clone(),
+                        signature_available: false,
+                    },
+                )?;
+            }
+        }
         for (k, v) in &file.settings {
             if !INTERNAL_SETTINGS.contains(&k.as_str()) {
                 crate::database::set_setting(&tx, k, v)?;
@@ -254,6 +361,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, file: &BackupFile) -> Ap
     match result {
         Ok(()) => {
             old_logos.iter().for_each(|n| logos::remove(logos_dir, n));
+            old_signatures.iter().for_each(|n| signatures::remove(signatures_dir, n));
             Ok(())
         }
         Err(e) => {
@@ -313,13 +421,34 @@ mod tests {
         )
         .unwrap();
         crate::database::set_setting(&conn, LAST_RUN_VERSION_KEY, "1.0.0").unwrap();
+        let sig_dir = dir.join("signatures");
+        std::fs::create_dir_all(&sig_dir).unwrap();
+        let signature_png = signatures::tests::png_1px();
+        let signature = signatures::import_from_bytes(&sig_dir, &signature_png).unwrap();
+        signers::insert(
+            &conn,
+            &CertificateSignerInput {
+                name: "Leidy Villamil".into(),
+                role: "Contadora Pública".into(),
+                professional_document: "TP-290048".into(),
+                signature_file: signature.clone(),
+            },
+        )
+        .unwrap();
 
-        let backup = build(&conn, &dir, "1.0.0").unwrap();
+        let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
         let json = serde_json::to_vec(&backup).unwrap();
+        assert!(!String::from_utf8_lossy(&json).contains(&*sig_dir.to_string_lossy()), "sin rutas absolutas");
         let parsed = parse(&json).unwrap();
 
-        restore(&mut conn, &dir, &parsed).unwrap();
+        restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        let restored_signers = signers::list(&conn, None).unwrap();
+        assert_eq!(restored_signers.len(), 1);
+        let new_signature = &restored_signers[0].signature_file;
+        assert_ne!(new_signature, &signature);
+        assert_eq!(signatures::read_valid(&sig_dir, new_signature), Some(signature_png));
+        assert!(!sig_dir.join(&signature).exists(), "la firma anterior se elimina");
         let restored = companies::list(&conn, None).unwrap();
         assert_eq!(restored.len(), 1);
         let new_logo = restored[0].logo_file.clone().unwrap();

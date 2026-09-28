@@ -14,7 +14,7 @@ const MAX_BACKUP_BYTES: u64 = 200 * 1024 * 1024;
 #[tauri::command]
 pub async fn export_backup(app: AppHandle, db: State<'_, Db>, state: State<'_, AppState>) -> AppResult<Option<String>> {
     let version = app.package_info().version.to_string();
-    let file = db.with(|c| backup_json::build(c, &state.paths.logos_dir, &version))?;
+    let file = db.with(|c| backup_json::build(c, &state.paths.logos_dir, &state.paths.signatures_dir, &version))?;
     let json = serde_json::to_vec_pretty(&file)?;
 
     let default_name = format!("herramientas-backup-{}.json", &now_compact()[..8]);
@@ -68,7 +68,7 @@ pub fn apply_pending_backup(db: State<'_, Db>, state: State<'_, AppState>) -> Ap
     db.with(|c| {
         backups::snapshot(c, &state.paths.backups_dir, PREFIX_BEFORE_IMPORT, "json")?;
         backups::prune(&state.paths.backups_dir, PREFIX_BEFORE_IMPORT, None, KEEP_AUTOMATIC_BACKUPS)?;
-        backup_json::restore(c, &state.paths.logos_dir, &file)
+        backup_json::restore(c, &state.paths.logos_dir, &state.paths.signatures_dir, &file)
     })
 }
 
