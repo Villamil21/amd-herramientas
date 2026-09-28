@@ -19,6 +19,7 @@ Primer módulo funcional: **Certificados → Certificado de retención**.
 | `npm test` | Pruebas de cálculos (certificado de retención y análisis de extractos). |
 | `BANCOLOMBIA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Prueba el parser con extractos reales de Bancolombia (varios archivos separados por `:`). Los PDF no se guardan en el repositorio. |
 | `COOPCENTRAL_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Coopcentral. |
+| `DAVIVIENDA_PDF="/ruta/extracto.pdf" npx vitest run realPdf` | Igual, con extractos reales de Davivienda. |
 | `cd src-tauri && cargo test` | Pruebas de Rust: migraciones, backups, conservación de datos al actualizar, lectura de Excel. |
 | `npm run app:build` | Compila `.app` y `.dmg` (requiere la clave de firma del actualizador; ver abajo). |
 | `npm run version:bump -- minor` | Sube la versión (`patch` / `minor` / `major` / `X.Y.Z`). |
@@ -73,7 +74,8 @@ src/
 │   │   ├── shared/         pdf/ (texto con coordenadas y filas), agrupación, validación,
 │   │   │                   resumen, exportación a Excel y componentes de resultados
 │   │   ├── bancolombia/    parser/ del formato Bancolombia (+ pruebas) y su página
-│   │   └── coopcentral/    parser/, services/, components/ y página del formato Coopcentral
+│   │   ├── coopcentral/    parser/, services/, components/ y página del formato Coopcentral
+│   │   └── davivienda/     parser/, services/ y página del formato Davivienda (modelo con signo de shared/)
 │   ├── social-security/    (próximamente)
 │   ├── certificates/
 │   │   └── withholding/    Certificado de retención
@@ -143,6 +145,14 @@ Atajos: `⌘O` importar Excel (en el certificado), `⌘S` generar PDF (en la vis
 - Agrupación estricta por concepto exacto + tipo; un concepto con créditos y débitos da dos grupos. Neto = total créditos − total débitos.
 - Una fila con valor en CREDITOS y DEBITOS a la vez es una **anomalía**: no se clasifica ni se suma y se muestra para revisión. Una fila 0/0 que no es de saldo se reporta.
 - Controles: saldo inicial + créditos − débitos = saldo final (obligatorio para validar), secuencia de saldos fila a fila, suma de grupos, y comparación informativa con el bloque de totales (Consignaciones + Notas Crédito + Intereses Recibidos; Retiros + Notas Débito + Retención + GMF).
+
+## Análisis de extractos — Davivienda
+
+- Columnas Fecha | Valor | Doc. | Clase de Movimiento | Oficina. El valor trae el signo al final (`$ 2,900,000.00+`, `$ 742,942.68-`), casi siempre como fragmento aparte; se une al importe. Un valor sin signo se reporta, nunca se supone.
+- Columnas ubicadas con el encabezado de cada página: los títulos están centrados sobre columnas contiguas, así que midiendo dónde empieza la Clase se deducen los límites. La Oficina (letra más pequeña, misma fila) nunca entra en la Clase.
+- Una línea sin fecha, valor ni documento justo debajo de un movimiento continúa su Clase (p. ej. `TRANSFERENCIA TERCEROS`) o su Oficina.
+- Reutiliza el modelo con signo de `shared/` (agrupación por clase exacta + signo, resumen, tabla, detalle); validación y exportación propias.
+- Controles: total positivo = Más Créditos; total negativo = Menos Débitos; Saldo Anterior + Más Créditos − Menos Débitos = Nuevo Saldo; Saldo Anterior + neto = Nuevo Saldo; suma de grupos = suma de movimientos.
 
 **Agregar un banco:** poner su logo en `Logos/` con el nombre exacto (ej. `Davivienda.png`), declarar `logo: "Davivienda.png"` y el `component` en el submódulo de `src/modules/bank-analysis/index.ts`, y escribir su parser en `src/modules/bank-analysis/<banco>/`. Si el extracto usa una columna VALOR con signo, produce un `ParsedStatement` y reutiliza agrupación, validación, resumen, interfaz y exportación de `shared/`. Si usa columnas separadas de créditos y débitos, sigue el modelo de `coopcentral/`. En ambos casos se comparten el flujo de importación (`useStatementImport`), la tarjeta del archivo, la lectura del PDF, los controles de tabla y el guardado del Excel.
 

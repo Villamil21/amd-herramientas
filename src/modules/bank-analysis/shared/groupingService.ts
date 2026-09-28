@@ -32,7 +32,7 @@ export function groupMovements(movements: BankMovement[]): MovementGroup[] {
   return sortGroups([...groups.values()], "description", "asc");
 }
 
-export type GroupSortKey = "description" | "count" | "total";
+export type GroupSortKey = "description" | "sign" | "count" | "total";
 export type SortDirection = "asc" | "desc";
 
 const collator = new Intl.Collator("es", { sensitivity: "variant", numeric: true });
@@ -49,7 +49,13 @@ export function sortGroups(groups: MovementGroup[], key: GroupSortKey, direction
     collator.compare(a.description, b.description) || SIGN_ORDER[a.sign] - SIGN_ORDER[b.sign];
   return [...groups].sort((a, b) => {
     const primary =
-      key === "description" ? collator.compare(a.description, b.description) : key === "count" ? a.count - b.count : a.totalCents - b.totalCents;
+      key === "description"
+        ? collator.compare(a.description, b.description)
+        : key === "sign"
+          ? SIGN_ORDER[a.sign] - SIGN_ORDER[b.sign]
+          : key === "count"
+            ? a.count - b.count
+            : a.totalCents - b.totalCents;
     return dir * primary || byDescription(a, b);
   });
 }

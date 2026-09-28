@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.4.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo módulo: análisis de extractos bancarios de Davivienda en PDF.",
+      "Agrupa los movimientos por clase de movimiento exacta, separando positivos y negativos.",
+      "Valida el resultado contra Más Créditos, Menos Débitos y el Nuevo Saldo del extracto.",
+      "Búsqueda, filtros, orden por tipo, detalle de cada grupo y exportación a Excel."
+    ]
+  },
+  {
     "version": "1.3.0",
     "date": "2026-09-28",
     "notes": [

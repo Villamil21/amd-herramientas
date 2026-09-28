@@ -1,9 +1,10 @@
 import { Modal } from "../../../../components/ui";
 import { formatMoneyCents } from "../../../../utils/format";
 import type { MovementGroup } from "../types";
+import { DEFAULT_GROUP_LABELS, type GroupLabels } from "./groupLabels";
 import { SignLabel } from "./SignLabel";
 
-export function GroupDetailModal({ group, onClose }: { group: MovementGroup | null; onClose: () => void }) {
+export function GroupDetailModal({ group, labels = DEFAULT_GROUP_LABELS, onClose }: { group: MovementGroup | null; labels?: GroupLabels; onClose: () => void }) {
   if (!group) return null;
   const { movements } = group;
   const showBalance = movements.every((m) => m.balanceCents !== undefined);
@@ -33,9 +34,9 @@ export function GroupDetailModal({ group, onClose }: { group: MovementGroup | nu
           <thead>
             <tr>
               <th>Fecha</th>
-              <th>Descripción</th>
-              {showBranch && <th>Sucursal</th>}
-              {showDocument && <th>Dcto.</th>}
+              <th>{labels.description}</th>
+              {showBranch && <th>{labels.branch}</th>}
+              {showDocument && <th>{labels.document}</th>}
               <th className="num">Valor</th>
               {showBalance && <th className="num">Saldo</th>}
               <th className="num">Página</th>

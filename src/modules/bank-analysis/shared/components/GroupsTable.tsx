@@ -4,6 +4,7 @@ import { formatInteger, formatMoneyCents } from "../../../../utils/format";
 import { sortGroups, type GroupSortKey, type SortDirection } from "../groupingService";
 import type { MovementGroup, Sign } from "../types";
 import { GroupDetailModal } from "./GroupDetailModal";
+import { DEFAULT_GROUP_LABELS, type GroupLabels } from "./groupLabels";
 import { SignLabel } from "./SignLabel";
 import { SearchBox, SegmentedFilter, SortableTh } from "./tableControls";
 
@@ -16,7 +17,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "zero", label: "Cero" },
 ];
 
-export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
+export function GroupsTable({ groups, labels = DEFAULT_GROUP_LABELS }: { groups: MovementGroup[]; labels?: GroupLabels }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<{ key: GroupSortKey; direction: SortDirection }>({ key: "description", direction: "asc" });
@@ -31,7 +32,7 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
   }, [groups, query, filter, sort]);
 
   const toggleSort = (key: GroupSortKey) =>
-    setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "description" ? "asc" : "desc" }));
+    setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "description" || key === "sign" ? "asc" : "desc" }));
 
   const header = (key: GroupSortKey, label: string, numeric = false) => (
     <SortableTh label={label} active={sort.key === key} direction={sort.direction} numeric={numeric} onToggle={() => toggleSort(key)} />
@@ -41,10 +42,10 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
     <Card
       flush
       title="Movimientos agrupados"
-      description="Agrupados por descripción exacta y signo del valor. Haz clic en un grupo para ver sus movimientos."
+      description={labels.tableDescription}
       actions={
         <>
-          <SearchBox placeholder="Buscar descripción..." value={query} onChange={setQuery} />
+          <SearchBox placeholder={labels.searchPlaceholder} value={query} onChange={setQuery} />
           <SegmentedFilter label="Filtrar por tipo" options={FILTERS.filter((f) => f.id !== "zero" || hasZero)} value={filter} onChange={setFilter} />
         </>
       }
@@ -53,8 +54,8 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
         <table className="table">
           <thead>
             <tr>
-              {header("description", "Descripción")}
-              <th>Tipo</th>
+              {header("description", labels.description)}
+              {labels.sortableType ? header("sign", "Tipo") : <th>Tipo</th>}
               {header("count", "Cantidad", true)}
               {header("total", "Total", true)}
             </tr>
@@ -80,7 +81,7 @@ export function GroupsTable({ groups }: { groups: MovementGroup[] }) {
           </tbody>
         </table>
       </div>
-      <GroupDetailModal group={selected} onClose={() => setSelected(null)} />
+      <GroupDetailModal group={selected} labels={labels} onClose={() => setSelected(null)} />
     </Card>
   );
 }

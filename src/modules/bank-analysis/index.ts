@@ -25,7 +25,14 @@ export const bankAnalysisModule: ModuleDef = {
       logo: "Coopcentral.png",
       component: lazy(() => import("./coopcentral/CoopcentralStatementPage")),
     },
+    {
+      id: "davivienda",
+      name: "Davivienda",
+      description: "Análisis de extractos bancarios.",
+      icon: Landmark,
+      logo: "Davivienda.png",
+      component: lazy(() => import("./davivienda/DaviviendaStatementPage")),
+    },
     { id: "banco-de-bogota", name: "Banco de Bogotá", description: "Extractos del Banco de Bogotá.", icon: Landmark },
-    { id: "davivienda", name: "Davivienda", description: "Extractos de Davivienda.", icon: Landmark },
   ],
 };

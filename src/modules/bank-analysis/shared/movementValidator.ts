@@ -8,7 +8,7 @@ const MAX_LISTED = 5;
  * cuadra, solo se informa para que el usuario revise.
  */
 export function validateStatement(statement: ParsedStatement, groups: MovementGroup[], summary: StatementSummary): StatementValidation {
-  const checks: ValidationCheck[] = [grouping(statement, groups), balanceChain(statement), ...totals(statement, summary)];
+  const checks: ValidationCheck[] = [groupingCheck(statement, groups), balanceChain(statement), ...totals(statement, summary)];
   if (statement.issues.length > 0) {
     checks.push({
       id: "issues",
@@ -24,7 +24,7 @@ export function validateStatement(statement: ParsedStatement, groups: MovementGr
 }
 
 /** Suma de los grupos = suma de los movimientos individuales (error interno si no). */
-function grouping(statement: ParsedStatement, groups: MovementGroup[]): ValidationCheck {
+export function groupingCheck(statement: ParsedStatement, groups: MovementGroup[]): ValidationCheck {
   const movementsTotal = statement.movements.reduce((s, m) => s + m.valueCents, 0);
   const groupsTotal = groups.reduce((s, g) => s + g.totalCents, 0);
   const groupsCount = groups.reduce((s, g) => s + g.count, 0);

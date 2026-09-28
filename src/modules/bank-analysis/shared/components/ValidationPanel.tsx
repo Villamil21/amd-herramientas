@@ -3,7 +3,18 @@ import type { ParsedStatement, StatementValidation } from "../types";
 
 const MAX_ISSUES = 8;
 
-export function ValidationPanel({ statement, validation }: { statement: ParsedStatement; validation: StatementValidation }) {
+const DEFAULT_VALIDATED = "Los movimientos coinciden con el resumen del extracto y con la secuencia de saldos.";
+
+export function ValidationPanel({
+  statement,
+  validation,
+  validatedMessage = DEFAULT_VALIDATED,
+}: {
+  statement: ParsedStatement;
+  validation: StatementValidation;
+  /** Qué se comprobó, según los controles que ofrece el extracto de cada banco. */
+  validatedMessage?: string;
+}) {
   const passed = validation.checks.filter((c) => c.status === "ok");
   const failed = validation.checks.filter((c) => c.status === "failed");
   const unavailable = validation.checks.filter((c) => c.status === "unavailable");
@@ -11,14 +22,13 @@ export function ValidationPanel({ statement, validation }: { statement: ParsedSt
   if (validation.validated) {
     return (
       <Alert tone="success" title="Extracto validado">
-        Se revisaron {statement.pageCount} {statement.pageCount === 1 ? "página" : "páginas"}. Los movimientos coinciden con el resumen del
-        extracto y con la secuencia de saldos.
+        Se revisaron {statement.pageCount} {statement.pageCount === 1 ? "página" : "páginas"}. {validatedMessage}
         {unavailable.length > 0 && <> No fue posible comprobar: {unavailable.map((c) => c.label).join("; ")}.</>}
       </Alert>
     );
   }
 
-  const summaryMismatch = failed.some((c) => ["credits", "debits", "net", "last-balance", "balances"].includes(c.id));
+  const summaryMismatch = failed.some((c) => ["credits", "debits", "net", "last-balance", "balances", "summary"].includes(c.id));
   const items = [
     ...failed.filter((c) => c.id !== "issues").map((c) => `${c.label}: ${c.detail ?? "no coincide."}`),
     ...statement.issues.slice(0, MAX_ISSUES).map((i) => `Página ${i.page}: «${i.text}». ${i.reason}`),
