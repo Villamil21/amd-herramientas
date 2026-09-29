@@ -8,7 +8,7 @@ export function NotFoundPage() {
       <EmptyState
         icon={<Compass size={20} />}
         title="No encontramos esta sección"
-        action={<Button onClick={() => navigate(paths.home)}>Ir al inicio</Button>}
+        action={<Button onClick={() => navigate(paths.tools)}>Ir a Herramientas</Button>}
       />
     </Card>
   );

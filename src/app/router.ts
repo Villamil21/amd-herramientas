@@ -34,7 +34,6 @@ export function navigate(path: string) {
 }
 
 export const paths = {
-  home: "/",
   tools: "/herramientas",
   module: (moduleId: string) => `/herramientas/${moduleId}`,
   submodule: (moduleId: string, subId: string) => `/herramientas/${moduleId}/${subId}`,

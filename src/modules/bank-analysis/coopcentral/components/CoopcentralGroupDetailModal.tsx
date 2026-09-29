@@ -34,7 +34,7 @@ export function CoopcentralGroupDetailModal({ group, onClose }: { group: Coopcen
       }
       onClose={onClose}
     >
-      <div className="table-wrap group-detail group-detail--nowrap">
+      <div className="table-wrap table-wrap--scroll group-detail group-detail--nowrap">
         <table className="table">
           <thead>
             <tr>

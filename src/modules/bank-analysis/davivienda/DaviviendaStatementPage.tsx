@@ -33,7 +33,7 @@ export default function DaviviendaStatementPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Análisis de extractos bancarios"
+        eyebrow="Extractos bancarios"
         title="Davivienda"
         description="Importa un extracto bancario en PDF para analizar sus movimientos."
         actions={

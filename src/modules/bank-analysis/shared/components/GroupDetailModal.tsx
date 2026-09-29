@@ -29,7 +29,7 @@ export function GroupDetailModal({ group, labels = DEFAULT_GROUP_LABELS, onClose
       }
       onClose={onClose}
     >
-      <div className="table-wrap group-detail">
+      <div className="table-wrap table-wrap--scroll group-detail">
         <table className="table">
           <thead>
             <tr>

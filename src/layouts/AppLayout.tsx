@@ -1,18 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Building2, Download, Home, LayoutGrid, PanelLeftClose, PanelLeftOpen, Percent, Settings } from "lucide-react";
+import { Building2, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Settings, UserRound } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
+import { GlobalSearch } from "../components/GlobalSearch";
 import { Breadcrumbs, type Crumb } from "../components/ui";
 
-const NAV = [
-  { key: "home", label: "Inicio", icon: Home, path: paths.home },
-  { key: "tools", label: "Herramientas", icon: LayoutGrid, path: paths.tools },
-];
+const NAV = [{ key: "tools", label: "Herramientas", icon: LayoutGrid, path: paths.tools }];
 const DATA_NAV = [
   { key: "companies", label: "Empresas", icon: Building2, path: paths.companies },
-  { key: "concepts", label: "Conceptos", icon: Percent, path: paths.concepts },
-  { key: "settings", label: "Configuración", icon: Settings, path: paths.settings },
+  { key: "signers", label: "Firmas", icon: UserRound, path: paths.signers },
+  { key: "concepts", label: "Conceptos", icon: Database, path: paths.concepts },
 ];
+const SYSTEM_NAV = [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }];
 
 const COLLAPSE_KEY = "ui.sidebarCollapsed";
 
@@ -49,8 +48,10 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
       className={`nav-item ${active === n.key ? "is-active" : ""}`}
       onClick={() => navigate(n.path)}
       title={collapsed ? n.label : undefined}
+      aria-label={collapsed ? n.label : undefined}
+      aria-current={active === n.key ? "page" : undefined}
     >
-      <n.icon size={17} strokeWidth={1.8} />
+      <n.icon size={18} strokeWidth={1.8} aria-hidden />
       <span className="nav-item__label">{n.label}</span>
     </button>
   );
@@ -60,20 +61,42 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
       <aside className="sidebar">
         <div className="sidebar__drag" data-tauri-drag-region />
         <div className="sidebar__brand" data-tauri-drag-region>
-          <div className="brand-mark">A</div>
+          {/* Contraído solo queda la marca «A». */}
+          <div className="brand-mark" aria-hidden>
+            A
+          </div>
           <div className="brand-text">
-            AMD <span>Módulos</span>
+            <div className="brand-text__name">
+              AMD <span>Módulos</span>
+            </div>
+            <div className="brand-text__tagline">Datos que generan confianza</div>
           </div>
         </div>
-        <nav className="sidebar__nav">
+        <nav className="sidebar__nav" aria-label="Navegación principal">
           {NAV.map(item)}
           <div className="sidebar__section">Datos</div>
           {DATA_NAV.map(item)}
+          <div className="sidebar__section">Sistema</div>
+          {SYSTEM_NAV.map(item)}
         </nav>
         <div className="sidebar__footer">
-          <span className="sidebar__version">Versión {version}</span>
-          <button className="icon-button" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? "Expandir menú" : "Contraer menú"}>
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          {/* La versión queda visible siempre; contraído se abrevia (v1.9.0) y el texto completo va en el tooltip. */}
+          <span className="sidebar__version" title={`Versión ${version}`}>
+            <span className="sr-only">Versión {version}</span>
+            <span className="sidebar__version-full" aria-hidden>
+              Versión {version}
+            </span>
+            <span className="sidebar__version-short" aria-hidden>
+              v{version}
+            </span>
+          </span>
+          <button
+            className="icon-button"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? "Expandir menú" : "Contraer menú"}
+            title={collapsed ? "Expandir menú" : "Contraer menú"}
+          >
+            {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
           </button>
         </div>
       </aside>
@@ -82,6 +105,7 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
         <header className="topbar" data-tauri-drag-region>
           <Breadcrumbs items={crumbs} />
           <div className="topbar__actions">
+            <GlobalSearch />
             {update && noticeDismissed && (status === "available" || status === "ready") && (
               <button
                 className="pill-button"

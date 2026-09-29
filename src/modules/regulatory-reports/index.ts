@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { FileSpreadsheet, Landmark, ShieldCheck } from "lucide-react";
+import { FileSpreadsheet, FileText, ShieldCheck } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 /**
@@ -10,8 +10,9 @@ import type { ModuleDef } from "../../types/modules";
 export const regulatoryReportsModule: ModuleDef = {
   id: "reportes-regulatorios",
   name: "Reportes regulatorios",
-  description: "Preparación y revisión de reportes para entidades de control.",
-  icon: Landmark,
+  description: "Genera reportes y archivos para organismos reguladores.",
+  icon: FileText,
+  accent: "amber",
   submodules: [
     {
       id: "uiaf",

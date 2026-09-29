@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useToast } from "../../../components/ui";
 import { useShortcut } from "../../../hooks/useShortcut";
+import { activityService, analysisStatus } from "../../../services/activityService";
 import { errorMessage } from "../../../services/tauri";
 import { extractPdfText } from "./pdf/pdfExtractor";
 import type { PdfDocumentText } from "./pdf/pdfTypes";
@@ -51,11 +52,14 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
       try {
         const text = await extractPdfText(picked.data, (page, total) => setState({ status: "analyzing", fileName, pageCount: total, page }));
         pageCount = text.pageCount;
-        setState({ status: "done", fileName, pageCount, analysis: analyze(text) });
+        const analysis = analyze(text);
+        setState({ status: "done", fileName, pageCount, analysis });
+        activityService.record(fileName, analysisStatus(analysis));
       } catch (e) {
         if (!(e instanceof StatementError) && import.meta.env.DEV) console.error(`[${logTag}]`, e);
         const message = e instanceof StatementError ? e.message : fallbackError;
         setState({ status: "error", fileName, pageCount, message });
+        activityService.record(fileName, "error");
       }
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -71,6 +75,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
       const path = await exportExcel(state.analysis, state.fileName);
       if (path) {
         setExportedPath(path);
+        activityService.saved(path);
         toast("Excel exportado.");
       }
     } catch (e) {

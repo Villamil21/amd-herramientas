@@ -20,7 +20,7 @@ export function Stepper({ steps, current, canGoTo, onChange }: Props) {
               <span className="step__num">{i < current ? <Check size={12} strokeWidth={3} /> : i + 1}</span>
               {label}
             </button>
-            {i < steps.length - 1 && <span className="step__line" />}
+            {i < steps.length - 1 && <span className={`step__line ${i < current ? "is-done" : ""}`} aria-hidden />}
           </Fragment>
         );
       })}

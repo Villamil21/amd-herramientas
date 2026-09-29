@@ -32,7 +32,7 @@ export default function IrisBankStatementPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Análisis de extractos bancarios"
+        eyebrow="Extractos bancarios"
         title="Iris Bank"
         description="Importa un extracto bancario en PDF para analizar sus movimientos."
         actions={

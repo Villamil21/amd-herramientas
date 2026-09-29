@@ -21,7 +21,7 @@ export default function BancoomevaStatementPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Análisis de extractos bancarios"
+        eyebrow="Extractos bancarios"
         title="Bancoomeva"
         description="Importa un extracto bancario en PDF para analizar sus movimientos."
         actions={

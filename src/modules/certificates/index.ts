@@ -5,8 +5,9 @@ import type { ModuleDef } from "../../types/modules";
 export const certificatesModule: ModuleDef = {
   id: "certificados",
   name: "Certificados",
-  description: "Certificados tributarios generados a partir de la información contable.",
+  description: "Genera certificados profesionales en PDF con datos ya guardados.",
   icon: FileBadge2,
+  accent: "violet",
   submodules: [
     { id: "composicion-accionaria", name: "Composición Accionaria", description: "Certificado de capital y participación de accionistas.", icon: TableProperties, component: lazy(() => import("./composition/CompositionCertificatePage")) },
     {

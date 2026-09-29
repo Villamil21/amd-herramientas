@@ -9,7 +9,7 @@ const empty: CertificateSignerInput = { name: "", role: "", professionalDocument
 /** "loading" mientras se lee la firma guardada; "missing" si SQLite la referencia pero el archivo ya no está. */
 type SignatureStatus = "none" | "loading" | "ok" | "missing";
 
-const signatureBox = { display: "flex", alignItems: "center", justifyContent: "center", minHeight: 110, padding: 12, border: "1px solid var(--border, #E3E5EA)", borderRadius: 10, background: "#fff" } as const;
+const signatureBox = { display: "flex", alignItems: "center", justifyContent: "center", minHeight: 110, padding: 12, border: "1px solid var(--color-border)", borderRadius: 10, background: "var(--color-surface)" } as const;
 
 export function SignersPage() {
   const toast = useToast(); const list = useAsync(() => signerService.list(), []);

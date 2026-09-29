@@ -1,12 +1,13 @@
 import { lazy } from "react";
-import { Landmark } from "lucide-react";
+import { FileChartColumn, Landmark } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 export const bankAnalysisModule: ModuleDef = {
   id: "extractos-bancarios",
-  name: "Análisis de extractos bancarios",
-  description: "Lectura y análisis de extractos por banco.",
-  icon: Landmark,
+  name: "Extractos bancarios",
+  description: "Analiza, valida y concilia extractos bancarios de forma automatizada.",
+  icon: FileChartColumn,
+  accent: "blue",
   submoduleCards: "logo",
   submodules: [
     {

@@ -54,7 +54,7 @@ export function UiafRecordsTable({ groups }: { groups: UiafTypeGroup[] }) {
         />
       }
     >
-      <div className="uiaf-toolbar row row--between">
+      <div className="toolbar row--between">
         <SegmentedFilter
           label="Código Tipo"
           options={tabs.map((g) => ({ id: g.codeType, label: `${g.label} (${formatInteger(g.records.length)})` }))}
@@ -69,7 +69,7 @@ export function UiafRecordsTable({ groups }: { groups: UiafTypeGroup[] }) {
           {query.trim() && ` · ${formatInteger(visible.length)} ${visible.length === 1 ? "coincidencia" : "coincidencias"}`}
         </span>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap table-wrap--scroll">
         <table className="table uiaf-table">
           <thead>
             <tr>

@@ -27,8 +27,8 @@ export function UpdateNotice() {
           <div className="progress__bar" style={{ width: `${Math.round((progress ?? 0.15) * 100)}%` }} />
         </div>
       )}
-      {error && <div style={{ fontSize: 12.5, color: "#fda29b" }}>{error}</div>}
-      {status === "ready" && <div style={{ fontSize: 12.5, opacity: 0.8 }}>Reinicia la aplicación para terminar. Tus datos se conservan.</div>}
+      {error && <div style={{ fontSize: 12.5, color: "var(--color-danger-ink)" }}>{error}</div>}
+      {status === "ready" && <div style={{ fontSize: 12.5, color: "var(--color-muted)" }}>Reinicia la aplicación para terminar. Tus datos se conservan.</div>}
 
       <div className="update-notice__actions">
         {update.notes && status !== "ready" && (

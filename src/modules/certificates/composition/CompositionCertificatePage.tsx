@@ -3,6 +3,7 @@ import { Alert, Button, Card, Field, Loader, PageHeader, Select } from "../../..
 import { useAsync } from "../../../hooks/useAsync";
 import { companyService, getLogoDataUrl } from "../../../services/companyService";
 import { signerService } from "../../../services/signerService";
+import { activityService } from "../../../services/activityService";
 import { fileService } from "../../../services/fileService";
 import { build, formatMoney, formatNumber, validate } from "./model";
 import { renderCompositionPdf } from "./pdf";
@@ -52,7 +53,7 @@ export default function CompositionCertificatePage() {
     try {
       const fresh = build(company!, signer!, logo!, signature!, new Date());
       const path = await fileService.savePdf(await renderCompositionPdf(fresh), fresh.fileName);
-      if (path) setError(`PDF guardado: ${path}`);
+      if (path) { activityService.saved(path, fresh.company.razonSocial); setError(`PDF guardado: ${path}`); }
     } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); }
   }
   if (companies.loading || signers.loading) return <Loader />;

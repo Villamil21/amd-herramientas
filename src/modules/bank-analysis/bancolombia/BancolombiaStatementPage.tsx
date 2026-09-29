@@ -41,7 +41,7 @@ export default function BancolombiaStatementPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Análisis de extractos bancarios"
+        eyebrow="Extractos bancarios"
         title="Bancolombia"
         description="Importa un extracto bancario en PDF para analizar sus movimientos."
         actions={

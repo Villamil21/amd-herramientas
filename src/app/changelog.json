@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.10.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Nuevo diseño visual: interfaz clara con paneles translúcidos y fondo azul suave; tablas, formularios y ventanas se mantienen opacos para leer con comodidad.",
+      "La aplicación abre directamente en Herramientas (se retiró la pantalla Inicio). El menú lateral se organiza en Herramientas, Datos (Empresas, Firmas, Conceptos) y Sistema (Configuración).",
+      "Herramientas muestra los cuatro módulos (Extractos bancarios, Seguridad social, Certificados y Reportes regulatorios) como tarjetas con su color.",
+      "Nueva sección «Actividad reciente»: archivos analizados y Excel o PDF generados, con su estado (Validado, Advertencia, Generado, Error) y acceso directo en Finder. Se guarda solo en este equipo.",
+      "Nuevo buscador en la barra superior (⌘K) para ir a cualquier herramienta, banco, sección o empresa.",
+      "La versión instalada queda siempre visible en la esquina inferior izquierda, también con el menú contraído.",
+      "Si una pantalla falla al mostrarse, aparece un aviso con la opción de volver a Herramientas en lugar de una ventana en blanco."
+    ]
+  },
+  {
     "version": "1.9.0",
     "date": "2026-09-28",
     "notes": [
@@ -12,13 +25,6 @@
     ]
   },
   {
-    "version": "1.9.0",
-    "date": "2026-09-28",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
-    ]
-  },
-  {
     "version": "1.8.2",
     "date": "2026-09-28",
     "notes": [
@@ -26,13 +32,6 @@
       "Las filas se conservan en el orden visual del PDF y con sus valores originales; solo se acepta el orden distinto si están exactamente todos los saldos esperados.",
       "Nuevo control: cada fila ocupa una posición propia (página y línea), para detectar filas leídas dos veces o fuera de orden.",
       "La advertencia «no concilian» solo aparece cuando fallan los débitos, los créditos o el saldo final."
-    ]
-  },
-  {
-    "version": "1.8.2",
-    "date": "2026-09-28",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {

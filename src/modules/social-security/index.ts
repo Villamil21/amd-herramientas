@@ -1,12 +1,13 @@
 import { lazy } from "react";
-import { HeartPulse, ClipboardList } from "lucide-react";
+import { UsersRound, ClipboardList } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 export const socialSecurityModule: ModuleDef = {
   id: "seguridad-social",
   name: "Seguridad social",
-  description: "Resúmenes de planillas de aportes.",
-  icon: HeartPulse,
+  description: "Procesa planillas PILA y obtiene el detalle de aportes por empleado.",
+  icon: UsersRound,
+  accent: "teal",
   submodules: [
     {
       id: "resumen-planilla",

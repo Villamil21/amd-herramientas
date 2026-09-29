@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { DatabaseZap } from "lucide-react";
 import { AppLayout } from "../layouts/AppLayout";
-import { Button, Card, EmptyState, Loader, type Crumb } from "../components/ui";
+import { Button, Card, EmptyState, ErrorBoundary, Loader, type Crumb } from "../components/ui";
 import { appService } from "../services/appService";
 import type { StartupInfo } from "../types/models";
 import { useShortcut } from "../hooks/useShortcut";
@@ -9,7 +9,6 @@ import { findModule } from "./modules";
 import { navigate, paths, useRoute } from "./router";
 import { UpdateNotice } from "./UpdateNotice";
 import { WhatsNewModal } from "./WhatsNewModal";
-import { HomePage } from "../pages/HomePage";
 import { ToolsPage } from "../pages/ToolsPage";
 import { ModulePage } from "../pages/ModulePage";
 import { ProviderSelectPage } from "../pages/ProviderSelectPage";
@@ -20,24 +19,23 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { SignersPage } from "../pages/SignersPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 
-const home: Crumb = { label: "Inicio", onClick: () => navigate(paths.home) };
 const tools: Crumb = { label: "Herramientas", onClick: () => navigate(paths.tools) };
 
 function resolve(segments: string[]) {
   const [section, moduleId, subId, providerId] = segments;
   switch (section) {
+    // La aplicación abre directamente en Herramientas.
     case undefined:
-      return { active: "home", crumbs: [{ label: "Inicio" }], page: <HomePage /> };
     case "herramientas": {
-      if (!moduleId) return { active: "tools", crumbs: [home, { label: "Herramientas" }], page: <ToolsPage /> };
+      if (!moduleId) return { active: "tools", crumbs: [{ label: "Herramientas" }], page: <ToolsPage /> };
       const mod = findModule(moduleId);
       if (!mod) break;
       const modCrumb: Crumb = { label: mod.name, onClick: () => navigate(paths.module(mod.id)) };
-      if (!subId) return { active: "tools", crumbs: [home, tools, { label: mod.name }], page: <ModulePage module={mod} /> };
+      if (!subId) return { active: "tools", crumbs: [tools, { label: mod.name }], page: <ModulePage module={mod} /> };
       const sub = mod.submodules.find((s) => s.id === subId);
       if (!sub) break;
       if (sub.providers && !providerId) {
-        return { active: "tools", crumbs: [home, tools, modCrumb, { label: sub.name }], page: <ProviderSelectPage module={mod} submodule={sub} /> };
+        return { active: "tools", crumbs: [tools, modCrumb, { label: sub.name }], page: <ProviderSelectPage module={mod} submodule={sub} /> };
       }
       const provider = providerId ? sub.providers?.find((p) => p.id === providerId) : undefined;
       if (providerId && !provider) break;
@@ -48,7 +46,7 @@ function resolve(segments: string[]) {
       const Page = target.component;
       return {
         active: "tools",
-        crumbs: [home, tools, modCrumb, ...subCrumbs],
+        crumbs: [tools, modCrumb, ...subCrumbs],
         page: Page ? (
           <Suspense fallback={<Loader />}>
             <Page />
@@ -59,15 +57,15 @@ function resolve(segments: string[]) {
       };
     }
     case "empresas":
-      return { active: "companies", crumbs: [home, { label: "Empresas" }], page: <CompaniesPage /> };
+      return { active: "companies", crumbs: [{ label: "Datos" }, { label: "Empresas" }], page: <CompaniesPage /> };
     case "conceptos":
-      return { active: "concepts", crumbs: [home, { label: "Conceptos de retención" }], page: <ConceptsPage /> };
+      return { active: "concepts", crumbs: [{ label: "Datos" }, { label: "Conceptos de retención" }], page: <ConceptsPage /> };
     case "firmas":
-      return { active: "settings", crumbs: [home, { label: "Firmas" }], page: <SignersPage /> };
+      return { active: "signers", crumbs: [{ label: "Datos" }, { label: "Firmas" }], page: <SignersPage /> };
     case "configuracion":
-      return { active: "settings", crumbs: [home, { label: "Configuración" }], page: <SettingsPage /> };
+      return { active: "settings", crumbs: [{ label: "Sistema" }, { label: "Configuración" }], page: <SettingsPage /> };
   }
-  return { active: "", crumbs: [home, { label: "No encontrado" }], page: <NotFoundPage /> };
+  return { active: "", crumbs: [tools, { label: "No encontrado" }], page: <NotFoundPage /> };
 }
 
 export function App() {
@@ -105,7 +103,10 @@ export function App() {
           />
         </Card>
       ) : (
-        page
+        // key: al navegar a otra ruta se sale del estado de error.
+        <ErrorBoundary key={route.join("/")} action={<Button onClick={() => navigate(paths.tools)}>Volver a Herramientas</Button>}>
+          {page}
+        </ErrorBoundary>
       )}
       {startup && <WhatsNewModal info={startup} />}
       <UpdateNotice />

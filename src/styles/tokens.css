@@ -1,60 +1,87 @@
 /*
- * Sistema visual tomado de AMD Soluciones (davinzifc.github.io/AMD-soluciones):
- * tinta profunda #0D141A + dorado #CFBB66, Sora para títulos y DM Sans para texto.
- * Adaptación a escritorio: navegación oscura como la del sitio y un área de
- * trabajo clara (mist/blanco) cómoda para jornadas largas.
+ * AMD Glass Workspace: bento claro con vidrio muy sutil al estilo macOS.
+ * Paneles y tarjetas semitransparentes con desenfoque discreto; tablas,
+ * formularios y modales casi opacos para no perder contraste.
+ * Los acentos de marca (turquesa, violeta, ámbar) no alcanzan contraste AA
+ * sobre blanco: se usan como fondo suave/marcador y su variante "-ink" para
+ * iconos y texto.
  */
 :root {
-  /* Marca */
-  --color-primary: #cfbb66;
-  --color-primary-hover: #e5d59a;
-  --color-primary-ink: #7d6e27; /* dorado legible sobre fondos claros */
-  --color-primary-soft: rgba(207, 187, 102, 0.14);
-  --color-secondary: #0d141a;
-  --color-secondary-soft: #1d1e20;
+  /* Acción */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-ink: #1d4ed8; /* azul para texto sobre fondos claros */
+  --color-primary-soft: #dbeafe;
+  --color-primary-softer: #eff5ff;
+  --color-primary-border: rgba(37, 99, 235, 0.32);
+  --color-secondary: #102a5c;
+  --color-secondary-soft: #1a3a78;
 
   /* Superficies */
-  --color-background: #f2f3f6;
-  --color-surface: #ffffff;
-  --color-surface-alt: #f7f8fa;
-  --color-sidebar: #0d141a;
-  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
-  --color-sidebar-border: rgba(255, 255, 255, 0.08);
-  --color-sidebar-text: rgba(245, 246, 248, 0.72);
+  --color-background: #f4f8ff;
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-bg-strong: rgba(255, 255, 255, 0.94);
+  --glass-blur: saturate(160%) blur(18px);
+  --color-surface: #ffffff; /* casi opaco: tablas, formularios, modales */
+  --color-surface-alt: #f7faff;
+  --color-surface-hover: #edf3ff;
+  --color-sidebar: rgba(255, 255, 255, 0.72);
+  --color-sidebar-hover: rgba(37, 99, 235, 0.07);
+  --color-sidebar-border: rgba(37, 99, 235, 0.12);
+  --color-sidebar-text: #41557d;
 
   /* Texto */
-  --color-text: #0d141a;
-  --color-text-on-dark: #f5f6f8;
-  --color-muted: #56585e;
-  --color-subtle: #8a8d94;
+  --color-text: #102a5c;
+  --color-text-on-dark: #f8fbff;
+  --color-muted: #5f7092;
+  --color-subtle: #5f7092;
 
   /* Bordes */
-  --color-border: rgba(13, 20, 26, 0.09);
-  --color-border-strong: rgba(13, 20, 26, 0.18);
+  --color-border: rgba(37, 99, 235, 0.15);
+  --color-border-strong: rgba(37, 99, 235, 0.3);
+  --color-input-border: #b9c7e2; /* 3:1 contra blanco para controles */
 
-  /* Estados */
-  --color-danger: #b42318;
-  --color-danger-soft: #fef3f2;
-  --color-warning: #a15c07;
-  --color-warning-soft: #fffaeb;
-  --color-success: #067647;
-  --color-success-soft: #ecfdf3;
-  --color-info: #175cd3;
-  --color-info-soft: #eff8ff;
-  --color-status-on: #17b26a; /* punto de módulo disponible */
-  --color-status-off: #c3c6cc; /* punto de módulo en preparación */
-  --color-sign-negative: #e0605a; /* punto de valores negativos (rojo suave) */
+  /* Acentos */
+  --accent-blue: #2563eb;
+  --accent-blue-ink: #1d4ed8;
+  --accent-blue-soft: #dbeafe;
+  --accent-teal: #14b8a6;
+  --accent-teal-ink: #0f766e;
+  --accent-teal-soft: #ccfbf1;
+  --accent-violet: #8b5cf6;
+  --accent-violet-ink: #6d28d9;
+  --accent-violet-soft: #ede9fe;
+  --accent-amber: #f59e0b;
+  --accent-amber-ink: #b45309;
+  --accent-amber-soft: #fef3c7;
+
+  /* Estados (base = iconos y marcadores; -ink = texto) */
+  --color-danger: #dc2626;
+  --color-danger-ink: #b91c1c;
+  --color-danger-soft: #fef2f2;
+  --color-warning: #f59e0b;
+  --color-warning-ink: #b45309;
+  --color-warning-soft: #fffbeb;
+  --color-success: #059669;
+  --color-success-ink: #047857;
+  --color-success-soft: #ecfdf5;
+  --color-info: #2563eb;
+  --color-info-soft: #eff5ff;
+  --color-neutral-soft: #eef2fa;
+  --color-status-on: #059669; /* punto de módulo disponible */
+  --color-status-off: #c3cde0; /* punto de módulo en preparación */
+  --color-sign-negative: #dc2626; /* punto de valores negativos */
 
   /* Tipografía */
   --font-display: "Sora", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
   --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --text-xs: 11.5px;
-  --text-sm: 12.5px;
+  --text-xs: 12px;
+  --text-sm: 13px;
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
-  --text-2xl: 24px;
+  --text-2xl: 28px;
 
   /* Espaciado */
   --space-1: 4px;
@@ -65,29 +92,50 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  /* Formas */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* Formas: tarjetas 14–18 px */
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 18px;
   --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgba(13, 20, 26, 0.05);
-  --shadow-md: 0 6px 20px rgba(13, 20, 26, 0.08);
-  --shadow-lg: 0 18px 48px rgba(13, 20, 26, 0.18);
-  --focus-ring: 0 0 0 3px rgba(207, 187, 102, 0.45);
+  --shadow-sm: 0 1px 2px rgba(16, 42, 92, 0.04), 0 4px 16px rgba(16, 42, 92, 0.04);
+  --shadow-md: 0 2px 6px rgba(16, 42, 92, 0.05), 0 12px 32px rgba(37, 99, 235, 0.1);
+  --shadow-lg: 0 24px 64px rgba(16, 42, 92, 0.18);
+  --focus-ring: 0 0 0 2px #fff, 0 0 0 4px rgba(37, 99, 235, 0.6);
 
-  /* Movimiento (mismo easing del sitio de referencia) */
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --motion-fast: 0.15s;
+  /* Movimiento: breve y discreto */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 0.18s;
 
   /* Estructura */
-  --sidebar-width: 236px;
-  --sidebar-collapsed: 80px;
+  --sidebar-width: 264px;
+  --sidebar-collapsed: 76px;
   --topbar-height: 52px;
-  --content-max: 1180px;
+  --content-max: 1320px;
+  --control-height: 36px;
+  --target-min: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0s;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Sin transparencia si el sistema lo pide: todo opaco. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: #ffffff;
+    --glass-bg-strong: #ffffff;
+    --color-sidebar: #ffffff;
+    --glass-blur: none;
   }
 }
