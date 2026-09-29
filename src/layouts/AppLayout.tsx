@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Building2, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Settings, UserRound } from "lucide-react";
+import { Building2, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Settings, Store, UserRound } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
@@ -10,6 +10,7 @@ const DATA_NAV = [
   { key: "companies", label: "Empresas", icon: Building2, path: paths.companies },
   { key: "signers", label: "Firmas", icon: UserRound, path: paths.signers },
   { key: "concepts", label: "Conceptos", icon: Database, path: paths.concepts },
+  { key: "suppliers", label: "Proveedores", icon: Store, path: paths.suppliers },
 ];
 const SYSTEM_NAV = [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }];
 

@@ -41,5 +41,6 @@ export const paths = {
   companies: "/empresas",
   concepts: "/conceptos",
   signers: "/firmas",
+  suppliers: "/proveedores",
   settings: "/configuracion",
 };

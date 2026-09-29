@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Building2, Database, Search, Settings, UserRound } from "lucide-react";
+import { Building2, Database, Search, Settings, Store, UserRound } from "lucide-react";
 import { isAvailable, MODULES } from "../app/modules";
 import { navigate, paths } from "../app/router";
 import { useShortcut } from "../hooks/useShortcut";
@@ -32,6 +32,7 @@ function staticResults(): Result[] {
     { key: "companies", label: "Empresas", hint: "Datos", icon: Building2, path: paths.companies },
     { key: "signers", label: "Firmas", hint: "Datos", icon: UserRound, path: paths.signers },
     { key: "concepts", label: "Conceptos", hint: "Datos", icon: Database, path: paths.concepts },
+    { key: "suppliers", label: "Proveedores", hint: "Datos", icon: Store, path: paths.suppliers },
     { key: "settings", label: "Configuración", hint: "Sistema", icon: Settings, path: paths.settings },
   );
   return out;

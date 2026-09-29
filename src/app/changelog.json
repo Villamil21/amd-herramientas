@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.12.0",
+    "date": "2026-09-29",
+    "notes": [
+      "Nuevo módulo: Impuestos → Análisis de IVA de facturas.",
+      "Selecciona una carpeta con facturas electrónicas en PDF (solo esa carpeta, sin subcarpetas) y la aplicación lee todas las facturas en este equipo. Los archivos no se modifican, mueven ni envían.",
+      "De la tabla «Detalles de Productos» (en una o varias páginas) suma por tarifa 0 %, 5 % y 19 % la base («Precio unitario de venta») y el IVA de cada línea.",
+      "Resumen independiente por cada tipo de documento (Factura electrónica de venta, Nota electrónica…): bienes al 5 %, bienes y servicios a la tarifa general y excluidos/exentos/no gravados.",
+      "Valida la suma de bases contra el subtotal y el IVA por líneas contra el IVA total del documento; las diferencias de redondeo se muestran sin alterar los valores.",
+      "Marca para revisión las tarifas no configuradas, los servicios al 5 %, las filas que no se pueden interpretar y las posibles facturas duplicadas (mismo NIT y número). Los PDF que no son facturas se señalan como «No compatible» sin detener el lote.",
+      "Exportación a Excel con las hojas Resumen, Facturas, Proveedores e Incidencias.",
+      "Nueva sección Datos → Proveedores (NIT, razón social y tipo IVA: Compras o Servicios). Los proveedores nuevos se crean desde el análisis con los datos de la factura y se reconocen automáticamente en los próximos meses.",
+      "La copia de seguridad incluye los proveedores. Las copias anteriores se siguen pudiendo restaurar."
+    ]
+  },
+  {
     "version": "1.11.0",
     "date": "2026-09-28",
     "notes": [

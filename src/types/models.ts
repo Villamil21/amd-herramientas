@@ -90,4 +90,23 @@ export interface BackupSummary {
   settings: number;
   /** null: backup anterior a las firmas; al restaurarlo se conservan los firmantes actuales. */
   signers: number | null;
+  /** null: backup anterior a los proveedores; al restaurarlo se conservan los proveedores actuales. */
+  suppliers: number | null;
 }
+
+/** Clasificación tributaria del proveedor para el análisis de IVA. */
+export type VatType = "purchase" | "service";
+
+export const VAT_TYPE_LABEL: Record<VatType, string> = { purchase: "Compras", service: "Servicios" };
+
+export interface Supplier {
+  id: number;
+  /** Solo dígitos, sin dígito de verificación. */
+  nit: string;
+  businessName: string;
+  vatType: VatType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SupplierInput = Omit<Supplier, "id" | "createdAt" | "updatedAt">;

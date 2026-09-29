@@ -10,8 +10,9 @@ import { certificatesModule } from "../modules/certificates";
 import { regulatoryReportsModule } from "../modules/regulatory-reports";
 import { salesOrdersModule } from "../modules/sales-orders";
 import { socialSecurityModule } from "../modules/social-security";
+import { taxesModule } from "../modules/taxes";
 
-export const MODULES: ModuleDef[] = [bankAnalysisModule, socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule];
+export const MODULES: ModuleDef[] = [bankAnalysisModule, socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule];
 
 export function findModule(id: string | undefined) {
   return MODULES.find((m) => m.id === id);

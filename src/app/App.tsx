@@ -17,6 +17,7 @@ import { CompaniesPage } from "../pages/CompaniesPage";
 import { ConceptsPage } from "../pages/ConceptsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { SignersPage } from "../pages/SignersPage";
+import { SuppliersPage } from "../pages/SuppliersPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 
 const tools: Crumb = { label: "Herramientas", onClick: () => navigate(paths.tools) };
@@ -62,6 +63,8 @@ function resolve(segments: string[]) {
       return { active: "concepts", crumbs: [{ label: "Datos" }, { label: "Conceptos de retención" }], page: <ConceptsPage /> };
     case "firmas":
       return { active: "signers", crumbs: [{ label: "Datos" }, { label: "Firmas" }], page: <SignersPage /> };
+    case "proveedores":
+      return { active: "suppliers", crumbs: [{ label: "Datos" }, { label: "Proveedores" }], page: <SuppliersPage /> };
     case "configuracion":
       return { active: "settings", crumbs: [{ label: "Sistema" }, { label: "Configuración" }], page: <SettingsPage /> };
   }

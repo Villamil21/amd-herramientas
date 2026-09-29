@@ -32,6 +32,7 @@ pub fn run() {
                 startup,
                 pending_backup: Mutex::new(None),
                 saved_files: Mutex::new(Vec::new()),
+                invoice_folder: Mutex::new(None),
             });
             Ok(())
         })
@@ -55,6 +56,10 @@ pub fn run() {
             commands::concepts::create_concept,
             commands::concepts::update_concept,
             commands::concepts::delete_concept,
+            commands::suppliers::list_suppliers,
+            commands::suppliers::create_supplier,
+            commands::suppliers::update_supplier,
+            commands::suppliers::delete_supplier,
             commands::files::pick_excel_file,
             commands::files::load_dropped_excel,
             commands::files::save_pdf,
@@ -62,6 +67,8 @@ pub fn run() {
             commands::files::open_saved_file,
             commands::statements::pick_statement_pdf,
             commands::statements::pick_report_txt,
+            commands::invoices::pick_invoice_folder,
+            commands::invoices::read_invoice_pdf,
             commands::backup::export_backup,
             commands::backup::pick_backup_file,
             commands::backup::apply_pending_backup,

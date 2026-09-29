@@ -1,5 +1,5 @@
 //! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
-//! PNG) y configuración.
+//! PNG), proveedores y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,11 +8,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, signers};
+use crate::database::{companies, concepts, signers, suppliers};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
+use crate::models::supplier::{Supplier, SupplierInput};
 use crate::services::{logos, signatures};
 use crate::services::time::now_iso;
 use crate::startup::LAST_RUN_VERSION_KEY;
@@ -65,6 +66,9 @@ pub struct BackupFile {
     /// `None` en backups anteriores a las firmas: al restaurarlos no se tocan los firmantes actuales.
     #[serde(default)]
     pub signers: Option<Vec<SignerBackup>>,
+    /// `None` en backups anteriores a los proveedores: al restaurarlos no se tocan los proveedores actuales.
+    #[serde(default)]
+    pub suppliers: Option<Vec<Supplier>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -78,6 +82,8 @@ pub struct BackupSummary {
     pub settings: usize,
     /// `None` si el backup es anterior a las firmas.
     pub signers: Option<usize>,
+    /// `None` si el backup es anterior a los proveedores.
+    pub suppliers: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -131,7 +137,12 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
                 })
                 .collect(),
         ),
+        suppliers: Some(suppliers::list(conn, None)?),
     })
+}
+
+fn supplier_input(s: &Supplier) -> SupplierInput {
+    SupplierInput { nit: s.nit.clone(), business_name: s.business_name.clone(), vat_type: s.vat_type.clone() }
 }
 
 fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
@@ -170,6 +181,15 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
         signer_input(s)
             .validated()
             .map_err(|e| AppError::user(format!("Firmante «{}» del backup: {}", s.name, e.0)))?;
+    }
+    let mut nits = std::collections::HashSet::new();
+    for s in file.suppliers.iter().flatten() {
+        let v = supplier_input(s)
+            .validated()
+            .map_err(|e| AppError::user(format!("Proveedor «{}» del backup: {}", s.business_name, e.0)))?;
+        if !nits.insert(v.nit.clone()) {
+            return Err(AppError::user(format!("El backup tiene dos proveedores con el NIT {}.", v.nit)));
+        }
     }
     Ok(file)
 }
@@ -211,6 +231,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         concepts: file.concepts.len(),
         settings: file.settings.len(),
         signers: file.signers.as_ref().map(Vec::len),
+        suppliers: file.suppliers.as_ref().map(Vec::len),
     }
 }
 
@@ -237,7 +258,7 @@ fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<V
     Ok(written)
 }
 
-/// Reemplaza empresas, conceptos, firmantes y configuración en una sola transacción.
+/// Reemplaza empresas, conceptos, firmantes, proveedores y configuración en una sola transacción.
 pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
     // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
     let new_signatures = match &file.signers {
@@ -349,6 +370,23 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        if let Some(list) = &file.suppliers {
+            tx.execute("DELETE FROM suppliers", [])?;
+            for s in list {
+                let v = supplier_input(s).validated()?;
+                suppliers::insert_full(
+                    &tx,
+                    &Supplier {
+                        id: s.id,
+                        nit: v.nit,
+                        business_name: v.business_name,
+                        vat_type: v.vat_type,
+                        created_at: s.created_at.clone(),
+                        updated_at: s.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
         for (k, v) in &file.settings {
             if !INTERNAL_SETTINGS.contains(&k.as_str()) {
                 crate::database::set_setting(&tx, k, v)?;
@@ -436,13 +474,19 @@ mod tests {
         )
         .unwrap();
 
+        suppliers::insert(&conn, &SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: "purchase".into() }).unwrap();
+
         let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
         let json = serde_json::to_vec(&backup).unwrap();
         assert!(!String::from_utf8_lossy(&json).contains(&*sig_dir.to_string_lossy()), "sin rutas absolutas");
         let parsed = parse(&json).unwrap();
 
+        suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: "service".into() }).unwrap();
         restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        let restored_suppliers = suppliers::list(&conn, None).unwrap();
+        assert_eq!(restored_suppliers.len(), 1, "los proveedores se reemplazan");
+        assert_eq!((restored_suppliers[0].nit.as_str(), restored_suppliers[0].vat_type.as_str()), ("900319753", "purchase"));
         let restored_signers = signers::list(&conn, None).unwrap();
         assert_eq!(restored_signers.len(), 1);
         let new_signature = &restored_signers[0].signature_file;
@@ -461,6 +505,21 @@ mod tests {
             Some("1.0.0"),
             "las claves internas se conservan"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_backup_without_suppliers_keeps_current_ones() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        suppliers::insert(&conn, &SupplierInput { nit: "900".into(), business_name: "A".into(), vat_type: "purchase".into() }).unwrap();
+        let old = br#"{"format":"amd-herramientas-backup","formatVersion":1,"appVersion":"1.0.0","exportedAt":"x","companies":[],"concepts":[]}"#;
+        let parsed = parse(old).unwrap();
+        assert!(parsed.suppliers.is_none());
+        let dir = std::env::temp_dir().join(format!("amd-json-old-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        restore(&mut conn, &dir, &dir, &parsed).unwrap();
+        assert_eq!(suppliers::list(&conn, None).unwrap().len(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

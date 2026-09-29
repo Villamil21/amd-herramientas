@@ -6,8 +6,10 @@ pub mod backup;
 pub mod companies;
 pub mod concepts;
 pub mod files;
+pub mod invoices;
 pub mod statements;
 pub mod signers;
+pub mod suppliers;
 
 use std::path::PathBuf;
 

@@ -1964,6 +1964,11 @@ a {
   --accent-soft: var(--accent-amber-soft);
 }
 
+.module-card--rose {
+  --accent-ink: var(--accent-rose-ink);
+  --accent-soft: var(--accent-rose-soft);
+}
+
 .module-card__icon {
   color: var(--accent-ink);
 }

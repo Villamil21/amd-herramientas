@@ -54,6 +54,9 @@
   --accent-amber: #f59e0b;
   --accent-amber-ink: #b45309;
   --accent-amber-soft: #fef3c7;
+  --accent-rose: #f43f5e;
+  --accent-rose-ink: #be123c;
+  --accent-rose-soft: #ffe4e6;
 
   /* Estados (base = iconos y marcadores; -ink = texto) */
   --color-danger: #dc2626;

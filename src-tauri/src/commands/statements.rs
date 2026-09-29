@@ -81,7 +81,7 @@ pub async fn pick_report_txt(app: AppHandle, title: Option<String>) -> AppResult
 }
 
 /// La firma %PDF- debe estar en el primer kilobyte (la especificación tolera bytes previos).
-fn is_pdf(bytes: &[u8]) -> bool {
+pub(crate) fn is_pdf(bytes: &[u8]) -> bool {
     bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-")
 }
 

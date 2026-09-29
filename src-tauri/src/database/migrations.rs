@@ -23,6 +23,7 @@ pub struct Migration {
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "initial", sql: include_str!("../../migrations/001_initial.sql") },
     Migration { version: 2, name: "shareholder_certificates", sql: include_str!("../../migrations/002_shareholder_certificates.sql") },
+    Migration { version: 3, name: "suppliers", sql: include_str!("../../migrations/003_suppliers.sql") },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
