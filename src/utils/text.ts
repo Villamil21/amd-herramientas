@@ -7,3 +7,8 @@ export function normalizeKey(value: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/** Copia ordenada alfabéticamente por `name` (español, sin distinguir mayúsculas ni tildes). */
+export function sortByName<T extends { name: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+}

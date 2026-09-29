@@ -1,6 +1,4 @@
 import { FolderOpen } from "lucide-react";
-import { navigate, paths } from "../app/router";
-import { ModuleTile } from "../components/ModuleTile";
 import { Button, Card, PageHeader } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { appService } from "../services/appService";
@@ -13,13 +11,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Configuración" description="Datos compartidos, copias de seguridad y actualizaciones." />
-
-      <div className="tile-grid">
-        <ModuleTile title="Empresas" description="Empresas emisoras, sus datos y logos." available hideStatus meta="Administrar" onOpen={() => navigate(paths.companies)} />
-        <ModuleTile title="Conceptos de retención" description="Conceptos, tipos y tarifas predeterminadas." available hideStatus meta="Administrar" onOpen={() => navigate(paths.concepts)} />
-        <ModuleTile title="Firmas" description="Firmantes e imágenes PNG reutilizables en certificados." available hideStatus meta="Administrar" onOpen={() => navigate(paths.signers)} />
-      </div>
+      <PageHeader eyebrow="Configuración" title="Configuración" description="Copias de seguridad y actualizaciones." />
 
       <BackupSection />
       <AboutSection version={startup?.currentVersion ?? "—"} />

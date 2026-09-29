@@ -3,7 +3,8 @@ import type { DebitCreditSummary } from "../types";
 import { Stat } from "./Stat";
 
 /** Resumen de extractos con columnas de crédito y débito. */
-export function DebitCreditSummaryCards({ summary }: { summary: DebitCreditSummary }) {
+/** finalBalanceCents: SALDO FINAL impreso en el extracto (no el neto); undefined si el PDF no lo trae. */
+export function DebitCreditSummaryCards({ summary, finalBalanceCents }: { summary: DebitCreditSummary; finalBalanceCents: number | undefined }) {
   return (
     <div className="stack stack--sm">
       <div className="stat-row">
@@ -16,6 +17,7 @@ export function DebitCreditSummaryCards({ summary }: { summary: DebitCreditSumma
         <Stat label="Total créditos" value={formatMoneyCents(summary.totalCreditsCents)} tone="positive" />
         <Stat label="Total débitos" value={formatMoneyCents(summary.totalDebitsCents)} tone="negative" />
         <Stat label="Neto" value={formatMoneyCents(summary.netCents)} />
+        <Stat label="Saldo final" value={finalBalanceCents === undefined ? "—" : formatMoneyCents(finalBalanceCents)} />
       </div>
     </div>
   );

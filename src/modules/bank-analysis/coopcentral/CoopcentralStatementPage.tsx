@@ -45,7 +45,7 @@ export default function CoopcentralStatementPage() {
       {state.status === "done" && (
         <>
           <CoopcentralValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <DebitCreditSummaryCards summary={state.analysis.summary} />
+          <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.closingBalanceCents} />
           <CoopcentralGroupsTable groups={state.analysis.groups} />
         </>
       )}

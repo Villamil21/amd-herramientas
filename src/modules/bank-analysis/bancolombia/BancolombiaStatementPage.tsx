@@ -65,7 +65,7 @@ export default function BancolombiaStatementPage() {
       {state.status === "done" && (
         <>
           <ValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <SummaryCards summary={state.analysis.summary} />
+          <SummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.currentBalanceCents} />
           <GroupsTable groups={state.analysis.groups} />
         </>
       )}

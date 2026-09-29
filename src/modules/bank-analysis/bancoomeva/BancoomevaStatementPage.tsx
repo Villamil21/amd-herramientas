@@ -45,7 +45,7 @@ export default function BancoomevaStatementPage() {
       {state.status === "done" && (
         <>
           <BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <DebitCreditSummaryCards summary={state.analysis.summary} />
+          <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
           <BancoomevaGroupsTable groups={state.analysis.groups} />
         </>
       )}

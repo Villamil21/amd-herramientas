@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import { FileChartColumn, Landmark } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
+import { sortByName } from "../../utils/text";
 
 export const bankAnalysisModule: ModuleDef = {
   id: "extractos-bancarios",
@@ -9,7 +10,8 @@ export const bankAnalysisModule: ModuleDef = {
   icon: FileChartColumn,
   accent: "blue",
   submoduleCards: "logo",
-  submodules: [
+  // Orden alfabético automático: un banco nuevo solo se agrega a la lista.
+  submodules: sortByName([
     {
       id: "bancolombia",
       name: "Bancolombia",
@@ -50,6 +52,5 @@ export const bankAnalysisModule: ModuleDef = {
       logo: "Bancoomeva.png",
       component: lazy(() => import("./bancoomeva/BancoomevaStatementPage")),
     },
-    { id: "banco-de-bogota", name: "Banco de Bogotá", description: "Extractos del Banco de Bogotá.", icon: Landmark },
-  ],
+  ]),
 };

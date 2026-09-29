@@ -9,16 +9,9 @@ export function ProviderSelectPage({ module, submodule }: { module: ModuleDef; s
   return (
     <>
       <PageHeader eyebrow={module.name} title={submodule.name} description={submodule.providersDescription ?? "Selecciona el proveedor de la planilla."} />
-      <div className="tile-grid">
+      <div className="bank-grid">
         {(submodule.providers ?? []).map((p) => (
-          <BankCard
-            key={p.id}
-            name={p.name}
-            logo={p.logo}
-            description={p.description}
-            available={isAvailable(p)}
-            onOpen={() => navigate(paths.provider(module.id, submodule.id, p.id))}
-          />
+          <BankCard key={p.id} name={p.name} logo={p.logo} available={isAvailable(p)} onOpen={() => navigate(paths.provider(module.id, submodule.id, p.id))} />
         ))}
       </div>
     </>

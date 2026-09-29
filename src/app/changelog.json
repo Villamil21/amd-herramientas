@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.11.0",
+    "date": "2026-09-28",
+    "notes": [
+      "Extractos bancarios: nueva tarjeta «Saldo final» en el resumen de todos los bancos, con el saldo impreso en el extracto (Saldo actual, Nuevo saldo o Saldo final).",
+      "Selección de banco más simple: logo y nombre centrados, estado en la esquina inferior derecha y bancos en orden alfabético.",
+      "Nuevo buscador «Buscar banco…» en Extractos bancarios.",
+      "Logos de los bancos y de Aportes en Línea actualizados. Se retiró Banco de Bogotá, que no estaba disponible.",
+      "Resumen de planilla: Aportes en Línea y Mi Planilla usan el mismo diseño de tarjeta.",
+      "Composición Accionaria: la empresa y el firmante empiezan siempre sin seleccionar.",
+      "Pantalla Herramientas más limpia: se retiraron el subtítulo y la sección «Actividad reciente».",
+      "Configuración ya no repite los accesos a Empresas, Conceptos y Firmas, que siguen en el menú lateral."
+    ]
+  },
+  {
     "version": "1.10.0",
     "date": "2026-09-28",
     "notes": [

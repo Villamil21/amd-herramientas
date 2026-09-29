@@ -5,7 +5,6 @@ import { useLogo } from "../../../hooks/useLogo";
 import { useShortcut } from "../../../hooks/useShortcut";
 import { companyService } from "../../../services/companyService";
 import { conceptService } from "../../../services/conceptService";
-import { activityService } from "../../../services/activityService";
 import { fileService } from "../../../services/fileService";
 import { errorMessage, isTauri } from "../../../services/tauri";
 import type { Workbook } from "../../../types/excel";
@@ -139,10 +138,7 @@ export default function WithholdingCertificatePage() {
       const doc = buildCertificateDocument({ company, logoDataUrl, analysis, lines, consignadoEn: draft.consignadoEn, generatedAt: new Date() });
       const bytes = await renderWithholdingPdf(doc);
       const path = await fileService.savePdf(bytes, doc.fileName);
-      if (path) {
-        activityService.saved(path, company?.razonSocial);
-        patch({ result: { path, fileName: path.split("/").pop() ?? doc.fileName }, step: STEP.done });
-      }
+      if (path) patch({ result: { path, fileName: path.split("/").pop() ?? doc.fileName }, step: STEP.done });
     } catch (e) {
       setGenerateError(errorMessage(e));
     } finally {

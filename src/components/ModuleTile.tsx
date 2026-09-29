@@ -6,15 +6,13 @@ interface Props {
   description: string;
   meta?: string;
   available: boolean;
-  /** Oculta el indicador de estado (accesos directos). */
-  hideStatus?: boolean;
   onOpen: () => void;
 }
 
-export function ModuleTile({ title, description, meta, available, hideStatus, onOpen }: Props) {
+export function ModuleTile({ title, description, meta, available, onOpen }: Props) {
   return (
     <button className="card tile" onClick={onOpen}>
-      {!hideStatus && <StatusDot available={available} />}
+      <StatusDot available={available} />
       <div>
         <h3>{title}</h3>
         <p>{description}</p>

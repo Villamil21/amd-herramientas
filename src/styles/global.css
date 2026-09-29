@@ -164,12 +164,6 @@ a {
   color: var(--color-primary);
 }
 
-.brand-text__tagline {
-  margin-top: 4px;
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-}
-
 .brand-text span {
   color: var(--color-muted);
   font-weight: 400;
@@ -660,34 +654,99 @@ a {
   gap: 6px;
 }
 
-/* Tarjetas con logo (selección de banco) */
+/* Tarjetas con logo (bancos, proveedores de planilla): logo y nombre centrados, estado abajo a la derecha */
+.bank-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.bank-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: 188px;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease), box-shadow var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+
+.bank-card:hover {
+  border-color: var(--color-primary-border);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
 .bank-card__logo {
-  height: 56px;
+  width: 100%;
+  height: 76px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .bank-card__logo img {
-  max-height: 48px;
-  max-width: 100%;
+  max-width: min(100%, 180px);
+  max-height: 100%;
   object-fit: contain;
   user-select: none;
 }
 
-.bank-card__title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+.bank-card__name {
+  font-size: 16px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
-.bank-card__title .status-dot {
-  align-self: center;
+.bank-card__status {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  place-items: center;
 }
 
-.bank-card p {
-  margin-top: 4px;
+.bank-card .status-dot {
+  width: 10px;
+  height: 10px;
+}
+
+/* Halo lento y suave del estado disponible */
+.status-dot--pulse {
+  position: relative;
+}
+
+.status-dot--pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--color-status-on);
+  animation: status-halo 2.8s ease-out infinite;
+}
+
+@keyframes status-halo {
+  0% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot--pulse::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .stat-row {
@@ -1861,12 +1920,6 @@ a {
   line-height: 1.1;
 }
 
-.tools-hero p {
-  margin-top: 8px;
-  font-size: 20px;
-  color: var(--color-muted);
-}
-
 .module-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1949,142 +2002,6 @@ a {
 
 .module-card:hover .module-card__arrow {
   transform: translateX(3px);
-}
-
-.activity {
-  overflow: hidden;
-}
-
-.activity__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-5) var(--space-6);
-}
-
-.activity__header h2 {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.activity__header h2 svg {
-  color: var(--color-muted);
-}
-
-.activity__empty {
-  padding: 0 var(--space-6) var(--space-6);
-  color: var(--color-muted);
-}
-
-.activity-table th:first-child,
-.activity-table td:first-child {
-  padding-left: var(--space-6);
-}
-
-.activity-table td {
-  padding-top: 12px;
-  padding-bottom: 12px;
-}
-
-.activity-table__file {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 340px;
-}
-
-.activity-table__file > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.activity-table__date {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.file-icon {
-  flex-shrink: 0;
-  color: var(--color-muted);
-}
-
-.file-icon--pdf {
-  color: var(--color-danger);
-}
-
-.file-icon--xlsx {
-  color: var(--color-success);
-}
-
-.pill-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 0 16px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border-strong);
-  background: rgba(255, 255, 255, 0.8);
-  color: var(--color-primary-ink);
-  font-weight: 600;
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: background var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease);
-}
-
-.pill-link:hover {
-  background: var(--color-primary-softer);
-  border-color: var(--color-primary-border);
-}
-
-/* Estado en píldora: punto + texto */
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.status-pill__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.status-pill--validated {
-  background: var(--color-success-soft);
-  color: var(--color-success-ink);
-}
-
-.status-pill--processed {
-  background: var(--color-primary-softer);
-  color: var(--color-primary-ink);
-}
-
-.status-pill--generated {
-  background: var(--accent-violet-soft);
-  color: var(--accent-violet-ink);
-}
-
-.status-pill--warning {
-  background: var(--color-warning-soft);
-  color: var(--color-warning-ink);
-}
-
-.status-pill--error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger-ink);
 }
 
 /* ------------------------------------------------------------------ */

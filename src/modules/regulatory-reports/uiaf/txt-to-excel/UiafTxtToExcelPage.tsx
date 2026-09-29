@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { FileSpreadsheet } from "lucide-react";
 import { Button, PageHeader, useToast } from "../../../../components/ui";
 import { useShortcut } from "../../../../hooks/useShortcut";
-import { activityService, analysisStatus } from "../../../../services/activityService";
 import { errorMessage } from "../../../../services/tauri";
 import { formatInteger } from "../../../../utils/format";
 import { StatementFileCard } from "../../../bank-analysis/shared/components/StatementFileCard";
@@ -41,13 +40,10 @@ export default function UiafTxtToExcelPage() {
       await nextFrame();
       try {
         // Un TXT no tiene páginas: pageCount 0 no se muestra.
-        const analysis = analyzeUiafTxt(picked.data);
-        setState({ status: "done", fileName, pageCount: 0, analysis });
-        activityService.record(fileName, analysisStatus(analysis));
+        setState({ status: "done", fileName, pageCount: 0, analysis: analyzeUiafTxt(picked.data) });
       } catch (e) {
         if (!(e instanceof StatementError) && import.meta.env.DEV) console.error("[uiaf]", e);
         setState({ status: "error", fileName, message: e instanceof StatementError ? e.message : "No fue posible leer el archivo. Verifica que sea un TXT de reporte UIAF." });
-        activityService.record(fileName, "error");
       }
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -63,7 +59,6 @@ export default function UiafTxtToExcelPage() {
       const path = await exportUiafExcel(state.analysis.report, state.fileName);
       if (path) {
         setExportedPath(path);
-        activityService.saved(path);
         toast("Excel generado correctamente.");
       }
     } catch (e) {

@@ -69,7 +69,6 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
             <div className="brand-text__name">
               AMD <span>Módulos</span>
             </div>
-            <div className="brand-text__tagline">Datos que generan confianza</div>
           </div>
         </div>
         <nav className="sidebar__nav" aria-label="Navegación principal">

@@ -6,24 +6,27 @@ interface Props {
   name: string;
   /** Nombre exacto del archivo dentro de Logos/ (ej. "Bancolombia.png"). */
   logo?: string;
-  description: string;
   available: boolean;
   onOpen: () => void;
 }
 
-/** Tarjeta con el logo real de la entidad. Si el logo falta, muestra solo el nombre. */
-export function BankCard({ name, logo, description, available, onOpen }: Props) {
+/**
+ * Tarjeta de selección de entidad (bancos, proveedores de planilla): logo y
+ * nombre centrados, y el estado en la esquina inferior derecha. Si el logo
+ * falta, el nombre queda centrado en la tarjeta.
+ */
+export function BankCard({ name, logo, available, onOpen }: Props) {
   const src = logoUrl(logo);
   const [failed, setFailed] = useState(false);
   const showLogo = Boolean(src) && !failed;
 
   return (
-    <button className="card tile bank-card" onClick={onOpen}>
+    <button className="card bank-card" onClick={onOpen}>
       {showLogo && (
         <div className="bank-card__logo">
           <img
             src={src}
-            alt={`Logo de ${name}`}
+            alt=""
             draggable={false}
             onError={() => {
               setFailed(true);
@@ -32,13 +35,10 @@ export function BankCard({ name, logo, description, available, onOpen }: Props) 
           />
         </div>
       )}
-      <div>
-        <div className="bank-card__title">
-          <h3>{name}</h3>
-          <StatusDot available={available} />
-        </div>
-        {description && <p>{description}</p>}
-      </div>
+      <h3 className="bank-card__name">{name}</h3>
+      <span className="bank-card__status">
+        <StatusDot available={available} pulse />
+      </span>
     </button>
   );
 }
