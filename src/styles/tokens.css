@@ -57,6 +57,9 @@
   --accent-rose: #f43f5e;
   --accent-rose-ink: #be123c;
   --accent-rose-soft: #ffe4e6;
+  --accent-orange: #f97316;
+  --accent-orange-ink: #c2410c;
+  --accent-orange-soft: #ffedd5;
 
   /* Estados (base = iconos y marcadores; -ink = texto) */
   --color-danger: #dc2626;

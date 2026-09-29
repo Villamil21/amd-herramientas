@@ -1,5 +1,5 @@
 //! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
-//! PNG), proveedores y configuración.
+//! PNG), proveedores, clasificación de estados de Dropi y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,10 +8,11 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, signers, suppliers};
+use crate::database::{companies, concepts, dropi, signers, suppliers};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
+use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
 use crate::models::supplier::{Supplier, SupplierInput};
 use crate::services::{logos, signatures};
@@ -69,6 +70,9 @@ pub struct BackupFile {
     /// `None` en backups anteriores a los proveedores: al restaurarlos no se tocan los proveedores actuales.
     #[serde(default)]
     pub suppliers: Option<Vec<Supplier>>,
+    /// Dropi status mappings. `None` en backups anteriores: al restaurarlos no se tocan las reglas actuales.
+    #[serde(default)]
+    pub dropi_status_mappings: Option<Vec<DropiStatusMapping>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -84,6 +88,8 @@ pub struct BackupSummary {
     pub signers: Option<usize>,
     /// `None` si el backup es anterior a los proveedores.
     pub suppliers: Option<usize>,
+    /// `None` si el backup es anterior a la clasificación de estados de Dropi.
+    pub dropi_status_mappings: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -138,11 +144,20 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
                 .collect(),
         ),
         suppliers: Some(suppliers::list(conn, None)?),
+        dropi_status_mappings: Some(dropi::list(conn)?),
     })
 }
 
 fn supplier_input(s: &Supplier) -> SupplierInput {
     SupplierInput { nit: s.nit.clone(), business_name: s.business_name.clone(), vat_type: s.vat_type.clone() }
+}
+
+fn dropi_input(m: &DropiStatusMapping) -> DropiStatusMappingInput {
+    DropiStatusMappingInput {
+        normalized_status: m.normalized_status.clone(),
+        display_status: m.display_status.clone(),
+        category: m.category.clone(),
+    }
 }
 
 fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
@@ -191,6 +206,15 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
             return Err(AppError::user(format!("El backup tiene dos proveedores con el NIT {}.", v.nit)));
         }
     }
+    let mut statuses = std::collections::HashSet::new();
+    for m in file.dropi_status_mappings.iter().flatten() {
+        let v = dropi_input(m)
+            .validated()
+            .map_err(|e| AppError::user(format!("Estado de Dropi «{}» del backup: {}", m.display_status, e.0)))?;
+        if !statuses.insert(v.normalized_status.clone()) {
+            return Err(AppError::user(format!("El backup tiene dos reglas para el estado de Dropi «{}».", v.display_status)));
+        }
+    }
     Ok(file)
 }
 
@@ -232,6 +256,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         settings: file.settings.len(),
         signers: file.signers.as_ref().map(Vec::len),
         suppliers: file.suppliers.as_ref().map(Vec::len),
+        dropi_status_mappings: file.dropi_status_mappings.as_ref().map(Vec::len),
     }
 }
 
@@ -258,7 +283,7 @@ fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<V
     Ok(written)
 }
 
-/// Reemplaza empresas, conceptos, firmantes, proveedores y configuración en una sola transacción.
+/// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi y configuración en una sola transacción.
 pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
     // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
     let new_signatures = match &file.signers {
@@ -387,6 +412,23 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        if let Some(list) = &file.dropi_status_mappings {
+            tx.execute("DELETE FROM dropi_status_mappings", [])?;
+            for m in list {
+                let v = dropi_input(m).validated()?;
+                dropi::insert_full(
+                    &tx,
+                    &DropiStatusMapping {
+                        id: m.id,
+                        normalized_status: v.normalized_status,
+                        display_status: v.display_status,
+                        category: v.category,
+                        created_at: m.created_at.clone(),
+                        updated_at: m.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
         for (k, v) in &file.settings {
             if !INTERNAL_SETTINGS.contains(&k.as_str()) {
                 crate::database::set_setting(&tx, k, v)?;
@@ -475,6 +517,12 @@ mod tests {
         .unwrap();
 
         suppliers::insert(&conn, &SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: "purchase".into() }).unwrap();
+        let rule = |status: &str, category: &str| DropiStatusMappingInput {
+            normalized_status: status.into(),
+            display_status: status.into(),
+            category: category.into(),
+        };
+        dropi::save_many(&mut conn, &[rule("EN TERMINAL DESTINO", "in_process"), rule("RECLAME EN OFICINA", "claim")]).unwrap();
 
         let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
@@ -483,7 +531,15 @@ mod tests {
         let parsed = parse(&json).unwrap();
 
         suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: "service".into() }).unwrap();
+        dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
         restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        let restored_rules: Vec<(String, String)> =
+            dropi::list(&conn).unwrap().into_iter().map(|m| (m.normalized_status, m.category)).collect();
+        assert_eq!(
+            restored_rules,
+            vec![("EN TERMINAL DESTINO".into(), "in_process".into()), ("RECLAME EN OFICINA".into(), "claim".into())],
+            "las reglas de Dropi se reemplazan por las del backup"
+        );
         let restored_suppliers = suppliers::list(&conn, None).unwrap();
         assert_eq!(restored_suppliers.len(), 1, "los proveedores se reemplazan");
         assert_eq!((restored_suppliers[0].nit.as_str(), restored_suppliers[0].vat_type.as_str()), ("900319753", "purchase"));
@@ -513,6 +569,11 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
         suppliers::insert(&conn, &SupplierInput { nit: "900".into(), business_name: "A".into(), vat_type: "purchase".into() }).unwrap();
+        dropi::save_many(
+            &mut conn,
+            &[DropiStatusMappingInput { normalized_status: "PENDIENTE".into(), display_status: "PENDIENTE".into(), category: "in_process".into() }],
+        )
+        .unwrap();
         let old = br#"{"format":"amd-herramientas-backup","formatVersion":1,"appVersion":"1.0.0","exportedAt":"x","companies":[],"concepts":[]}"#;
         let parsed = parse(old).unwrap();
         assert!(parsed.suppliers.is_none());
@@ -520,7 +581,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         restore(&mut conn, &dir, &dir, &parsed).unwrap();
         assert_eq!(suppliers::list(&conn, None).unwrap().len(), 1);
+        assert_eq!(dropi::list(&conn).unwrap().len(), 1, "sin estados de Dropi en el backup se conservan los actuales");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_fixed_dropi_status_in_backup() {
+        let json = br#"{"format":"amd-herramientas-backup","formatVersion":1,"appVersion":"1.13.0","exportedAt":"x","companies":[],"concepts":[],
+            "dropiStatusMappings":[{"id":1,"normalizedStatus":"ENTREGADO","displayStatus":"ENTREGADO","category":"claim","createdAt":"x","updatedAt":"x"}]}"#;
+        assert!(parse(json).is_err());
     }
 
     #[test]

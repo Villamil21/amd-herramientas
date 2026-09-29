@@ -7,12 +7,13 @@
 import type { ModuleDef, SubmoduleDef } from "../types/modules";
 import { bankAnalysisModule } from "../modules/bank-analysis";
 import { certificatesModule } from "../modules/certificates";
+import { dropiModule } from "../modules/dropi";
 import { regulatoryReportsModule } from "../modules/regulatory-reports";
 import { salesOrdersModule } from "../modules/sales-orders";
 import { socialSecurityModule } from "../modules/social-security";
 import { taxesModule } from "../modules/taxes";
 
-export const MODULES: ModuleDef[] = [bankAnalysisModule, socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule];
+export const MODULES: ModuleDef[] = [bankAnalysisModule, socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule, dropiModule];
 
 export function findModule(id: string | undefined) {
   return MODULES.find((m) => m.id === id);

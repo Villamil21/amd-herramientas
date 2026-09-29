@@ -5,6 +5,7 @@ pub mod app;
 pub mod backup;
 pub mod companies;
 pub mod concepts;
+pub mod dropi;
 pub mod files;
 pub mod invoices;
 pub mod statements;

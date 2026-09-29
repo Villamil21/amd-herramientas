@@ -1,5 +1,6 @@
 pub mod company;
 pub mod concept;
+pub mod dropi;
 pub mod signer;
 pub mod supplier;
 

@@ -155,6 +155,18 @@ mod tests {
         assert_eq!(rows[1][29], Cell::Number(1_406_580.0));
     }
 
+    /// Vuelca un libro real a JSON (mismo formato que recibe el frontend) para
+    /// las pruebas de vitest con archivos reales. Se omite sin las variables:
+    /// EXCEL_DUMP_IN=<libro.xlsx> EXCEL_DUMP_OUT=<salida.json> cargo test dump_workbook_json
+    #[test]
+    fn dump_workbook_json() {
+        let (Ok(input), Ok(output)) = (std::env::var("EXCEL_DUMP_IN"), std::env::var("EXCEL_DUMP_OUT")) else {
+            return;
+        };
+        let book = read_workbook(Path::new(&input)).unwrap();
+        std::fs::write(output, serde_json::to_vec(&book).unwrap()).unwrap();
+    }
+
     #[test]
     fn rejects_other_extensions() {
         assert!(read_workbook(Path::new("/tmp/archivo.csv")).is_err());

@@ -92,6 +92,8 @@ export interface BackupSummary {
   signers: number | null;
   /** null: backup anterior a los proveedores; al restaurarlo se conservan los proveedores actuales. */
   suppliers: number | null;
+  /** null: backup anterior a los estados de Dropi; al restaurarlo se conservan las reglas actuales. */
+  dropiStatusMappings: number | null;
 }
 
 /** Clasificación tributaria del proveedor para el análisis de IVA. */
@@ -110,3 +112,16 @@ export interface Supplier {
 }
 
 export type SupplierInput = Omit<Supplier, "id" | "createdAt" | "updatedAt">;
+
+/** Clasificación guardada de un estado de Dropi (global al módulo Dropi). */
+export interface DropiStatusMapping {
+  id: number;
+  /** Sin tildes, en mayúsculas, "_" como espacio. */
+  normalizedStatus: string;
+  displayStatus: string;
+  category: "in_process" | "claim";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DropiStatusMappingInput = Pick<DropiStatusMapping, "normalizedStatus" | "displayStatus" | "category">;

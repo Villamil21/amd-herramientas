@@ -2,6 +2,7 @@
 
 pub mod companies;
 pub mod concepts;
+pub mod dropi;
 pub mod migrations;
 pub mod signers;
 pub mod suppliers;

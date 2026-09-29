@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.13.0",
+    "date": "2026-09-29",
+    "notes": [
+      "Nuevo módulo: Dropi → Órdenes, para el cierre de las empresas que venden con Dropi.",
+      "Importa el Excel de órdenes exportado desde Dropi. La hoja de órdenes se identifica por sus encabezados (no por su nombre), y las columnas se leen por nombre. Las hojas con tablas dinámicas o resúmenes se ignoran.",
+      "Ventas Dropi (sobre «VALOR DE COMPRA EN PRODUCTOS»): valor facturado; canceladas / rechazadas / guía anulada; devoluciones; en proceso; siniestro, e indemnizada / en proceso de indemnización.",
+      "Costos Dropi: costo del producto y flete de los pedidos entregados, y costo del flete de las devoluciones.",
+      "Pedidos (IDs únicos): despachados, entregados y cancelados / rechazados.",
+      "Cuando aparece un estado nuevo, la aplicación pregunta una sola vez si va a En proceso o a Siniestro. La decisión se guarda y se aplica automáticamente en los archivos siguientes, de cualquier empresa. Desde «Clasificación de estados» se puede ver, cambiar o eliminar cada regla.",
+      "Detalle por estado y tabla de órdenes con buscador (ID, estado, guía, factura o cliente) y filtros. Avisos de IDs repetidos o con varios estados y de valores no válidos.",
+      "Exportación a Excel con las hojas Resumen, Estados y Datos. El archivo original de Dropi no se modifica.",
+      "La copia de seguridad incluye la clasificación de estados de Dropi. Las copias anteriores se siguen pudiendo restaurar."
+    ]
+  },
+  {
     "version": "1.12.0",
     "date": "2026-09-29",
     "notes": [

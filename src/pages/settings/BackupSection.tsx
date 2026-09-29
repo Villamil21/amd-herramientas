@@ -64,7 +64,7 @@ export function BackupSection() {
           <div>
             <strong>Exportar datos</strong>
             <p className="muted" style={{ fontSize: 13 }}>
-              Genera un archivo .json con empresas (incluidos sus logos), conceptos, firmantes (incluidas sus firmas PNG), proveedores y configuración.
+              Genera un archivo .json con empresas (incluidos sus logos), conceptos, firmantes (incluidas sus firmas PNG), proveedores, clasificación de estados de Dropi y configuración.
             </p>
           </div>
           <Button icon={<Download size={15} />} onClick={() => void exportData()} loading={exporting}>
@@ -110,14 +110,17 @@ export function BackupSection() {
                 <li>{pending.concepts} conceptos</li>
                 {pending.signers !== null && <li>{pending.signers} firmantes (con sus firmas PNG)</li>}
                 {pending.suppliers !== null && <li>{pending.suppliers} proveedores</li>}
+                {pending.dropiStatusMappings !== null && <li>{pending.dropiStatusMappings} estados de Dropi clasificados</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>
                 Las empresas, conceptos{pending.signers !== null && ", firmantes"}
-                {pending.suppliers !== null && ", proveedores"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
+                {pending.suppliers !== null && ", proveedores"}
+                {pending.dropiStatusMappings !== null && ", estados de Dropi"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
                 automática antes de continuar.
                 {pending.signers === null && " Este backup no incluye firmantes: se conservan los actuales."}
                 {pending.suppliers === null && " Este backup no incluye proveedores: se conservan los actuales."}
+                {pending.dropiStatusMappings === null && " Este backup no incluye estados de Dropi: se conservan las clasificaciones actuales."}
               </span>
             </div>
           )
