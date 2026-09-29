@@ -14,9 +14,9 @@ export function closingConcepts(a: DropiOrdersAnalysis) {
     { section: "Ventas Dropi", concept: "En proceso", cents: s.inProcessCents },
     { section: "Ventas Dropi", concept: "Siniestro", cents: s.claimCents },
     { section: "Ventas Dropi", concept: "Indemnizada / En proceso indemnización", cents: s.indemnityCents },
-    { section: "Costos Dropi", concept: "Costo producto Dropi", cents: s.deliveredProductCostCents },
     { section: "Costos Dropi", concept: "Costo flete entregados Dropi", cents: s.deliveredFreightCostCents },
     { section: "Costos Dropi", concept: "Costo devolución flete Dropi", cents: s.returnFreightCostCents },
+    { section: "Costos Dropi", concept: "Costo producto Dropi", cents: s.deliveredProductCostCents },
   ];
 }
 
@@ -38,6 +38,7 @@ export function buildDropiSheets(file: ParsedOrdersFile, analysis: DropiOrdersAn
   const text = (header: string) => ({ header, kind: "text" as const });
   const money = (header: string) => ({ header, kind: "money" as const });
   const integer = (header: string) => ({ header, kind: "integer" as const });
+  const concepts = closingConcepts(analysis);
 
   const summary: ExportSheet = {
     name: "Resumen",
@@ -49,8 +50,10 @@ export function buildDropiSheets(file: ParsedOrdersFile, analysis: DropiOrdersAn
       ...(file.period ? [["Archivo", "Periodo (columna FECHA)", file.period, null]] : []),
       ["Archivo", "Registros", null, analysis.summary.totalRows],
       ["Archivo", "Pedidos únicos", null, analysis.summary.uniqueOrders],
-      ...closingConcepts(analysis).map((c) => [c.section, c.concept, pesos(c.cents), null]),
+      // Mismo orden que la pantalla: Ventas Dropi, Pedidos, Costos Dropi.
+      ...concepts.filter((c) => c.section === "Ventas Dropi").map((c) => [c.section, c.concept, pesos(c.cents), null]),
       ...orderCounts(analysis).map((c) => ["Pedidos", c.concept, null, c.count]),
+      ...concepts.filter((c) => c.section === "Costos Dropi").map((c) => [c.section, c.concept, pesos(c.cents), null]),
     ],
   };
 

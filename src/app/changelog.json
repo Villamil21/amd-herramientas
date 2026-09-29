@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.13.1",
+    "date": "2026-09-29",
+    "notes": [
+      "Dropi → Órdenes: nueva clasificación «Indemnización» para los estados nuevos. Su valor se suma a «Indemnizada / En proceso indemnización», junto con los estados fijos de indemnización. Se guarda y se aplica automáticamente como En proceso y Siniestro; las clasificaciones anteriores se conservan.",
+      "Dropi → Órdenes: los bloques se muestran en el orden Ventas Dropi, Pedidos y Costos Dropi (también en la hoja Resumen del Excel). En Costos Dropi, «Costo producto Dropi» pasa a la última columna. Los cálculos no cambian."
+    ]
+  },
+  {
     "version": "1.13.0",
     "date": "2026-09-29",
     "notes": [

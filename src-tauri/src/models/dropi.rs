@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::models::clean;
 
-/// "in_process" = En proceso, "claim" = Siniestro.
-pub const CATEGORIES: &[&str] = &["in_process", "claim"];
+/// "in_process" = En proceso, "claim" = Siniestro, "indemnity" = Indemnización.
+pub const CATEGORIES: &[&str] = &["in_process", "claim", "indemnity"];
 
 /// Estados con regla fija, ya normalizados como en el frontend (sin tildes,
 /// mayúsculas, "_" como espacio). Nunca se guardan como regla configurable.
@@ -44,7 +44,7 @@ pub fn validate_category(category: &str) -> AppResult<String> {
     if CATEGORIES.contains(&c.as_str()) {
         Ok(c)
     } else {
-        Err(AppError::user("Selecciona la clasificación del estado (En proceso o Siniestro)."))
+        Err(AppError::user("Selecciona la clasificación del estado (En proceso, Siniestro o Indemnización)."))
     }
 }
 
@@ -80,6 +80,7 @@ mod tests {
     #[test]
     fn validates_category_and_fixed_statuses() {
         assert_eq!(input("EN REPARTO", " Claim ").validated().unwrap().category, "claim");
+        assert_eq!(input("INDEMNIZADA POR DROPI", "indemnity").validated().unwrap().category, "indemnity");
         assert!(input("EN REPARTO", "otro").validated().is_err());
         assert!(input("  ", "claim").validated().is_err());
         assert!(input("ENTREGADO", "in_process").validated().is_err());

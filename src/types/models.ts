@@ -119,7 +119,7 @@ export interface DropiStatusMapping {
   /** Sin tildes, en mayúsculas, "_" como espacio. */
   normalizedStatus: string;
   displayStatus: string;
-  category: "in_process" | "claim";
+  category: "in_process" | "claim" | "indemnity";
   createdAt: string;
   updatedAt: string;
 }

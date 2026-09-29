@@ -52,6 +52,26 @@ describe("analyzeOrders", () => {
     expect(summary.unclassifiedCents).toBe(0);
   });
 
+  it("un estado clasificado como Indemnización se suma a Indemnizada / En proceso indemnización", () => {
+    const extra = [...rows, row("11", "INDEMNIZADA POR DROPI", 1234)];
+    const base = analyzeOrders(extra, rules([["EN TERMINAL DESTINO", "in_process"], ["RECLAME EN OFICINA", "claim"]]));
+    expect(base.pending.map((p) => p.key)).toEqual(["INDEMNIZADA POR DROPI"]);
+    const { summary, pending, complete } = analyzeOrders(
+      extra,
+      rules([
+        ["EN TERMINAL DESTINO", "in_process"],
+        ["RECLAME EN OFICINA", "claim"],
+        ["INDEMNIZADA POR DROPI", "indemnity"],
+      ]),
+    );
+    expect(pending).toEqual([]);
+    expect(complete).toBe(true);
+    expect(summary.indemnityCents).toBe(150000 + 123400);
+    expect(summary.inProcessCents).toBe(90000);
+    expect(summary.claimCents).toBe(110000);
+    expect(summary.billedCents).toBe(830000 + 123400);
+  });
+
   it("calcula los costos solo con ENTREGADO y DEVOLUCION", () => {
     const { summary } = analyzeOrders(rows, rules());
     expect(summary.deliveredProductCostCents).toBe(100000);

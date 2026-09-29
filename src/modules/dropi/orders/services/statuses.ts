@@ -70,6 +70,6 @@ export const CATEGORY_LABEL: Record<StatusCategory, string> = {
   unclassified: "Sin clasificar",
 };
 
-export const CONFIGURABLE_LABEL: Record<ConfigurableCategory, string> = { in_process: "En proceso", claim: "Siniestro" };
+export const CONFIGURABLE_LABEL: Record<ConfigurableCategory, string> = { in_process: "En proceso", claim: "Siniestro", indemnity: "Indemnización" };
 
 export const CONFIGURABLE_CATEGORIES = Object.keys(CONFIGURABLE_LABEL) as ConfigurableCategory[];

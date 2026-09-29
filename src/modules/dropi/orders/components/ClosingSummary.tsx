@@ -24,21 +24,21 @@ const Title = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => 
   </span>
 );
 
-/** Los tres bloques del cierre: Ventas Dropi, Costos Dropi y Pedidos. */
+/** Los tres bloques del cierre: Ventas Dropi, Pedidos y Costos Dropi. */
 export function ClosingSummary({ analysis }: { analysis: DropiOrdersAnalysis }) {
   const { summary: s, complete } = analysis;
   const concepts = closingConcepts(analysis);
   const sales = concepts.filter((c) => c.section === "Ventas Dropi");
   const costs = concepts.filter((c) => c.section === "Costos Dropi");
-  // En proceso y Siniestro dependen de la clasificación del usuario.
-  const partial = (concept: string) =>
-    !complete && (concept === "En proceso" || concept === "Siniestro") ? <Badge tone="warning">Parcial</Badge> : undefined;
+  // En proceso, Siniestro e Indemnizada dependen (también) de la clasificación del usuario.
+  const userClassified = ["En proceso", "Siniestro", "Indemnizada / En proceso indemnización"];
+  const partial = (concept: string) => (!complete && userClassified.includes(concept) ? <Badge tone="warning">Parcial</Badge> : undefined);
 
   return (
     <>
       {!complete && (
         <Alert tone="warning" title="El cierre aún no está completamente clasificado">
-          Los totales de En proceso y Siniestro se actualizan automáticamente al clasificar los estados pendientes. La exportación se habilita cuando
+          Los totales de En proceso, Siniestro e Indemnizada / En proceso indemnización se actualizan automáticamente al clasificar los estados pendientes. La exportación se habilita cuando
           todos los estados tengan destino.
         </Alert>
       )}
@@ -62,18 +62,18 @@ export function ClosingSummary({ analysis }: { analysis: DropiOrdersAnalysis }) 
         </div>
       </Card>
 
-      <Card flush className="dropi-block dropi-block--costs" title={<Title icon={<Coins size={17} />}>Costos Dropi</Title>} description="Costos de pedidos entregados y fletes de devolución.">
-        <div className="dropi-metrics">
-          {costs.map((c) => (
-            <Metric key={c.concept} label={c.concept} value={formatCop(c.cents)} />
-          ))}
-        </div>
-      </Card>
-
       <Card flush className="dropi-block dropi-block--orders" title={<Title icon={<PackageCheck size={17} />}>Pedidos</Title>} description="Pedidos únicos por ID (un ID repetido cuenta una sola vez).">
         <div className="dropi-metrics">
           {orderCounts(analysis).map((c) => (
             <Metric key={c.concept} label={c.concept} value={formatInteger(c.count)} />
+          ))}
+        </div>
+      </Card>
+
+      <Card flush className="dropi-block dropi-block--costs" title={<Title icon={<Coins size={17} />}>Costos Dropi</Title>} description="Costos de pedidos entregados y fletes de devolución.">
+        <div className="dropi-metrics">
+          {costs.map((c) => (
+            <Metric key={c.concept} label={c.concept} value={formatCop(c.cents)} />
           ))}
         </div>
       </Card>

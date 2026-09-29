@@ -7,7 +7,7 @@
 export type FixedStatus = "delivered" | "cancelled" | "rejected" | "void" | "returned" | "indemnity";
 
 /** Destinos que el usuario puede asignar a los demás estados. */
-export type ConfigurableCategory = "in_process" | "claim";
+export type ConfigurableCategory = "in_process" | "claim" | "indemnity";
 
 /** Clasificación de cada estado en el cierre. */
 export type StatusCategory = "delivered" | "cancelled_group" | "returned" | "in_process" | "claim" | "indemnity" | "unclassified";
@@ -76,7 +76,7 @@ export interface StatusDetail extends MoneyTotals {
   display: string;
   category: StatusCategory;
   fixed?: FixedStatus;
-  /** Puede asignarse a En proceso o Siniestro. */
+  /** Puede asignarse a En proceso, Siniestro o Indemnización. */
   configurable: boolean;
   rows: number;
   uniqueOrders: number;

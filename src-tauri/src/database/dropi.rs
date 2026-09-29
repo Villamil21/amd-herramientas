@@ -99,6 +99,33 @@ mod tests {
     }
 
     #[test]
+    fn migration_005_keeps_rules_and_accepts_indemnity() {
+        use crate::database::migrations::{ensure_migrations_table, MIGRATIONS};
+        // Base en la versión 004 con reglas ya guardadas.
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_migrations_table(&conn).unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 4) {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute("INSERT INTO schema_migrations VALUES (?1, ?2, 'x')", params![m.version, m.name]).unwrap();
+        }
+        save_many(&mut conn, &[input("EN TERMINAL DESTINO", "in_process"), input("RECLAME EN OFICINA", "claim")]).unwrap();
+        assert!(save_many(&mut conn, &[input("INDEMNIZADA POR DROPI", "indemnity")]).is_err());
+        let before = list(&conn).unwrap();
+
+        run_pending(&mut conn).unwrap();
+        let after = list(&conn).unwrap();
+        assert_eq!(
+            after.iter().map(|m| (m.id, m.normalized_status.clone(), m.category.clone(), m.created_at.clone())).collect::<Vec<_>>(),
+            before.iter().map(|m| (m.id, m.normalized_status.clone(), m.category.clone(), m.created_at.clone())).collect::<Vec<_>>(),
+        );
+        save_many(&mut conn, &[input("INDEMNIZADA POR DROPI", "indemnity")]).unwrap();
+        update_category(&conn, after[0].id, "indemnity").unwrap();
+        assert!(save_many(&mut conn, &[input("X", "otro")]).is_err());
+        // El id sigue autoincrementando sin reutilizar los anteriores.
+        assert!(list(&conn).unwrap().iter().all(|m| m.normalized_status != "INDEMNIZADA POR DROPI" || m.id > before.last().unwrap().id));
+    }
+
+    #[test]
     fn rejects_unknown_category_in_sql() {
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
