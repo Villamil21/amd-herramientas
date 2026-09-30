@@ -2237,3 +2237,308 @@ li.global-search__empty {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Retención en la fuente: pendientes, estado del lote y alertas       */
+/* ------------------------------------------------------------------ */
+
+button.stat--link {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+
+.stat--link.is-active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary) inset;
+}
+
+.lot-status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.lot-status__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.lot-status__note {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.lot-status--ready {
+  color: var(--color-success-ink);
+  background: var(--color-success-soft);
+  border-color: rgba(5, 150, 105, 0.3);
+}
+
+.lot-status--attention {
+  color: var(--color-danger-ink);
+  background: var(--color-danger-soft);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+.lot-status--processing {
+  color: var(--color-primary-ink);
+  background: var(--color-primary-softer);
+  border-color: var(--color-primary-border);
+}
+
+.pending-panel {
+  border-width: 1px 1px 1px 4px;
+  overflow: hidden;
+}
+
+.pending-panel--blocking {
+  border-color: rgba(220, 38, 38, 0.3);
+  border-left-color: var(--color-danger);
+}
+
+.pending-panel--warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  border-left-color: var(--color-warning);
+}
+
+.pending-panel--info {
+  border-left-color: var(--color-info);
+}
+
+.pending-panel__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+}
+
+.pending-panel__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.pending-panel--blocking .pending-panel__icon {
+  color: var(--color-danger);
+}
+
+.pending-panel--warning .pending-panel__icon {
+  color: var(--color-warning);
+}
+
+.pending-panel--info .pending-panel__icon {
+  color: var(--color-info);
+}
+
+.pending-panel__heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-panel__heading h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pending-panel__heading p {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  margin-top: 2px;
+}
+
+.pending-panel__count {
+  min-width: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.pending-panel--warning .pending-panel__count {
+  background: var(--color-warning-ink);
+}
+
+.pending-summary {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-4) calc(var(--space-5) + 20px + var(--space-3));
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pending-summary__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: filter var(--motion-fast) var(--ease);
+}
+
+.pending-summary__item:hover {
+  filter: brightness(0.97);
+}
+
+.pending-summary__item--blocking {
+  background: var(--color-danger-soft);
+  border-color: rgba(220, 38, 38, 0.25);
+  color: #7f1d1d;
+}
+
+.pending-summary__item--warning {
+  background: var(--color-warning-soft);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #78350f;
+}
+
+.pending-summary__item--info {
+  background: var(--color-info-soft);
+  border-color: var(--color-border-strong);
+  color: #1e3a8a;
+}
+
+.pending-panel__details {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pending-category__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-2);
+}
+
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.6);
+  transition: box-shadow var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease);
+}
+
+.pending-item__icon {
+  flex-shrink: 0;
+}
+
+.pending-item--blocking .pending-item__icon {
+  color: var(--color-danger);
+}
+
+.pending-item--warning .pending-item__icon {
+  color: var(--color-warning);
+}
+
+.pending-item--info .pending-item__icon {
+  color: var(--color-info);
+}
+
+.pending-item__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-sm);
+}
+
+.pending-item__text span {
+  color: var(--color-muted);
+}
+
+.pending-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pending-item.is-focused {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.table tbody tr.row-attention td:first-child {
+  position: relative;
+}
+
+.table tbody tr.row-attention--blocking td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.table tbody tr.row-attention--warning td:first-child {
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+.table tbody tr.row-attention--blocking td {
+  background: rgba(254, 242, 242, 0.55);
+}
+
+.table tbody tr.row-attention--warning td {
+  background: rgba(255, 251, 235, 0.6);
+}
+
+.row-attention__icon {
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.row-attention--blocking .row-attention__icon {
+  color: var(--color-danger);
+}
+
+.row-attention--warning .row-attention__icon {
+  color: var(--color-warning);
+}
+
+.attention-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: 12px;
+  border: 1px dashed;
+}
+
+.attention-block--danger {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.attention-block--warning {
+  border-color: rgba(245, 158, 11, 0.45);
+}

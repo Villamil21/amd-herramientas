@@ -336,6 +336,15 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
     }
   }
 
+  const fiscalUnknown: WithholdingReport["fiscalUnknown"] = [];
+  for (const r of inPeriod) {
+    const s = r.nit ? suppliersByNit.get(r.nit) : undefined;
+    if (!s || s.fiscalRegime?.trim() || fiscalByNit.has(r.nit!)) continue;
+    const u = fiscalUnknown.find((x) => x.nit === s.nit);
+    if (u) u.files.push(r.fileName);
+    else fiscalUnknown.push({ supplierId: s.id, nit: s.nit, name: s.businessName, files: [r.fileName] });
+  }
+
   const unknown = new Map<string, UnknownTitle>();
   for (const r of rows) {
     if (r.status !== "pending-title") continue;
@@ -349,7 +358,7 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
   const summary: SummaryLine[] = RETENTION_TYPES.map((t) => ({ retentionType: t, pj: { baseCents: 0, retentionCents: 0 }, pn: { baseCents: 0, retentionCents: 0 } }));
   const detail: SubtypeDetail[] = [];
   let invoicesCents = 0;
-  let notesCents = 0;
+  const notesSummary = { baseCents: 0, retentionCents: 0, documentCount: 0 };
   for (const r of counted) {
     const person = r.personType!;
     if (r.category === "invoice") {
@@ -358,7 +367,11 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
       cell.baseCents += r.baseCents!;
       cell.retentionCents += r.retentionCents;
       invoicesCents += r.retentionCents;
-    } else notesCents += r.retentionCents;
+    } else {
+      notesSummary.baseCents += r.baseCents!;
+      notesSummary.retentionCents += r.retentionCents;
+      notesSummary.documentCount++;
+    }
     const d = detail.find(
       (x) => x.category === r.category && x.retentionType === r.rule!.retentionType && x.subtypeName === r.rule!.subtypeName && x.personType === person && x.rateBp === r.rateBp,
     );
@@ -371,6 +384,7 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
     }
   }
   detail.sort((a, b) => a.category.localeCompare(b.category) || RETENTION_TYPES.indexOf(a.retentionType) - RETENTION_TYPES.indexOf(b.retentionType) || a.subtypeName.localeCompare(b.subtypeName) || a.personType.localeCompare(b.personType));
+  const notesCents = notesSummary.retentionCents;
   const netCents = invoicesCents - notesCents;
 
   const count = (...statuses: DocRow["status"][]) => rows.filter((r) => statuses.includes(r.status)).length;
@@ -394,9 +408,11 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
     fiscalChanges,
     fiscalMissing,
     fiscalConflicts,
+    fiscalUnknown,
     unknownTitles: [...unknown.values()],
     summary,
     detail,
+    notesSummary,
     totals: { invoicesCents, notesCents, netCents, netRoundedCents: roundToThousands(netCents) },
     uvtUsed: uvtYears.map((year) => ({ year, valuePesos: ctx.uvts.find((u) => u.year === year)!.valuePesos })),
   };

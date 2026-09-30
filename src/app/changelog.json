@@ -1,5 +1,25 @@
 [
   {
+    "version": "1.14.1",
+    "date": "2026-09-29",
+    "notes": [
+      "Impuestos → Retención en la fuente: nuevo bloque «Pendientes por resolver» arriba del resultado. Agrupa lo que falta por tipo (proveedores sin configurar, títulos sin clasificar, diferencias de retención, régimen fiscal…) y permite resolver cada punto desde ahí mismo.",
+      "Botón «Resolver pendientes»: lleva al primer pendiente y, al resolverlo, pasa al siguiente. En el detalle de un documento, «Siguiente pendiente» continúa el recorrido. Todo se recalcula al instante, sin volver a importar la carpeta.",
+      "Estado del lote siempre visible: «Listo para declaración» solo cuando no quedan pendientes bloqueantes; si no, «Requiere atención» con el número de pendientes. «Exportar Excel» se habilita cuando no quedan pendientes bloqueantes.",
+      "Un proveedor sin régimen fiscal asignado ahora es un pendiente bloqueante: se asigna el régimen que trae la factura o, si la factura no lo muestra, se escribe (ej. R-99-PN, O-13).",
+      "Tabla de documentos: las filas pendientes se resaltan y tienen su acción (Revisar, Configurar ahora, Clasificar…); nuevo filtro «Pendientes», y los contadores de arriba filtran la tabla al pulsarlos.",
+      "Detalle del documento: lo que falta por resolver aparece arriba. La tabla de productos ya no muestra IVA, INC, Descuento detalle ni Recargo detalle.",
+      "Nuevo cuadro «Notas crédito» debajo del Resumen para declaración, con la base y la retención de las notas válidas. La retención es la misma que se resta en el total neto; el resumen principal no cambia."
+    ]
+  },
+  {
+    "version": "1.14.1",
+    "date": "2026-09-30",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.14.0",
     "date": "2026-09-29",
     "notes": [

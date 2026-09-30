@@ -11,15 +11,17 @@ import { formatInteger } from "../../../utils/format";
 import { SupplierWithholdingModal, type SupplierDraft } from "../../../pages/suppliers/SupplierWithholdingModal";
 import { pickInvoiceFolder, type InvoiceFolder } from "../invoice-vat/services/invoiceFolderService";
 import { DocumentDetailModal } from "./components/DocumentDetailModal";
-import { DocumentsTable } from "./components/DocumentsTable";
-import { BelowMinimumTable, DeclarationSummary, IgnoredSection, NotesSection, SubtypeDetailTable, TotalsCard } from "./components/ReportSections";
-import { FiscalPanels, PendingSuppliersPanel, PeriodPanel, UnknownTitlesPanel } from "./components/SetupPanels";
+import { DOCUMENTS_ANCHOR, DocumentsTable, type DocFilter } from "./components/DocumentsTable";
+import { LotStatusIndicator, PendingPanel, pendingItemId } from "./components/PendingPanel";
+import { BelowMinimumTable, DeclarationSummary, IgnoredSection, NotesSection, NotesSummary, SubtypeDetailTable, TotalsCard } from "./components/ReportSections";
+import { PeriodPanel } from "./components/SetupPanels";
 import { TitleMappingsModal } from "./components/TitleMappingsModal";
 import { WithholdingStats } from "./components/WithholdingStats";
 import { buildWithholdingReport, fiscalDismissKey, suggestPersonType } from "./services/analysis";
 import { exportWithholdingExcel } from "./services/excelExport";
 import { processWithholdingFolder } from "./services/folder";
 import { ignoredGroup } from "./services/labels";
+import { actionable, actionsByFile, buildPendingActions, lotStatus, nextPending, type PendingAction } from "./services/pending";
 import type { DocDecision, DocRow, FileResult, PendingSupplier } from "./types";
 
 type Phase = { status: "idle" } | { status: "ready" } | { status: "processing"; done: number; total: number } | { status: "done"; results: FileResult[] };
@@ -27,6 +29,9 @@ type Phase = { status: "idle" } | { status: "ready" } | { status: "processing"; 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", formatInteger(n)));
 
 type SupplierModal = { supplier: Supplier | null; draft: SupplierDraft | null } | null;
+
+const PERIOD_ANCHOR = "withholding-period";
+const scrollToId = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
 
 export default function WithholdingPage() {
   const toast = useToast();
@@ -45,6 +50,14 @@ export default function WithholdingPage() {
   const [titlesOpen, setTitlesOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
+  const [filter, setFilter] = useState<DocFilter>("all");
+  const [pendingExpanded, setPendingExpanded] = useState(false);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  /** «Resolver pendientes» en curso: al resolver uno se pasa al siguiente. */
+  const [resolving, setResolving] = useState(false);
+  const [advance, setAdvance] = useState(false);
+  const [justAnalyzed, setJustAnalyzed] = useState(false);
+  const [resolvedConflicts, setResolvedConflicts] = useState<Set<string>>(() => new Set());
   const cancelled = useRef(false);
   const processing = phase.status === "processing";
 
@@ -90,6 +103,9 @@ export default function WithholdingPage() {
     setPeriodChoice(undefined);
     setDecisions({});
     setDismissedFiscal(new Set());
+    setResolvedConflicts(new Set());
+    setResolving(false);
+    setFocusId(null);
     setPhase({ status: "processing", done: 0, total: folder.files.length });
     await loadData();
     const results = await processWithholdingFolder(
@@ -97,7 +113,10 @@ export default function WithholdingPage() {
       (done, total) => setPhase({ status: "processing", done, total }),
       () => cancelled.current,
     );
-    if (!cancelled.current) setPhase({ status: "done", results });
+    if (!cancelled.current) {
+      setPhase({ status: "done", results });
+      setJustAnalyzed(true);
+    }
   }
 
   const report = useMemo(
@@ -105,9 +124,70 @@ export default function WithholdingPage() {
     [phase, suppliers, rates, uvts, titles, periodChoice, decisions, dismissedFiscal],
   );
   const selectedRow = report?.rows.find((r) => r.fileName === selected) ?? null;
+  const actions = useMemo(() => (report ? buildPendingActions(report, resolvedConflicts) : []), [report, resolvedConflicts]);
+  const attention = useMemo(() => actionsByFile(actions), [actions]);
+  const selectedActionId = selected ? attention.get(selected)?.id : undefined;
+  /** Con pendientes bloqueantes no se exporta: el Excel sería una declaración incompleta. */
+  const exportBlocked = lotStatus(actions).kind === "attention";
+
+  // Tras analizar: con pendientes, la tabla abre filtrada y el detalle abierto si son pocos.
+  useEffect(() => {
+    if (!justAnalyzed) return;
+    setJustAnalyzed(false);
+    setFilter(attention.size ? "pending" : "all");
+    setPendingExpanded(actions.length <= 6);
+  }, [justAnalyzed, attention, actions]);
+
+  function runAction(a: PendingAction) {
+    setFocusId(a.id);
+    switch (a.target.kind) {
+      case "supplier":
+        return configure(a.target.supplier);
+      case "document":
+        return setSelected(a.target.fileName);
+      case "period":
+        return scrollToId(PERIOD_ANCHOR);
+      default:
+        setPendingExpanded(true);
+        scrollToId(pendingItemId(a.id));
+    }
+  }
+
+  /** Lleva al primer pendiente (bloqueantes primero) y deja activo el recorrido. */
+  function resolveNext(skipId?: string) {
+    const next = nextPending(actions, skipId);
+    if (!next) {
+      setResolving(false);
+      setSelected(null);
+      setFocusId(null);
+      toast("No quedan pendientes por resolver.");
+      return;
+    }
+    setResolving(true);
+    if (next.target.kind !== "document") setSelected(null);
+    runAction(next);
+  }
+
+  // Al guardar algo durante el recorrido, pasar al siguiente con los datos ya recalculados.
+  useEffect(() => {
+    if (!advance) return;
+    setAdvance(false);
+    resolveNext();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advance]);
+
+  async function reloadAndAdvance() {
+    await loadData();
+    if (resolving) setAdvance(true);
+  }
+
+  function showDocuments(f: DocFilter) {
+    setFilter(f);
+    scrollToId(DOCUMENTS_ANCHOR);
+  }
 
   async function exportExcel() {
-    if (!report || !folder || exporting) return;
+    if (!report || !folder || exporting || exportBlocked) return;
     setExporting(true);
     try {
       const path = await exportWithholdingExcel(report, rates, folder.folderName);
@@ -165,7 +245,14 @@ export default function WithholdingPage() {
             </Button>
             <Button onClick={() => navigate(paths.withholdingTable)}>Tabla de retenciones</Button>
             {report && (
-              <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={() => void exportExcel()} loading={exporting}>
+              <Button
+                variant="primary"
+                icon={<FileSpreadsheet size={15} />}
+                onClick={() => void exportExcel()}
+                loading={exporting}
+                disabled={exportBlocked}
+                title={exportBlocked ? "Resuelve primero los pendientes bloqueantes." : undefined}
+              >
                 Exportar Excel
               </Button>
             )}
@@ -221,10 +308,32 @@ export default function WithholdingPage() {
         )}
       </Card>
 
+      {processing && <LotStatusIndicator processing />}
+
       {report && (
         <>
-          <PeriodPanel period={report.period} onChoose={setPeriodChoice} />
-          <WithholdingStats stats={report.stats} />
+          <div id={PERIOD_ANCHOR}>
+            <PeriodPanel period={report.period} onChoose={setPeriodChoice} />
+          </div>
+          <LotStatusIndicator actions={actions} />
+          <PendingPanel
+            actions={actions}
+            expanded={pendingExpanded}
+            onExpandedChange={setPendingExpanded}
+            focusId={focusId}
+            onResolveAll={() => resolveNext()}
+            onAction={runAction}
+            supplierIdFor={(nit) => suppliers.find((s) => s.nit === nit)?.id}
+            onFiscalDismiss={(nit, detected) => {
+              setDismissedFiscal((prev) => new Set(prev).add(fiscalDismissKey(nit, detected)));
+              if (resolving) setAdvance(true);
+            }}
+            onConflictResolved={(nit) => {
+              setResolvedConflicts((prev) => new Set(prev).add(nit));
+              if (resolving) setAdvance(true);
+            }}
+            onChanged={reloadAndAdvance}
+          />
 
           {failed.length > 0 && (
             <Alert
@@ -233,24 +342,22 @@ export default function WithholdingPage() {
               items={failed.map((r) => `${r.fileName}: ${r.issues[0]}`)}
             />
           )}
-          <FiscalPanels
-            changes={report.fiscalChanges}
-            missing={report.fiscalMissing}
-            conflicts={report.fiscalConflicts}
-            onDismiss={(c) => setDismissedFiscal((prev) => new Set(prev).add(fiscalDismissKey(c.nit, c.detected)))}
-            onUpdated={() => void loadData()}
-          />
-          {report.unknownTitles.length > 0 && <UnknownTitlesPanel titles={report.unknownTitles} onSaved={() => void loadData()} />}
-          {report.pendingSuppliers.length > 0 && <PendingSuppliersPanel pending={report.pendingSuppliers} onConfigure={configure} />}
+          <WithholdingStats stats={report.stats} filter={filter} onFilter={showDocuments} />
 
-          <DocumentsTable rows={report.rows} onOpen={(r) => setSelected(r.fileName)} />
+          <DocumentsTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r) => setSelected(r.fileName)} onAction={runAction} />
 
           {report.stats.pending > 0 && (
-            <Alert tone="info" title={plural(report.stats.pending, "1 documento pendiente no está incluido en el resumen.", "# documentos pendientes no están incluidos en el resumen.")}>
-              Usa el filtro «Por revisar» en la tabla de documentos. El resumen se actualiza al resolverlos.
+            <Alert tone="warning" title={plural(report.stats.pending, "1 documento pendiente no está incluido en el resumen.", "# documentos pendientes no están incluidos en el resumen.")}>
+              <div className="row row--between" style={{ marginTop: 2 }}>
+                <span>El resumen se actualiza al resolverlos, sin volver a importar la carpeta.</span>
+                <Button size="sm" onClick={() => showDocuments("pending")}>
+                  Ver pendientes
+                </Button>
+              </div>
             </Alert>
           )}
           <DeclarationSummary report={report} />
+          <NotesSummary notes={report.notesSummary} />
           <SubtypeDetailTable report={report} />
           {belowRows.length > 0 && <BelowMinimumTable rows={belowRows} onOpen={(r) => setSelected(r.fileName)} />}
           {noteRows.length > 0 && <NotesSection rows={noteRows} totalCents={report.totals.notesCents} onOpen={(r) => setSelected(r.fileName)} />}
@@ -264,17 +371,25 @@ export default function WithholdingPage() {
         decision={selected ? decisions[selected] : undefined}
         onDecision={(fileName, d) => setDecisions((prev) => ({ ...prev, [fileName]: d }))}
         onEditSupplier={editSupplier}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          setResolving(false);
+        }}
+        remainingPending={actionable(actions).filter((a) => a.id !== selectedActionId).length}
+        onNextPending={() => resolveNext(selectedActionId)}
       />
       <SupplierWithholdingModal
         open={supplierModal !== null}
         supplier={supplierModal?.supplier}
         draft={supplierModal?.draft}
         rates={rates}
-        onClose={() => setSupplierModal(null)}
+        onClose={() => {
+          setSupplierModal(null);
+          setResolving(false);
+        }}
         onSaved={() => {
           setSupplierModal(null);
-          void loadData();
+          void reloadAndAdvance();
         }}
       />
       <TitleMappingsModal open={titlesOpen} titles={titles} onClose={() => setTitlesOpen(false)} onChanged={() => void loadData()} />

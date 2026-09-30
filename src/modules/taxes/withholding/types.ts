@@ -198,10 +198,14 @@ export interface WithholdingReport {
   /** Proveedores sin régimen guardado cuya factura sí lo trae (actualización automática ofrecida). */
   fiscalMissing: { supplierId: number; nit: string; name: string; detected: string }[];
   fiscalConflicts: FiscalConflict[];
+  /** Proveedores registrados sin régimen guardado cuyas facturas del lote tampoco lo traen: hay que escribirlo. */
+  fiscalUnknown: { supplierId: number; nit: string; name: string; files: string[] }[];
   unknownTitles: UnknownTitle[];
   /** Resumen para la declaración: solo Facturas válidas que generaron retención. */
   summary: SummaryLine[];
   detail: SubtypeDetail[];
+  /** Notas válidas que generaron retención (sin PJ / PN ni tipo). La retención es la misma de totals.notesCents. */
+  notesSummary: SummaryCell & { documentCount: number };
   totals: { invoicesCents: number; notesCents: number; netCents: number; netRoundedCents: number };
   /** UVT usados (año → valor) para el registro de auditoría. */
   uvtUsed: { year: number; valuePesos: number }[];

@@ -1,30 +1,32 @@
 import { useMemo, useState } from "react";
-import { Badge, Card } from "../../../../components/ui";
+import { AlertTriangle, XCircle } from "lucide-react";
+import { Badge, Button, Card } from "../../../../components/ui";
 import { RETENTION_TYPE_LABEL, TITLE_CATEGORY_LABEL } from "../../../../types/models";
 import { normalizeKey } from "../../../../utils/text";
 import { SearchBox, SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { formatCop } from "../../invoice-vat/parser/amounts";
-import { ignoredGroup, PENDING_STATUSES } from "../services/labels";
+import { ignoredGroup } from "../services/labels";
 import { formatDate, formatRateBp } from "../services/money";
+import type { PendingAction } from "../services/pending";
 import type { DocRow } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
-type Filter = "all" | "pending" | "validated" | "below" | "ignored" | "invoice" | "credit_note";
+export type DocFilter = "all" | "pending" | "validated" | "below" | "ignored" | "invoice" | "credit_note";
 
-const FILTERS: { id: Filter; label: string }[] = [
+const FILTERS: { id: DocFilter; label: string }[] = [
   { id: "all", label: "Todos" },
-  { id: "pending", label: "Por revisar" },
-  { id: "validated", label: "Validadas" },
-  { id: "below", label: "No supera tope" },
+  { id: "pending", label: "Pendientes" },
+  { id: "validated", label: "Validados" },
+  { id: "below", label: "No aplica por tope" },
   { id: "ignored", label: "Ignorados" },
   { id: "invoice", label: "Facturas" },
   { id: "credit_note", label: "Notas" },
 ];
 
-function matches(r: DocRow, f: Filter): boolean {
+function matches(r: DocRow, f: DocFilter, attention: Map<string, PendingAction>): boolean {
   switch (f) {
     case "pending":
-      return PENDING_STATUSES.includes(r.status);
+      return attention.has(r.fileName);
     case "validated":
       return r.status === "validated";
     case "below":
@@ -41,20 +43,33 @@ function matches(r: DocRow, f: Filter): boolean {
 
 const money = (cents?: number) => (cents === undefined ? "—" : formatCop(cents));
 
-export function DocumentsTable({ rows, onOpen }: { rows: DocRow[]; onOpen: (r: DocRow) => void }) {
+interface Props {
+  rows: DocRow[];
+  /** Pendiente más grave de cada archivo (services/pending). */
+  attention: Map<string, PendingAction>;
+  filter: DocFilter;
+  onFilterChange: (f: DocFilter) => void;
+  onOpen: (r: DocRow) => void;
+  onAction: (a: PendingAction) => void;
+}
+
+/** Ancla para llevar la vista a la tabla (contadores y «Ver pendientes»). */
+export const DOCUMENTS_ANCHOR = "withholding-documents";
+
+export function DocumentsTable({ rows, attention, filter, onFilterChange, onOpen, onAction }: Props) {
   const [query, setQuery] = useState("");
-  const pendingCount = rows.filter((r) => PENDING_STATUSES.includes(r.status)).length;
-  const [filter, setFilter] = useState<Filter>(pendingCount ? "pending" : "all");
+  const pendingCount = rows.filter((r) => attention.has(r.fileName)).length;
+  const options = FILTERS.map((f) => (f.id === "pending" && pendingCount ? { ...f, label: `Pendientes (${pendingCount})` } : f));
 
   const visible = useMemo(() => {
     const q = normalizeKey(query);
-    return rows.filter((r) => matches(r, filter) && (!q || normalizeKey([r.fileName, r.number, r.nit, r.supplierName].filter(Boolean).join(" ")).includes(q)));
-  }, [rows, query, filter]);
+    return rows.filter((r) => matches(r, filter, attention) && (!q || normalizeKey([r.fileName, r.number, r.nit, r.supplierName].filter(Boolean).join(" ")).includes(q)));
+  }, [rows, query, filter, attention]);
 
   return (
-    <Card flush title="Documentos" description="Haz clic en un documento para ver sus datos, la configuración de retención, los productos y las validaciones.">
+    <Card id={DOCUMENTS_ANCHOR} flush title="Documentos" description="Haz clic en un documento para ver sus datos, la configuración de retención, los productos y las validaciones.">
       <div className="toolbar row--between">
-        <SegmentedFilter label="Filtrar documentos" options={FILTERS} value={filter} onChange={setFilter} />
+        <SegmentedFilter label="Filtrar documentos" options={options} value={filter} onChange={onFilterChange} />
         <SearchBox placeholder="Archivo, número, NIT o proveedor" value={query} onChange={setQuery} />
       </div>
       <div className="table-wrap table-wrap--scroll">
@@ -62,6 +77,7 @@ export function DocumentsTable({ rows, onOpen }: { rows: DocRow[]; onOpen: (r: D
           <thead>
             <tr>
               <th>Archivo</th>
+              <th>Estado</th>
               <th>Categoría</th>
               <th>Título original</th>
               <th>Número</th>
@@ -77,42 +93,60 @@ export function DocumentsTable({ rows, onOpen }: { rows: DocRow[]; onOpen: (r: D
               <th className="num">Tarifa</th>
               <th className="num">Retención calculada</th>
               <th className="num">Rete fuente PDF</th>
-              <th>Estado</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 && (
               <tr>
                 <td colSpan={17} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
-                  Ningún documento coincide con el filtro.
+                  {filter === "pending" ? "No hay documentos pendientes." : "Ningún documento coincide con el filtro."}
                 </td>
               </tr>
             )}
-            {visible.map((r) => (
-              <tr key={r.fileName} className="is-clickable" onClick={() => onOpen(r)}>
-                <td className="table__primary" style={{ minWidth: 200, maxWidth: 280, overflowWrap: "break-word" }}>
-                  {r.fileName}
-                </td>
-                <td>{r.category ? <Badge tone={r.category === "credit_note" ? "gold" : "dark"}>{TITLE_CATEGORY_LABEL[r.category]}</Badge> : "—"}</td>
-                <td style={{ minWidth: 160 }}>{r.title ?? "—"}</td>
-                <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.number ?? "—"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>{formatDate(r.issueDate)}</td>
-                <td className="selectable">{r.nit ?? "—"}</td>
-                <td style={{ minWidth: 160 }}>{r.supplierName || "—"}</td>
-                <td>{r.personType ?? "—"}</td>
-                <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.fiscalCodes.join(";") || "—"}</td>
-                <td>{r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : "—"}</td>
-                <td style={{ minWidth: 180 }}>{r.rule?.subtypeName ?? "—"}</td>
-                <td className="num">{money(r.baseCents)}</td>
-                <td className="num">{money(r.minBaseCents)}</td>
-                <td className="num">{r.rateBp !== undefined ? formatRateBp(r.rateBp) : "—"}</td>
-                <td className="num">{money(r.calculatedCents)}</td>
-                <td className="num">{money(r.informedCents)}</td>
-                <td>
-                  <StatusBadge status={r.status} />
-                </td>
-              </tr>
-            ))}
+            {visible.map((r) => {
+              const a = attention.get(r.fileName);
+              const Icon = a?.severity === "blocking" ? XCircle : AlertTriangle;
+              return (
+                <tr key={r.fileName} className={["is-clickable", a && `row-attention row-attention--${a.severity}`].filter(Boolean).join(" ")} onClick={() => onOpen(r)}>
+                  <td className="table__primary" style={{ minWidth: 200, maxWidth: 280, overflowWrap: "break-word" }}>
+                    {a && <Icon size={14} className="row-attention__icon" aria-label={a.severity === "blocking" ? "Pendiente bloqueante" : "Advertencia"} />}
+                    {r.fileName}
+                  </td>
+                  <td>
+                    <span className="row" style={{ flexWrap: "nowrap" }}>
+                      <StatusBadge status={r.status} />
+                      {a && (
+                        <Button
+                          size="sm"
+                          variant={a.severity === "blocking" ? "primary" : "secondary"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAction(a);
+                          }}
+                        >
+                          {a.actionLabel}
+                        </Button>
+                      )}
+                    </span>
+                  </td>
+                  <td>{r.category ? <Badge tone={r.category === "credit_note" ? "gold" : "dark"}>{TITLE_CATEGORY_LABEL[r.category]}</Badge> : "—"}</td>
+                  <td style={{ minWidth: 160 }}>{r.title ?? "—"}</td>
+                  <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.number ?? "—"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{formatDate(r.issueDate)}</td>
+                  <td className="selectable">{r.nit ?? "—"}</td>
+                  <td style={{ minWidth: 160 }}>{r.supplierName || "—"}</td>
+                  <td>{r.personType ?? "—"}</td>
+                  <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.fiscalCodes.join(";") || "—"}</td>
+                  <td>{r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : "—"}</td>
+                  <td style={{ minWidth: 180 }}>{r.rule?.subtypeName ?? "—"}</td>
+                  <td className="num">{money(r.baseCents)}</td>
+                  <td className="num">{money(r.minBaseCents)}</td>
+                  <td className="num">{r.rateBp !== undefined ? formatRateBp(r.rateBp) : "—"}</td>
+                  <td className="num">{money(r.calculatedCents)}</td>
+                  <td className="num">{money(r.informedCents)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

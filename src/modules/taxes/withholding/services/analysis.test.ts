@@ -230,6 +230,29 @@ describe("buildWithholdingReport", () => {
     expect(below.totals.notesCents).toBe(0);
   });
 
+  it("resumen de Notas crédito: solo notas válidas con retención; la retención es la misma del total de notas", () => {
+    const note = (n: string, base: number, retention: number) => doc("1", n, base, { title: "NOTA CRÉDITO ELECTRÓNICA", retefuenteCents: pesos(retention) });
+    const files = [
+      file("f.pdf", doc("1", "F-1", 5_000_000, { retefuenteCents: pesos(200_000) })),
+      file("a.pdf", note("NC-A", 1_000_000, 40_000)),
+      file("b.pdf", note("NC-B", 500_000, 20_000)),
+      file("c.pdf", note("NC-C", 50_000, 0)),
+      file("dup.pdf", note("NC-A", 1_000_000, 40_000)),
+      file("dif.pdf", note("NC-D", 800_000, 1_000)),
+      file("feb.pdf", doc("1", "NC-E", 900_000, { title: "NOTA CRÉDITO ELECTRÓNICA", issueDate: "2026-02-01" })),
+    ];
+    const r = report(files, [supplier(1, "1", "PJ", [rule(6)])]);
+    expect(r.notesSummary).toEqual({ baseCents: pesos(1_500_000), retentionCents: pesos(60_000), documentCount: 2 });
+    expect(r.totals.notesCents).toBe(r.notesSummary.retentionCents);
+    expect(r.rows.find((x) => x.fileName === "c.pdf")).toMatchObject({ status: "below-minimum", category: "credit_note" });
+    // El cuadro principal sigue mostrando solo facturas, sin restar notas.
+    expect(r.summary.find((l) => l.retentionType === "services")!.pj).toEqual({ baseCents: pesos(5_000_000), retentionCents: pesos(200_000) });
+    expect(r.totals.netCents).toBe(pesos(200_000 - 60_000));
+
+    const none = report([files[0]], [supplier(1, "1", "PJ", [rule(6)])]);
+    expect(none.notesSummary).toEqual({ baseCents: 0, retentionCents: 0, documentCount: 0 });
+  });
+
   it("título nuevo: pendiente hasta clasificarlo", () => {
     const r = report([file("a.pdf", doc("1", "A", 1_000_000, { title: "NOTA DÉBITO ELECTRÓNICA" }))], [supplier(1, "1", "PJ", [rule(6)])]);
     expect(r.rows[0].status).toBe("pending-title");

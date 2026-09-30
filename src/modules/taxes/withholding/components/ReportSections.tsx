@@ -56,6 +56,36 @@ export function DeclarationSummary({ report }: { report: WithholdingReport }) {
   );
 }
 
+/**
+ * Notas crédito válidas que generaron retención, sin discriminar PJ / PN ni
+ * tipo. La retención es el mismo valor de «Total retenciones notas» que se
+ * resta en el total neto; la base es informativa y no se resta del resumen.
+ */
+export function NotesSummary({ notes }: { notes: WithholdingReport["notesSummary"] }) {
+  return (
+    <Card flush title="Notas crédito" description="Solo notas válidas que generaron retención. No se restan en el cuadro anterior: la retención se descuenta en el total neto.">
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Concepto</th>
+              <th className="num">Base</th>
+              <th className="num">Retención</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ fontWeight: 600 }}>
+              <td>Notas{notes.documentCount > 0 && <span className="muted" style={{ fontWeight: 400 }}> ({notes.documentCount === 1 ? "1 documento" : `${notes.documentCount} documentos`})</span>}</td>
+              <td className="num">{money(notes.baseCents)}</td>
+              <td className="num">{money(notes.retentionCents)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 /** Vista de auditoría por subtipo (solo documentos que generaron retención). */
 export function SubtypeDetailTable({ report }: { report: WithholdingReport }) {
   return (
