@@ -11,6 +11,7 @@ pub mod invoices;
 pub mod statements;
 pub mod signers;
 pub mod suppliers;
+pub mod withholding;
 
 use std::path::PathBuf;
 

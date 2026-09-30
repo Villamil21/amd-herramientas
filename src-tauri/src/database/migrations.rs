@@ -26,6 +26,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 3, name: "suppliers", sql: include_str!("../../migrations/003_suppliers.sql") },
     Migration { version: 4, name: "dropi_status_mappings", sql: include_str!("../../migrations/004_dropi_status_mappings.sql") },
     Migration { version: 5, name: "dropi_indemnity_category", sql: include_str!("../../migrations/005_dropi_indemnity_category.sql") },
+    Migration { version: 6, name: "withholding", sql: include_str!("../../migrations/006_withholding.sql") },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

@@ -94,6 +94,10 @@ export interface BackupSummary {
   suppliers: number | null;
   /** null: backup anterior a los estados de Dropi; al restaurarlo se conservan las reglas actuales. */
   dropiStatusMappings: number | null;
+  /** null: backup anterior a Retención en la fuente; al restaurarlo se conservan la tabla, los UVT y los títulos actuales. */
+  withholdingRates: number | null;
+  uvtValues: number | null;
+  documentTitleMappings: number | null;
 }
 
 /** Clasificación tributaria del proveedor para el análisis de IVA. */
@@ -109,9 +113,92 @@ export interface Supplier {
   vatType: VatType;
   createdAt: string;
   updatedAt: string;
+  /** Retención en la fuente (opcionales: los proveedores creados desde IVA no los tienen). */
+  personType?: PersonType | null;
+  /** Régimen / responsabilidad fiscal del emisor leída en la última verificación. */
+  fiscalRegime?: string | null;
+  fiscalCheckedAt?: string | null;
+  withholdingRules?: SupplierWithholdingRule[];
 }
 
-export type SupplierInput = Omit<Supplier, "id" | "createdAt" | "updatedAt">;
+export type SupplierInput = Pick<Supplier, "nit" | "businessName" | "vatType">;
+
+// ---------------------------------------------------------------------------
+// Retención en la fuente
+// ---------------------------------------------------------------------------
+
+export type PersonType = "PJ" | "PN";
+
+export const PERSON_TYPE_LABEL: Record<PersonType, string> = { PJ: "Persona jurídica", PN: "Persona natural" };
+
+export type RetentionType = "fees" | "services" | "rentals" | "purchases";
+
+/** En el orden del resumen para la declaración. */
+export const RETENTION_TYPES: RetentionType[] = ["fees", "services", "rentals", "purchases"];
+
+export const RETENTION_TYPE_LABEL: Record<RetentionType, string> = {
+  fees: "Honorarios",
+  services: "Servicios",
+  rentals: "Arrendamientos",
+  purchases: "Compras",
+};
+
+export type BaseMode = "invoice_subtotal" | "manual";
+
+export const BASE_MODE_LABEL: Record<BaseMode, string> = {
+  invoice_subtotal: "Subtotal de la factura",
+  manual: "Base diferente / manual",
+};
+
+/** Fila de la tabla de retenciones. La base mínima en pesos se calcula con el UVT del año. */
+export interface WithholdingRate {
+  id: number;
+  retentionType: RetentionType;
+  name: string;
+  /** Centésimas de UVT: 10 UVT → 1000. */
+  baseUvtCenti: number;
+  /** Centésimas de punto: 4 % → 400. */
+  rateBp: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WithholdingRateInput = Pick<WithholdingRate, "retentionType" | "name" | "baseUvtCenti" | "rateBp">;
+
+export interface UvtValue {
+  year: number;
+  valuePesos: number;
+  updatedAt: string;
+}
+
+export interface SupplierWithholdingRule {
+  id: number;
+  rateId: number;
+  baseMode: BaseMode;
+  isDefault: boolean;
+}
+
+export interface WithholdingProfileInput {
+  personType: PersonType | null;
+  rules: Omit<SupplierWithholdingRule, "id">[];
+}
+
+export type TitleCategory = "invoice" | "credit_note";
+
+export const TITLE_CATEGORY_LABEL: Record<TitleCategory, string> = { invoice: "Factura", credit_note: "Nota" };
+
+export interface DocumentTitleMapping {
+  id: number;
+  /** normalizeKey del título. */
+  normalizedTitle: string;
+  displayTitle: string;
+  category: TitleCategory;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DocumentTitleMappingInput = Pick<DocumentTitleMapping, "normalizedTitle" | "displayTitle" | "category">;
 
 /** Clasificación guardada de un estado de Dropi (global al módulo Dropi). */
 export interface DropiStatusMapping {

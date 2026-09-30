@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.14.0",
+    "date": "2026-09-29",
+    "notes": [
+      "Nuevo módulo: Impuestos → Retención en la fuente. Lee una carpeta de facturas electrónicas en PDF (en este equipo, sin modificar los archivos) y prepara el resumen para la declaración.",
+      "Detecta el periodo predominante (los documentos de otros meses se excluyen; en empate pregunta), los duplicados (mismo NIT y número) y el régimen / responsabilidad fiscal del emisor: los documentos O-15 (autorretenedor) y O-47 (régimen simple) se ignoran.",
+      "Aplica la regla de retención de cada proveedor (tipo, subtipo y modo de base: subtotal o base manual), compara contra la base mínima y calcula la retención. Los documentos que no superan el tope quedan aparte y no suman base ni retención.",
+      "Compara la retención calculada con la «Rete fuente» del PDF y muestra la tarifa implícita; si hay diferencia, permite confirmar la base y tarifa detectadas o corregirlas (deben coincidir con la Rete fuente informada).",
+      "Resumen PJ / PN por Honorarios, Servicios, Arrendamientos y Compras (solo facturas válidas que generaron retención), detalle por subtipo, notas por separado, total neto y total neto redondeado a miles.",
+      "Cada título de documento se clasifica una vez como Factura o Nota y la decisión se guarda. Detalle de cada documento con los productos (sin columnas de IVA ni INC).",
+      "Exportación a Excel: Resumen declaración, Notas, Facturas, No aplicó por tope, Ignorados, Configuración, Detalle por subtipo y Tarifas usadas.",
+      "Nueva sección Datos → Tabla de retenciones: valor UVT por año (2026 = $52.374) y conceptos con base UVT y tarifa editables; la base mínima se calcula automáticamente.",
+      "Proveedores: ahora guardan PJ / PN, régimen fiscal y una o varias reglas de retención (con regla predeterminada). Los datos de IVA existentes se conservan.",
+      "La copia de seguridad incluye la tabla de retenciones, los valores UVT, los títulos Factura / Nota y la configuración de retención de los proveedores. Las copias anteriores se siguen pudiendo restaurar."
+    ]
+  },
+  {
     "version": "1.13.1",
     "date": "2026-09-29",
     "notes": [

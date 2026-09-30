@@ -111,16 +111,23 @@ export function BackupSection() {
                 {pending.signers !== null && <li>{pending.signers} firmantes (con sus firmas PNG)</li>}
                 {pending.suppliers !== null && <li>{pending.suppliers} proveedores</li>}
                 {pending.dropiStatusMappings !== null && <li>{pending.dropiStatusMappings} estados de Dropi clasificados</li>}
+                {pending.withholdingRates !== null && (
+                  <li>
+                    Tabla de retenciones ({pending.withholdingRates} conceptos, {pending.uvtValues ?? 0} valores UVT, {pending.documentTitleMappings ?? 0} títulos Factura / Nota)
+                  </li>
+                )}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>
                 Las empresas, conceptos{pending.signers !== null && ", firmantes"}
                 {pending.suppliers !== null && ", proveedores"}
-                {pending.dropiStatusMappings !== null && ", estados de Dropi"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
+                {pending.dropiStatusMappings !== null && ", estados de Dropi"}
+                {pending.withholdingRates !== null && ", tabla de retenciones"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
                 automática antes de continuar.
                 {pending.signers === null && " Este backup no incluye firmantes: se conservan los actuales."}
                 {pending.suppliers === null && " Este backup no incluye proveedores: se conservan los actuales."}
                 {pending.dropiStatusMappings === null && " Este backup no incluye estados de Dropi: se conservan las clasificaciones actuales."}
+                {pending.withholdingRates === null && " Este backup no incluye la tabla de retenciones: se conservan la tabla, los valores UVT y los títulos actuales."}
               </span>
             </div>
           )

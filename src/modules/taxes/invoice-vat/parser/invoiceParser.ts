@@ -22,37 +22,37 @@ import { isCopAmount, parseCopAmount, parseDotDecimal, parseRate } from "./amoun
 /** El PDF no corresponde al modelo soportado (se marca «No compatible»). */
 export class InvoiceFormatError extends Error {}
 
-interface PageRows {
+export interface PageRows {
   page: number;
   rows: TextRow[];
 }
 
-const FOOTER = /^(hoja|p[aá]gina)\s+\d+\s+de\s+\d+$/i;
-const DETAILS_HEADING = /^detalles? de (los )?productos?/;
-const ISSUER_HEADING = /^datos del (emisor|vendedor)/;
+export const FOOTER = /^(hoja|p[aá]gina)\s+\d+\s+de\s+\d+$/i;
+export const DETAILS_HEADING = /^detalles? de (los )?productos?/;
+export const ISSUER_HEADING = /^datos del (emisor|vendedor)/;
 const FIRST_SECTION = /^datos del /;
-const GRAPHIC = /^representacion grafica/;
+export const GRAPHIC = /^representacion grafica/;
 /** Encabezados que pueden repetirse arriba de una página donde continúa la tabla. */
-const CONTINUATION_HEADINGS = [DETAILS_HEADING, GRAPHIC];
+export const CONTINUATION_HEADINGS = [DETAILS_HEADING, GRAPHIC];
 
-const NIT_LABEL = /^nit( del)?( emisor| vendedor)?\s*:/i;
-const NAME_LABEL = /^raz[oó]n social\s*:/i;
-const TRADE_NAME_LABEL = /^nombre comercial\s*:/i;
-const NUMBER_LABEL = /^n[uú]mero( de)? (factura|documento|nota)[^:]*:/i;
+export const NIT_LABEL = /^nit( del)?( emisor| vendedor)?\s*:/i;
+export const NAME_LABEL = /^raz[oó]n social\s*:/i;
+export const TRADE_NAME_LABEL = /^nombre comercial\s*:/i;
+export const NUMBER_LABEL = /^n[uú]mero( de)? (factura|documento|nota)[^:]*:/i;
 
-const rowText = (r: TextRow) => joinWords(r.words);
-const rowKey = (r: TextRow) => normalizeKey(rowText(r));
-const rowHeight = (r: TextRow) => Math.max(...r.words.map((w) => w.height));
-const isMoney = (w: Word) => w.text !== "$" && isCopAmount(w.text);
+export const rowText = (r: TextRow) => joinWords(r.words);
+export const rowKey = (r: TextRow) => normalizeKey(rowText(r));
+export const rowHeight = (r: TextRow) => Math.max(...r.words.map((w) => w.height));
+export const isMoney = (w: Word) => w.text !== "$" && isCopAmount(w.text);
 /** Valor con coma decimal ("1,00", "58.739,00"): distingue importes de códigos numéricos. */
-const isDecimalMoney = (w: Word) => /,\d{2}$/.test(w.text) && isCopAmount(w.text);
+export const isDecimalMoney = (w: Word) => /,\d{2}$/.test(w.text) && isCopAmount(w.text);
 
 /**
  * Celdas de una fila: palabras separadas por un espacio grande. La etiqueta
  * y su valor quedan juntos ("Nit del Emisor: 900319753"); el siguiente par
  * de la misma fila queda en otra celda.
  */
-function cells(row: TextRow): string[] {
+export function cells(row: TextRow): string[] {
   const groups: Word[][] = [];
   for (const w of row.words) {
     const current = groups[groups.length - 1];
@@ -64,7 +64,7 @@ function cells(row: TextRow): string[] {
 }
 
 /** Valor de «Etiqueta: valor» (en la misma celda o en la siguiente). */
-function findField(rows: TextRow[], label: RegExp): string | undefined {
+export function findField(rows: TextRow[], label: RegExp): string | undefined {
   for (const row of rows) {
     const cs = cells(row);
     for (let i = 0; i < cs.length; i++) {
@@ -85,7 +85,7 @@ export function normalizeNit(value: string): string {
 }
 
 /** Texto del código QR ("NitFac: 900319753 … ValIva: 44083.00"), respaldo de algunos datos. */
-function qrField(pages: PageRows[], name: string): string | undefined {
+export function qrField(pages: PageRows[], name: string): string | undefined {
   const re = new RegExp(`\\b${name}:\\s*(\\S+)`);
   for (const p of pages) {
     for (const r of p.rows) {
@@ -96,7 +96,7 @@ function qrField(pages: PageRows[], name: string): string | undefined {
   return undefined;
 }
 
-function detectTitle(rows: TextRow[]): string | undefined {
+export function detectTitle(rows: TextRow[]): string | undefined {
   const end = rows.findIndex((r) => FIRST_SECTION.test(rowKey(r)) || DETAILS_HEADING.test(rowKey(r)));
   const candidates = (end === -1 ? rows : rows.slice(0, end)).filter((r) => {
     const key = rowKey(r);
@@ -132,7 +132,7 @@ export interface ColumnAnchors {
 const isIva = (w: Word) => /^iva$/i.test(w.text);
 const isPercent = (w: Word) => w.text === "%";
 
-function isHeaderRow(row: TextRow): boolean {
+export function isHeaderRow(row: TextRow): boolean {
   const iva = row.words.find(isIva);
   return Boolean(iva && row.words.some((w) => isPercent(w) && w.x > iva.right));
 }

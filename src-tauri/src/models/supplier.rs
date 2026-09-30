@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::models::clean;
+use crate::models::withholding::SupplierWithholdingRule;
 
 /// "purchase" = Compras, "service" = Servicios.
 pub const VAT_TYPES: &[&str] = &["purchase", "service"];
@@ -15,6 +16,16 @@ pub struct Supplier {
     pub vat_type: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Retención en la fuente: "PJ" o "PN". Los campos siguientes faltan en backups anteriores.
+    #[serde(default)]
+    pub person_type: Option<String>,
+    /// Régimen / responsabilidad fiscal del emisor leída de la última factura verificada.
+    #[serde(default)]
+    pub fiscal_regime: Option<String>,
+    #[serde(default)]
+    pub fiscal_checked_at: Option<String>,
+    #[serde(default)]
+    pub withholding_rules: Vec<SupplierWithholdingRule>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

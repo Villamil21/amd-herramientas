@@ -42,5 +42,6 @@ export const paths = {
   concepts: "/conceptos",
   signers: "/firmas",
   suppliers: "/proveedores",
+  withholdingTable: "/tabla-retenciones",
   settings: "/configuracion",
 };

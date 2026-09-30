@@ -1,18 +1,22 @@
 import { useState } from "react";
-import { Pencil, Plus, Search, Store, Trash2 } from "lucide-react";
+import { HandCoins, Pencil, Plus, Search, Store, Trash2 } from "lucide-react";
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Input, Loader, PageHeader, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
 import { supplierService } from "../services/supplierService";
-import { VAT_TYPE_LABEL, type Supplier } from "../types/models";
+import { withholdingService } from "../services/withholdingService";
+import { RETENTION_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier } from "../types/models";
 import { SupplierFormModal } from "./suppliers/SupplierFormModal";
+import { SupplierWithholdingModal } from "./suppliers/SupplierWithholdingModal";
 
 export function SuppliersPage() {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const query = useDebounced(search);
   const list = useAsync(() => supplierService.list(query), [query]);
+  const rates = useAsync(() => withholdingService.listRates(), []);
   const [editing, setEditing] = useState<Supplier | null | undefined>(undefined);
+  const [withholding, setWithholding] = useState<Supplier | null>(null);
   const [deleting, setDeleting] = useState<Supplier | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,7 +42,7 @@ export function SuppliersPage() {
       <PageHeader
         eyebrow="Datos"
         title="Proveedores"
-        description="Clasificación de IVA de cada proveedor. El análisis de facturas la aplica automáticamente según el NIT."
+        description="Tipo IVA y configuración de retención en la fuente (PJ / PN y reglas) de cada proveedor. Los análisis de facturas la aplican automáticamente según el NIT."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing(null)}>
             Nuevo proveedor
@@ -77,6 +81,9 @@ export function SuppliersPage() {
                   <th>NIT</th>
                   <th>Razón social</th>
                   <th>Tipo IVA</th>
+                  <th>PJ / PN</th>
+                  <th>Régimen</th>
+                  <th>Retención</th>
                   <th />
                 </tr>
               </thead>
@@ -88,7 +95,25 @@ export function SuppliersPage() {
                     <td>
                       <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge>
                     </td>
+                    <td>{s.personType ?? <span className="muted">—</span>}</td>
+                    <td className="selectable">{s.fiscalRegime ?? <span className="muted">—</span>}</td>
+                    <td style={{ minWidth: 200 }}>
+                      {(s.withholdingRules ?? []).length === 0 ? (
+                        <span className="muted">Sin configurar</span>
+                      ) : (
+                        (s.withholdingRules ?? []).map((r) => {
+                          const rate = rates.data?.find((x) => x.id === r.rateId);
+                          return (
+                            <div key={r.id} style={{ fontSize: "var(--text-sm)" }}>
+                              {rate ? `${RETENTION_TYPE_LABEL[rate.retentionType]} — ${rate.name}` : "Subtipo eliminado"}
+                              {r.isDefault && (s.withholdingRules ?? []).length > 1 && <span className="muted"> (predeterminada)</span>}
+                            </div>
+                          );
+                        })
+                      )}
+                    </td>
                     <td className="actions" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="sm" iconOnly icon={<HandCoins size={14} />} aria-label="Retención en la fuente" title="Retención en la fuente" onClick={() => setWithholding(s)} />
                       <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => setEditing(s)} />
                       <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setDeleting(s)} />
                     </td>
@@ -106,6 +131,16 @@ export function SuppliersPage() {
         onClose={() => setEditing(undefined)}
         onSaved={() => {
           setEditing(undefined);
+          void list.reload();
+        }}
+      />
+      <SupplierWithholdingModal
+        open={withholding !== null}
+        supplier={withholding}
+        rates={rates.data ?? []}
+        onClose={() => setWithholding(null)}
+        onSaved={() => {
+          setWithholding(null);
           void list.reload();
         }}
       />

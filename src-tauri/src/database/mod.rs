@@ -6,6 +6,7 @@ pub mod dropi;
 pub mod migrations;
 pub mod signers;
 pub mod suppliers;
+pub mod withholding;
 
 use std::path::Path;
 use std::sync::Mutex;

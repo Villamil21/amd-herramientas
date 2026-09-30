@@ -1,5 +1,7 @@
 //! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
-//! PNG), proveedores, clasificación de estados de Dropi y configuración.
+//! PNG), proveedores (con su configuración de retención), clasificación de
+//! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota
+//! y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,13 +10,17 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, dropi, signers, suppliers};
+use crate::database::{companies, concepts, dropi, signers, suppliers, withholding};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
 use crate::models::supplier::{Supplier, SupplierInput};
+use crate::models::withholding::{
+    validate_uvt, DocumentTitleMapping, DocumentTitleMappingInput, SupplierWithholdingRuleInput, UvtValue, WithholdingProfileInput,
+    WithholdingRate, WithholdingRateInput,
+};
 use crate::services::{logos, signatures};
 use crate::services::time::now_iso;
 use crate::startup::LAST_RUN_VERSION_KEY;
@@ -73,6 +79,13 @@ pub struct BackupFile {
     /// Dropi status mappings. `None` en backups anteriores: al restaurarlos no se tocan las reglas actuales.
     #[serde(default)]
     pub dropi_status_mappings: Option<Vec<DropiStatusMapping>>,
+    /// Retención en la fuente. `None` en backups anteriores: al restaurarlos se conservan los datos actuales.
+    #[serde(default)]
+    pub withholding_rates: Option<Vec<WithholdingRate>>,
+    #[serde(default)]
+    pub uvt_values: Option<Vec<UvtValue>>,
+    #[serde(default)]
+    pub document_title_mappings: Option<Vec<DocumentTitleMapping>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -90,6 +103,10 @@ pub struct BackupSummary {
     pub suppliers: Option<usize>,
     /// `None` si el backup es anterior a la clasificación de estados de Dropi.
     pub dropi_status_mappings: Option<usize>,
+    /// `None` si el backup es anterior a Retención en la fuente.
+    pub withholding_rates: Option<usize>,
+    pub uvt_values: Option<usize>,
+    pub document_title_mappings: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -145,11 +162,33 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         ),
         suppliers: Some(suppliers::list(conn, None)?),
         dropi_status_mappings: Some(dropi::list(conn)?),
+        withholding_rates: Some(withholding::list_rates(conn)?),
+        uvt_values: Some(withholding::list_uvt(conn)?),
+        document_title_mappings: Some(withholding::list_titles(conn)?),
     })
 }
 
 fn supplier_input(s: &Supplier) -> SupplierInput {
     SupplierInput { nit: s.nit.clone(), business_name: s.business_name.clone(), vat_type: s.vat_type.clone() }
+}
+
+fn supplier_profile(s: &Supplier) -> WithholdingProfileInput {
+    WithholdingProfileInput {
+        person_type: s.person_type.clone(),
+        rules: s
+            .withholding_rules
+            .iter()
+            .map(|r| SupplierWithholdingRuleInput { rate_id: r.rate_id, base_mode: r.base_mode.clone(), is_default: r.is_default })
+            .collect(),
+    }
+}
+
+fn rate_input(r: &WithholdingRate) -> WithholdingRateInput {
+    WithholdingRateInput { retention_type: r.retention_type.clone(), name: r.name.clone(), base_uvt_centi: r.base_uvt_centi, rate_bp: r.rate_bp }
+}
+
+fn title_input(m: &DocumentTitleMapping) -> DocumentTitleMappingInput {
+    DocumentTitleMappingInput { normalized_title: m.normalized_title.clone(), display_title: m.display_title.clone(), category: m.category.clone() }
 }
 
 fn dropi_input(m: &DropiStatusMapping) -> DropiStatusMappingInput {
@@ -205,6 +244,34 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
         if !nits.insert(v.nit.clone()) {
             return Err(AppError::user(format!("El backup tiene dos proveedores con el NIT {}.", v.nit)));
         }
+        supplier_profile(s)
+            .validated()
+            .map_err(|e| AppError::user(format!("Proveedor «{}» del backup: {}", s.business_name, e.0)))?;
+    }
+    let mut rate_names = std::collections::HashSet::new();
+    for r in file.withholding_rates.iter().flatten() {
+        let v = rate_input(r)
+            .validated()
+            .map_err(|e| AppError::user(format!("Concepto de retención «{}» del backup: {}", r.name, e.0)))?;
+        if !rate_names.insert((v.retention_type, v.name.to_lowercase())) {
+            return Err(AppError::user(format!("El backup tiene repetido el concepto de retención «{}».", r.name)));
+        }
+    }
+    let mut years = std::collections::HashSet::new();
+    for u in file.uvt_values.iter().flatten() {
+        validate_uvt(u.year, u.value_pesos).map_err(|e| AppError::user(format!("UVT {} del backup: {}", u.year, e.0)))?;
+        if !years.insert(u.year) {
+            return Err(AppError::user(format!("El backup tiene dos valores UVT para {}.", u.year)));
+        }
+    }
+    let mut titles = std::collections::HashSet::new();
+    for m in file.document_title_mappings.iter().flatten() {
+        let v = title_input(m)
+            .validated()
+            .map_err(|e| AppError::user(format!("Título «{}» del backup: {}", m.display_title, e.0)))?;
+        if !titles.insert(v.normalized_title.clone()) {
+            return Err(AppError::user(format!("El backup tiene dos clasificaciones para el título «{}».", v.display_title)));
+        }
     }
     let mut statuses = std::collections::HashSet::new();
     for m in file.dropi_status_mappings.iter().flatten() {
@@ -257,6 +324,9 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         signers: file.signers.as_ref().map(Vec::len),
         suppliers: file.suppliers.as_ref().map(Vec::len),
         dropi_status_mappings: file.dropi_status_mappings.as_ref().map(Vec::len),
+        withholding_rates: file.withholding_rates.as_ref().map(Vec::len),
+        uvt_values: file.uvt_values.as_ref().map(Vec::len),
+        document_title_mappings: file.document_title_mappings.as_ref().map(Vec::len),
     }
 }
 
@@ -396,9 +466,11 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
             }
         }
         if let Some(list) = &file.suppliers {
+            tx.execute("DELETE FROM supplier_withholding_rules", [])?;
             tx.execute("DELETE FROM suppliers", [])?;
             for s in list {
                 let v = supplier_input(s).validated()?;
+                let profile = supplier_profile(s).validated()?;
                 suppliers::insert_full(
                     &tx,
                     &Supplier {
@@ -408,6 +480,10 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         vat_type: v.vat_type,
                         created_at: s.created_at.clone(),
                         updated_at: s.updated_at.clone(),
+                        person_type: profile.person_type,
+                        fiscal_regime: s.fiscal_regime.clone(),
+                        fiscal_checked_at: s.fiscal_checked_at.clone(),
+                        withholding_rules: s.withholding_rules.clone(),
                     },
                 )?;
             }
@@ -422,6 +498,48 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         id: m.id,
                         normalized_status: v.normalized_status,
                         display_status: v.display_status,
+                        category: v.category,
+                        created_at: m.created_at.clone(),
+                        updated_at: m.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
+        if let Some(list) = &file.withholding_rates {
+            tx.execute("DELETE FROM withholding_rates", [])?;
+            for r in list {
+                let v = rate_input(r).validated()?;
+                withholding::insert_rate_full(
+                    &tx,
+                    &WithholdingRate {
+                        id: r.id,
+                        retention_type: v.retention_type,
+                        name: v.name,
+                        base_uvt_centi: v.base_uvt_centi,
+                        rate_bp: v.rate_bp,
+                        sort_order: r.sort_order,
+                        created_at: r.created_at.clone(),
+                        updated_at: r.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
+        if let Some(list) = &file.uvt_values {
+            tx.execute("DELETE FROM uvt_values", [])?;
+            for u in list {
+                withholding::insert_uvt_full(&tx, u)?;
+            }
+        }
+        if let Some(list) = &file.document_title_mappings {
+            tx.execute("DELETE FROM document_title_mappings", [])?;
+            for m in list {
+                let v = title_input(m).validated()?;
+                withholding::insert_title_full(
+                    &tx,
+                    &DocumentTitleMapping {
+                        id: m.id,
+                        normalized_title: v.normalized_title,
+                        display_title: v.display_title,
                         category: v.category,
                         created_at: m.created_at.clone(),
                         updated_at: m.updated_at.clone(),
@@ -524,6 +642,24 @@ mod tests {
         };
         dropi::save_many(&mut conn, &[rule("EN TERMINAL DESTINO", "in_process"), rule("RECLAME EN OFICINA", "claim")]).unwrap();
 
+        let mono = suppliers::list(&conn, None).unwrap()[0].id;
+        suppliers::save_withholding_profile(
+            &mut conn,
+            mono,
+            &WithholdingProfileInput {
+                person_type: Some("PJ".into()),
+                rules: vec![SupplierWithholdingRuleInput { rate_id: 6, base_mode: "invoice_subtotal".into(), is_default: true }],
+            },
+        )
+        .unwrap();
+        withholding::save_uvt(&conn, 2026, 50000).unwrap();
+        withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 300, rate_bp: 450 }]).unwrap();
+        withholding::save_titles(
+            &mut conn,
+            &[DocumentTitleMappingInput { normalized_title: "nota debito".into(), display_title: "NOTA DÉBITO".into(), category: "credit_note".into() }],
+        )
+        .unwrap();
+
         let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
         let json = serde_json::to_vec(&backup).unwrap();
@@ -532,7 +668,15 @@ mod tests {
 
         suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: "service".into() }).unwrap();
         dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
+        withholding::save_uvt(&conn, 2026, 1).unwrap();
+        withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        let s = suppliers::list(&conn, None).unwrap().into_iter().find(|s| s.nit == "900319753").unwrap();
+        assert_eq!((s.person_type.as_deref(), s.withholding_rules.len()), (Some("PJ"), 1), "la configuración de retención se restaura");
+        assert_eq!(withholding::list_uvt(&conn).unwrap()[0].value_pesos, 50000);
+        let r6 = withholding::list_rates(&conn).unwrap().into_iter().find(|r| r.id == 6).unwrap();
+        assert_eq!((r6.base_uvt_centi, r6.rate_bp), (300, 450));
+        assert_eq!(withholding::list_titles(&conn).unwrap().len(), 3);
         let restored_rules: Vec<(String, String)> =
             dropi::list(&conn).unwrap().into_iter().map(|m| (m.normalized_status, m.category)).collect();
         assert_eq!(
@@ -582,6 +726,9 @@ mod tests {
         restore(&mut conn, &dir, &dir, &parsed).unwrap();
         assert_eq!(suppliers::list(&conn, None).unwrap().len(), 1);
         assert_eq!(dropi::list(&conn).unwrap().len(), 1, "sin estados de Dropi en el backup se conservan los actuales");
+        assert_eq!(withholding::list_rates(&conn).unwrap().len(), 15, "sin tabla de retenciones en el backup se conserva la actual");
+        assert_eq!(withholding::list_uvt(&conn).unwrap().len(), 1);
+        assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
