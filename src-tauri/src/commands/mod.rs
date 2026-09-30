@@ -7,6 +7,7 @@ pub mod companies;
 pub mod concepts;
 pub mod dropi;
 pub mod files;
+pub mod identity_documents;
 pub mod invoices;
 pub mod statements;
 pub mod signers;

@@ -3,6 +3,7 @@
 pub mod companies;
 pub mod concepts;
 pub mod dropi;
+pub mod identity_documents;
 pub mod migrations;
 pub mod signers;
 pub mod suppliers;

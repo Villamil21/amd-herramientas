@@ -31,6 +31,8 @@ export interface CertificateSigner {
   name: string;
   role: string;
   professionalDocument: string;
+  /** Identificación personal (ej. "CC 1.192.729.629"). Opcional: "" si no se ha registrado. */
+  personalDocument: string;
   signatureFile: string;
   createdAt: string;
   updatedAt: string;
@@ -98,7 +100,23 @@ export interface BackupSummary {
   withholdingRates: number | null;
   uvtValues: number | null;
   documentTitleMappings: number | null;
+  /** null: backup anterior al certificado de ingresos; al restaurarlo se conservan los tipos de documento actuales. */
+  identityDocumentTypes: number | null;
 }
+
+/** Tipo de documento de identidad del titular (certificado de ingresos). */
+export interface IdentityDocumentType {
+  id: number;
+  name: string;
+  /** El número se muestra con separador de miles (1.006.011.707). */
+  isNumeric: boolean;
+  /** Tipo inicial: no se puede eliminar. */
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type IdentityDocumentTypeInput = Pick<IdentityDocumentType, "name" | "isNumeric">;
 
 /** Clasificación tributaria del proveedor para el análisis de IVA. */
 export type VatType = "purchase" | "service";

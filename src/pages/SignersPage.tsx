@@ -5,7 +5,7 @@ import { useAsync } from "../hooks/useAsync";
 import { signerService } from "../services/signerService";
 import type { CertificateSigner, CertificateSignerInput } from "../types/models";
 
-const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", signatureFile: "" };
+const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", personalDocument: "", signatureFile: "" };
 /** "loading" mientras se lee la firma guardada; "missing" si SQLite la referencia pero el archivo ya no está. */
 type SignatureStatus = "none" | "loading" | "ok" | "missing";
 
@@ -23,7 +23,7 @@ export function SignersPage() {
     const token = ++loadToken.current;
     setEditing(s); setPreview(null); setError(null);
     if (!s) { setValues(empty); setStatus("none"); return; }
-    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
+    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, personalDocument: s.personalDocument, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
     if (!s.signatureAvailable) { setStatus(s.signatureFile ? "missing" : "none"); return; }
     setStatus("loading");
     const markMissing = () => { if (token === loadToken.current) { setStatus("missing"); setValues(v => ({ ...v, signatureFile: "" })); } };
@@ -48,7 +48,7 @@ export function SignersPage() {
   return <>
     <PageHeader eyebrow="Datos" title="Firmas" description="Firmantes reutilizables para certificados." actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => open(null)}>Nueva firma</Button>} />
     <Card flush title="Firmas registradas">
-      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firmante</th><th>Cargo</th><th>Documento profesional</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><span className="table__primary">{s.name}</span>{!s.signatureAvailable && <> <Badge tone="warning">Firma faltante</Badge></>}</td><td>{s.role}</td><td>{s.professionalDocument}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en composición accionaria." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
+      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firmante</th><th>Cargo</th><th>Documento profesional</th><th>Documento de identidad</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><span className="table__primary">{s.name}</span>{!s.signatureAvailable && <> <Badge tone="warning">Firma faltante</Badge></>}</td><td>{s.role}</td><td>{s.professionalDocument}</td><td>{s.personalDocument || "—"}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en los certificados." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
     </Card>
     <Modal open={editing !== undefined} title={editing ? "Editar firma" : "Nueva firma"} onClose={() => setEditing(undefined)} locked={busy} footer={<><Button variant="ghost" onClick={() => setEditing(undefined)}>Cancelar</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Guardar</Button></>}>
       <div className="stack">
@@ -67,6 +67,7 @@ export function SignersPage() {
         <Field label="Nombre" required>{id => <Input id={id} value={values.name} onChange={e => setValues(v => ({ ...v, name: e.target.value }))} />}</Field>
         <Field label="Cargo" required>{id => <Input id={id} value={values.role} onChange={e => setValues(v => ({ ...v, role: e.target.value }))} />}</Field>
         <Field label="Documento profesional" required hint="Ej. TP-290048">{id => <Input id={id} value={values.professionalDocument} onChange={e => setValues(v => ({ ...v, professionalDocument: e.target.value }))} />}</Field>
+        <Field label="Documento de identidad" hint="Opcional. Ej. CC 1192729629. Aparece bajo la firma del certificado de ingresos.">{id => <Input id={id} value={values.personalDocument} onChange={e => setValues(v => ({ ...v, personalDocument: e.target.value }))} />}</Field>
       </div>
     </Modal>
     <ConfirmDialog open={!!removing} danger title="Eliminar firma" message="La firma y su imagen se eliminarán." confirmLabel="Eliminar" loading={busy} onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />

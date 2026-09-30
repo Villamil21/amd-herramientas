@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { FileBadge2, FileCheck2, TableProperties } from "lucide-react";
+import { BadgeDollarSign, FileBadge2, FileCheck2, TableProperties } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 export const certificatesModule: ModuleDef = {
@@ -16,6 +16,13 @@ export const certificatesModule: ModuleDef = {
       description: "Retención en la fuente e ICA a partir del reporte de documentos electrónicos en Excel.",
       icon: FileCheck2,
       component: lazy(() => import("./withholding/WithholdingCertificatePage")),
+    },
+    {
+      id: "ingresos",
+      name: "Certificado de ingresos",
+      description: "Ingresos de trabajadores independientes con membrete AMD Personal o Corporativo.",
+      icon: BadgeDollarSign,
+      component: lazy(() => import("./income/IncomeCertificatePage")),
     },
   ],
 };

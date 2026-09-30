@@ -116,18 +116,21 @@ export function BackupSection() {
                     Tabla de retenciones ({pending.withholdingRates} conceptos, {pending.uvtValues ?? 0} valores UVT, {pending.documentTitleMappings ?? 0} títulos Factura / Nota)
                   </li>
                 )}
+                {pending.identityDocumentTypes !== null && <li>{pending.identityDocumentTypes} tipos de documento de identidad</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>
                 Las empresas, conceptos{pending.signers !== null && ", firmantes"}
                 {pending.suppliers !== null && ", proveedores"}
                 {pending.dropiStatusMappings !== null && ", estados de Dropi"}
-                {pending.withholdingRates !== null && ", tabla de retenciones"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
+                {pending.withholdingRates !== null && ", tabla de retenciones"}
+                {pending.identityDocumentTypes !== null && ", tipos de documento"} y configuración actuales <strong>se reemplazarán</strong>. Se guardará una copia
                 automática antes de continuar.
                 {pending.signers === null && " Este backup no incluye firmantes: se conservan los actuales."}
                 {pending.suppliers === null && " Este backup no incluye proveedores: se conservan los actuales."}
                 {pending.dropiStatusMappings === null && " Este backup no incluye estados de Dropi: se conservan las clasificaciones actuales."}
                 {pending.withholdingRates === null && " Este backup no incluye la tabla de retenciones: se conservan la tabla, los valores UVT y los títulos actuales."}
+                {pending.identityDocumentTypes === null && " Este backup no incluye tipos de documento: se conservan los actuales."}
               </span>
             </div>
           )

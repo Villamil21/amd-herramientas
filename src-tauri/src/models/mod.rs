@@ -1,6 +1,7 @@
 pub mod company;
 pub mod concept;
 pub mod dropi;
+pub mod identity_document;
 pub mod signer;
 pub mod supplier;
 pub mod withholding;

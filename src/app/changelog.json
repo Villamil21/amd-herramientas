@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.16.0",
+    "date": "2026-09-30",
+    "notes": [
+      "Nuevo submódulo: Certificados → Certificado de ingresos. Genera en una página un certificado de ingresos para trabajadores independientes, con membrete AMD Personal o Corporativo (el membrete ya incluye el logo y los datos de contacto del pie).",
+      "Usa los firmantes de Datos → Firmas: nombre, cargo, matrícula y firma se toman automáticamente, y el texto concuerda con el cargo («Contadora Pública titulada» / «Contador Público titulado»).",
+      "Datos del titular: tratamiento (Señor / Señora), nombre (siempre en MAYÚSCULAS en el PDF), tipo y número de documento (los numéricos se muestran con puntos, ej. 1.006.011.707), lugar de expedición y actividad independiente.",
+      "Tipos de documento: Cédula de Ciudadanía y Cédula de Extranjería vienen incluidos; puedes crear, editar y eliminar otros (Pasaporte, PPT, NIT…). Quedan guardados y se incluyen en el backup.",
+      "Ingresos en COP, USD, EUR u otra moneda, como valor directo o con su equivalencia aproximada en COP y la fecha de la tasa de cambio (la tasa la escribes tú: la app no consulta Internet).",
+      "La fecha del certificado es automática, los párrafos van justificados y el contenido se ajusta solo para quedar siempre en una página. La vista previa muestra el mismo PDF que se exporta.",
+      "Datos → Firmas: nuevo campo opcional «Documento de identidad» (ej. CC 1.192.729.629), que aparece bajo la firma del certificado de ingresos."
+    ]
+  },
+  {
     "version": "1.15.0",
     "date": "2026-09-30",
     "notes": [

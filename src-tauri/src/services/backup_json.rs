@@ -1,7 +1,7 @@
 //! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
 //! PNG), proveedores (con su configuración de retención), clasificación de
-//! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota
-//! y configuración.
+//! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota,
+//! tipos de documento de identidad y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -10,11 +10,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, dropi, signers, suppliers, withholding};
+use crate::database::{companies, concepts, dropi, identity_documents, signers, suppliers, withholding};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
+use crate::models::identity_document::{IdentityDocumentType, IdentityDocumentTypeInput};
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
 use crate::models::supplier::{Supplier, SupplierInput};
 use crate::models::withholding::{
@@ -53,6 +54,9 @@ pub struct SignerBackup {
     pub name: String,
     pub role: String,
     pub professional_document: String,
+    /// Ausente en backups anteriores al certificado de ingresos.
+    #[serde(default)]
+    pub personal_document: String,
     pub created_at: String,
     pub updated_at: String,
     /// PNG en base64; `None` si la firma ya faltaba al exportar.
@@ -86,6 +90,9 @@ pub struct BackupFile {
     pub uvt_values: Option<Vec<UvtValue>>,
     #[serde(default)]
     pub document_title_mappings: Option<Vec<DocumentTitleMapping>>,
+    /// Tipos de documento del certificado de ingresos. `None` en backups anteriores: se conservan los actuales.
+    #[serde(default)]
+    pub identity_document_types: Option<Vec<IdentityDocumentType>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -107,6 +114,8 @@ pub struct BackupSummary {
     pub withholding_rates: Option<usize>,
     pub uvt_values: Option<usize>,
     pub document_title_mappings: Option<usize>,
+    /// `None` si el backup es anterior al certificado de ingresos.
+    pub identity_document_types: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -155,6 +164,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
                     name: s.name,
                     role: s.role,
                     professional_document: s.professional_document,
+                    personal_document: s.personal_document,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                 })
@@ -165,6 +175,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         withholding_rates: Some(withholding::list_rates(conn)?),
         uvt_values: Some(withholding::list_uvt(conn)?),
         document_title_mappings: Some(withholding::list_titles(conn)?),
+        identity_document_types: Some(identity_documents::list(conn)?),
     })
 }
 
@@ -204,6 +215,7 @@ fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
         name: s.name.clone(),
         role: s.role.clone(),
         professional_document: s.professional_document.clone(),
+        personal_document: s.personal_document.clone(),
         // Marcador para validar nombre, cargo y documento; el archivo real se asigna al restaurar.
         signature_file: "-".into(),
     }
@@ -282,7 +294,20 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
             return Err(AppError::user(format!("El backup tiene dos reglas para el estado de Dropi «{}».", v.display_status)));
         }
     }
+    let mut type_names = std::collections::HashSet::new();
+    for t in file.identity_document_types.iter().flatten() {
+        let v = identity_type_input(t)
+            .validated()
+            .map_err(|e| AppError::user(format!("Tipo de documento «{}» del backup: {}", t.name, e.0)))?;
+        if !type_names.insert(v.name.to_lowercase()) {
+            return Err(AppError::user(format!("El backup tiene repetido el tipo de documento «{}».", v.name)));
+        }
+    }
     Ok(file)
+}
+
+fn identity_type_input(t: &IdentityDocumentType) -> IdentityDocumentTypeInput {
+    IdentityDocumentTypeInput { name: t.name.clone(), is_numeric: t.is_numeric }
 }
 
 fn company_input(c: &Company) -> CompanyInput {
@@ -327,6 +352,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         withholding_rates: file.withholding_rates.as_ref().map(Vec::len),
         uvt_values: file.uvt_values.as_ref().map(Vec::len),
         document_title_mappings: file.document_title_mappings.as_ref().map(Vec::len),
+        identity_document_types: file.identity_document_types.as_ref().map(Vec::len),
     }
 }
 
@@ -353,7 +379,7 @@ fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<V
     Ok(written)
 }
 
-/// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi y configuración en una sola transacción.
+/// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi, tipos de documento y configuración en una sola transacción.
 pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
     // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
     let new_signatures = match &file.signers {
@@ -457,6 +483,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         name: v.name,
                         role: v.role,
                         professional_document: v.professional_document,
+                        personal_document: v.personal_document,
                         signature_file: signature_file.clone(),
                         created_at: s.created_at.clone(),
                         updated_at: s.updated_at.clone(),
@@ -547,6 +574,23 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        if let Some(list) = &file.identity_document_types {
+            tx.execute("DELETE FROM identity_document_types", [])?;
+            for t in list {
+                let v = identity_type_input(t).validated()?;
+                identity_documents::insert_full(
+                    &tx,
+                    &IdentityDocumentType {
+                        id: t.id,
+                        name: v.name,
+                        is_numeric: v.is_numeric,
+                        is_system: t.is_system,
+                        created_at: t.created_at.clone(),
+                        updated_at: t.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
         for (k, v) in &file.settings {
             if !INTERNAL_SETTINGS.contains(&k.as_str()) {
                 crate::database::set_setting(&tx, k, v)?;
@@ -629,6 +673,7 @@ mod tests {
                 name: "Leidy Villamil".into(),
                 role: "Contadora Pública".into(),
                 professional_document: "TP-290048".into(),
+                personal_document: "CC 1.192.729.629".into(),
                 signature_file: signature.clone(),
             },
         )
@@ -660,6 +705,8 @@ mod tests {
         )
         .unwrap();
 
+        let passport = identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "Pasaporte".into(), is_numeric: false }).unwrap();
+
         let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
         let json = serde_json::to_vec(&backup).unwrap();
@@ -670,7 +717,12 @@ mod tests {
         dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
         withholding::save_uvt(&conn, 2026, 1).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
+        identity_documents::delete(&conn, passport).unwrap();
+        identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "NIT".into(), is_numeric: true }).unwrap();
         restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        let types: Vec<(i64, String, bool)> = identity_documents::list(&conn).unwrap().into_iter().map(|t| (t.id, t.name, t.is_system)).collect();
+        assert_eq!(types.len(), 3, "los tipos de documento se reemplazan por los del backup");
+        assert_eq!(types[2], (passport, "Pasaporte".into(), false));
         let s = suppliers::list(&conn, None).unwrap().into_iter().find(|s| s.nit == "900319753").unwrap();
         assert_eq!((s.person_type.as_deref(), s.withholding_rules.len()), (Some("PJ"), 1), "la configuración de retención se restaura");
         assert_eq!(withholding::list_uvt(&conn).unwrap()[0].value_pesos, 50000);
@@ -689,6 +741,7 @@ mod tests {
         assert_eq!((restored_suppliers[0].nit.as_str(), restored_suppliers[0].vat_type.as_str()), ("900319753", "purchase"));
         let restored_signers = signers::list(&conn, None).unwrap();
         assert_eq!(restored_signers.len(), 1);
+        assert_eq!(restored_signers[0].personal_document, "CC 1.192.729.629");
         let new_signature = &restored_signers[0].signature_file;
         assert_ne!(new_signature, &signature);
         assert_eq!(signatures::read_valid(&sig_dir, new_signature), Some(signature_png));
@@ -729,6 +782,7 @@ mod tests {
         assert_eq!(withholding::list_rates(&conn).unwrap().len(), 15, "sin tabla de retenciones en el backup se conserva la actual");
         assert_eq!(withholding::list_uvt(&conn).unwrap().len(), 1);
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
+        assert_eq!(identity_documents::list(&conn).unwrap().len(), 2, "sin tipos de documento en el backup se conservan los actuales");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
