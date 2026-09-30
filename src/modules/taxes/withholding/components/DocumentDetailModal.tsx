@@ -145,7 +145,8 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
   // Pendiente: el problema y su acción van arriba, no al final del detalle.
   const pending = PENDING_STATUSES.includes(row.status);
   const ruleOnTop = pending && !row.rule && row.ruleOptions.length > 1;
-  const manualOnTop = pending && row.status === "pending-base" && needsManual;
+  // Pendiente base: se resuelve en «Base de retención», después de los totales.
+  const basePending = row.status === "pending-base";
   const informedOnTop = pending && row.status === "difference" && askInformed;
 
   const ruleSelect = (
@@ -248,7 +249,7 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
           <Alert tone="danger">{row.issues[0]}</Alert>
         ) : (
           <>
-            {pending && (
+            {pending && !basePending && (
               <div className={`attention-block attention-block--${row.status === "difference" ? "danger" : "warning"}`}>
                 <Alert tone={row.status === "difference" ? "danger" : "warning"} title={`Por resolver: ${STATUS_LABEL[row.status]}`} items={row.issues}>
                   {row.status === "pending-supplier" && (
@@ -260,9 +261,8 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
                   )}
                 </Alert>
                 {ruleOnTop && ruleSelect}
-                {manualOnTop && manualBase}
                 {informedOnTop && informedReview}
-                {error && !pending && <Alert tone="danger">{error}</Alert>}
+                {error && !needsManual && <Alert tone="danger">{error}</Alert>}
               </div>
             )}
             <Section title="Datos del documento">
@@ -303,7 +303,6 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
                   <Item label="Tarifa" value={row.rateBp !== undefined ? formatRateBp(row.rateBp) : "—"} />
                 </div>
                 {row.ruleOptions.length > 1 && !ruleOnTop && ruleSelect}
-                {needsManual && !manualOnTop && manualBase}
               </Section>
             )}
 
@@ -318,11 +317,23 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
               </div>
             </Section>
 
+            {needsManual && (
+              <Section title="Base de retención" actions={basePending && <Badge tone="gold">Pendiente</Badge>}>
+                {basePending && row.issues.map((issue) => (
+                  <span key={issue} className="muted">
+                    {issue}
+                  </span>
+                ))}
+                {manualBase}
+                {error && <Alert tone="danger">{error}</Alert>}
+              </Section>
+            )}
+
             {!informedOnTop && informedReview}
-            {error && !pending && <Alert tone="danger">{error}</Alert>}
+            {error && !pending && !needsManual && <Alert tone="danger">{error}</Alert>}
 
             <Section
-              title="Detalles de productos"
+              title="Detalle de productos"
               actions={
                 <Button size="sm" variant="ghost" icon={showProducts ? <EyeOff size={14} /> : <Eye size={14} />} onClick={() => setShowProducts((v) => !v)}>
                   {showProducts ? "Ocultar productos" : "Ver detalles de productos"}

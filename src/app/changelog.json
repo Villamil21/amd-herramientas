@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.14.2",
+    "date": "2026-09-30",
+    "notes": [
+      "Impuestos → Retención en la fuente: el detalle del documento sigue un orden más lógico: Datos del documento, Proveedor, Configuración de retención, Datos totales, Base de retención y Detalle de productos.",
+      "El formulario para escribir la base de retención ya no aparece arriba: está en la nueva sección «Base de retención», después de Datos totales, con la marca «Pendiente» mientras falte. La etiqueta «Pendiente base» sigue visible en la parte superior.",
+      "Al revisar una diferencia de Rete fuente, el mensaje de error de «Validar» ahora se muestra cuando la base y la tarifa no coinciden."
+    ]
+  },
+  {
     "version": "1.14.1",
     "date": "2026-09-29",
     "notes": [
@@ -10,13 +19,6 @@
       "Tabla de documentos: las filas pendientes se resaltan y tienen su acción (Revisar, Configurar ahora, Clasificar…); nuevo filtro «Pendientes», y los contadores de arriba filtran la tabla al pulsarlos.",
       "Detalle del documento: lo que falta por resolver aparece arriba. La tabla de productos ya no muestra IVA, INC, Descuento detalle ni Recargo detalle.",
       "Nuevo cuadro «Notas crédito» debajo del Resumen para declaración, con la base y la retención de las notas válidas. La retención es la misma que se resta en el total neto; el resumen principal no cambia."
-    ]
-  },
-  {
-    "version": "1.14.1",
-    "date": "2026-09-30",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {
