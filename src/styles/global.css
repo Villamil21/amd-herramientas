@@ -2239,6 +2239,24 @@ li.global-search__empty {
 }
 
 /* ------------------------------------------------------------------ */
+/* Dropi → Historial de carteras: filas desplegables                   */
+/* ------------------------------------------------------------------ */
+
+.wallet-row {
+  cursor: pointer;
+}
+
+.wallet-row--review td {
+  background: var(--color-warning-soft);
+}
+
+.wallet-detail td {
+  background: var(--color-surface-alt);
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ */
 /* Retención en la fuente: pendientes, estado del lote y alertas       */
 /* ------------------------------------------------------------------ */
 

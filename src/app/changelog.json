@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.15.0",
+    "date": "2026-09-30",
+    "notes": [
+      "Nuevo submódulo: Dropi → Historial de carteras. Importa el historial de cartera exportado desde Dropi (sin modificar el archivo) y resume los retiros: fecha, valor pagado, 4x1000, concepto de retiro y estado.",
+      "El MONTO de Dropi ya incluye el 4x1000: valor pagado = MONTO / 1,004 y 4x1000 = MONTO − valor pagado, al centavo. Valor pagado + 4x1000 siempre cuadra con el valor total retirado. MONTO PREVIO se ignora.",
+      "Valida cada movimiento: descripción distinta de «SALIDA POR PETICION DE RETIRO DE SALDO EN CARTERA» (los espacios de más no cuentan), tipo distinto de SALIDA, ID repetido y MONTO vacío, no numérico, negativo o cero. Esas filas quedan en «Requiere revisión» y no se suman a los totales.",
+      "Alertas con botón para filtrar las filas afectadas, filtros Todos / Validados / Requiere revisión, buscador por concepto, fecha o ID, y detalle desplegable de cada fila (ID, hora, tipo, MONTO y descripción).",
+      "Exportar Excel: hojas Resumen (con Total valor pagado, Total 4x1000 y Total monto), Detalle e Incidencias (esta última si hay filas por revisar)."
+    ]
+  },
+  {
     "version": "1.14.2",
     "date": "2026-09-30",
     "notes": [
