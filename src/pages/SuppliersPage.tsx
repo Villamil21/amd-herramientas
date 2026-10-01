@@ -42,7 +42,6 @@ export function SuppliersPage() {
       <PageHeader
         eyebrow="Datos"
         title="Proveedores"
-        description="Tipo IVA y configuración de retención en la fuente (PJ / PN y reglas) de cada proveedor. Los análisis de facturas la aplican automáticamente según el NIT."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing(null)}>
             Nuevo proveedor

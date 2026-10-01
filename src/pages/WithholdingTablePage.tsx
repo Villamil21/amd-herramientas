@@ -133,7 +133,6 @@ export function WithholdingTablePage() {
       <PageHeader
         eyebrow="Datos"
         title="Tabla de retenciones"
-        description="Valor UVT por año, conceptos de retención, base UVT y tarifa. Retención en la fuente usa esta configuración local; no se actualiza desde Internet."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>
             Nuevo concepto
@@ -145,7 +144,7 @@ export function WithholdingTablePage() {
         <Loader />
       ) : (
         <>
-          <Card title="Valor UVT" description="Un solo valor para todas las filas del mismo año. Cada documento usa el UVT del año de su fecha de emisión.">
+          <Card title="Valor UVT">
             <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
               <Field label="Año">
                 {(id) => (

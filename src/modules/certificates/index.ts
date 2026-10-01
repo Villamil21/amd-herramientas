@@ -8,11 +8,12 @@ export const certificatesModule: ModuleDef = {
   description: "Genera certificados profesionales en PDF con datos ya guardados.",
   icon: FileBadge2,
   accent: "violet",
+  submoduleCards: "name",
   submodules: [
     { id: "composicion-accionaria", name: "Composición Accionaria", description: "Certificado de capital y participación de accionistas.", icon: TableProperties, component: lazy(() => import("./composition/CompositionCertificatePage")) },
     {
       id: "retencion",
-      name: "Certificado de retención",
+      name: "Certificado de Rete fuente e ICA",
       description: "Retención en la fuente e ICA a partir del reporte de documentos electrónicos en Excel.",
       icon: FileCheck2,
       component: lazy(() => import("./withholding/WithholdingCertificatePage")),

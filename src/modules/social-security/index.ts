@@ -8,6 +8,7 @@ export const socialSecurityModule: ModuleDef = {
   description: "Procesa planillas PILA y obtiene el detalle de aportes por empleado.",
   icon: UsersRound,
   accent: "teal",
+  submoduleCards: "name",
   submodules: [
     {
       id: "resumen-planilla",

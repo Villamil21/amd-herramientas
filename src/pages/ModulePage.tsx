@@ -49,6 +49,12 @@ export function ModulePage({ module }: { module: ModuleDef }) {
             ))}
           </div>
         )
+      ) : module.submoduleCards === "name" ? (
+        <div className="bank-grid">
+          {module.submodules.map((s) => (
+            <BankCard key={s.id} name={s.name} available={isAvailable(s)} onOpen={() => navigate(paths.submodule(module.id, s.id))} />
+          ))}
+        </div>
       ) : (
         <div className="tile-grid">
           {module.submodules.map((s) => (

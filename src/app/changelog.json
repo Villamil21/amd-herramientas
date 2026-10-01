@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.16.1",
+    "date": "2026-10-01",
+    "notes": [
+      "Certificados, Reportes regulatorios, Impuestos, Dropi y Seguridad social: las tarjetas ahora tienen el mismo estilo limpio de Extractos bancarios (nombre centrado y punto verde), sin descripción ni «Abrir».",
+      "Nombres más cortos: «Certificado de Rete fuente e ICA», «TPSV a Excel» (antes UIAF), «IVA» (antes Análisis de IVA de facturas) e «Historial de cartera».",
+      "Datos → Empresas, Proveedores y Tabla de retenciones (incluida la sección Valor UVT): se quitaron los textos explicativos bajo los títulos."
+    ]
+  },
+  {
+    "version": "1.16.1",
+    "date": "2026-10-01",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.16.0",
     "date": "2026-09-30",
     "notes": [

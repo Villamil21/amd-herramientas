@@ -162,7 +162,7 @@ export default function WithholdingCertificatePage() {
     <>
       <PageHeader
         eyebrow="Certificados"
-        title="Certificado de retención"
+        title="Certificado de Rete fuente e ICA"
         description="Genera certificados de retención en la fuente e ICA a partir del reporte de documentos electrónicos."
       />
       <Stepper steps={STEPS} current={draft.step} canGoTo={canGoTo} onChange={go} />

@@ -12,10 +12,11 @@ export const taxesModule: ModuleDef = {
   description: "Analiza facturas y prepara información tributaria.",
   icon: Landmark,
   accent: "rose",
+  submoduleCards: "name",
   submodules: [
     {
       id: "analisis-iva-facturas",
-      name: "Análisis de IVA de facturas",
+      name: "IVA",
       description: "Resume bases e IVA por tarifa, tipo de proveedor y tipo de documento a partir de una carpeta de facturas PDF.",
       icon: ReceiptText,
       component: lazy(() => import("./invoice-vat/InvoiceVatPage")),

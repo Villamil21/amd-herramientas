@@ -12,6 +12,7 @@ export const dropiModule: ModuleDef = {
   description: "Cierres de las empresas que venden con la plataforma Dropi.",
   icon: PackageCheck,
   accent: "orange",
+  submoduleCards: "name",
   submodules: [
     {
       id: "ordenes",
@@ -22,7 +23,7 @@ export const dropiModule: ModuleDef = {
     },
     {
       id: "historial-carteras",
-      name: "Historial de carteras",
+      name: "Historial de cartera",
       description: "Resume los retiros de la cartera Dropi: valor pagado y 4x1000 a partir del historial exportado.",
       icon: Wallet,
       component: lazy(() => import("./wallet-history/WalletHistoryPage")),

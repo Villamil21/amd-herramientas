@@ -186,7 +186,7 @@ export function SupplierWithholdingModal({ open, supplier, draft, rates, onClose
             )}
           </Field>
           {isNew && (
-            <Field label="Tipo IVA" required hint="Se usa en Análisis de IVA de facturas.">
+            <Field label="Tipo IVA" required hint="Se usa en Impuestos → IVA.">
               {(id) => (
                 <Select
                   id={id}

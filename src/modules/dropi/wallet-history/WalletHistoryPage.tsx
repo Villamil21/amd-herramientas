@@ -109,7 +109,7 @@ export default function WalletHistoryPage() {
     <>
       <PageHeader
         eyebrow="Dropi"
-        title="Historial de carteras"
+        title="Historial de cartera"
         description="Importa el historial de cartera exportado desde Dropi para resumir los retiros realizados."
         actions={
           analysis && (

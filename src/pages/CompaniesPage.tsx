@@ -39,7 +39,6 @@ export function CompaniesPage() {
       <PageHeader
         eyebrow="Datos"
         title="Empresas"
-        description="Empresas que emiten documentos y certificados. Sus datos y logo se reutilizan en todos los módulos."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing(null)}>
             Nueva empresa

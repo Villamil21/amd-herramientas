@@ -13,10 +13,11 @@ export const regulatoryReportsModule: ModuleDef = {
   description: "Genera reportes y archivos para organismos reguladores.",
   icon: FileText,
   accent: "amber",
+  submoduleCards: "name",
   submodules: [
     {
       id: "uiaf",
-      name: "UIAF",
+      name: "TPSV a Excel",
       description: "Reportes a la Unidad de Información y Análisis Financiero.",
       icon: ShieldCheck,
       providersDescription: "Selecciona el proceso de UIAF.",

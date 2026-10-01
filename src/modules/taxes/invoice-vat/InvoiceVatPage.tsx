@@ -108,7 +108,7 @@ export default function InvoiceVatPage() {
     <>
       <PageHeader
         eyebrow="Impuestos"
-        title="Análisis de IVA de facturas"
+        title="IVA"
         description="Selecciona una carpeta con facturas electrónicas en PDF para resumir bases e IVA por tarifa, tipo de proveedor y tipo de documento."
         actions={
           report && (
