@@ -1,7 +1,8 @@
 //! Backup portable en JSON: empresas (con logos), conceptos, firmantes (con su
 //! PNG), proveedores (con su configuración de retención), clasificación de
 //! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota,
-//! tipos de documento de identidad y configuración.
+//! tipos de documento de identidad, Tabla de Autorretenciones, tipos de
+//! documento de Ventas y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -10,12 +11,15 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, dropi, identity_documents, signers, suppliers, withholding};
+use crate::database::{companies, concepts, dropi, identity_documents, self_withholding, signers, suppliers, withholding};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
 use crate::models::identity_document::{IdentityDocumentType, IdentityDocumentTypeInput};
+use crate::models::self_withholding::{
+    normalize_ciiu, SalesDocumentTypeMapping, SalesDocumentTypeMappingInput, SelfWithholdingRate, SelfWithholdingRateInput,
+};
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
 use crate::models::supplier::{Supplier, SupplierInput};
 use crate::models::withholding::{
@@ -93,6 +97,11 @@ pub struct BackupFile {
     /// Tipos de documento del certificado de ingresos. `None` en backups anteriores: se conservan los actuales.
     #[serde(default)]
     pub identity_document_types: Option<Vec<IdentityDocumentType>>,
+    /// Retención en la fuente ventas. `None` en backups anteriores: se conservan la tabla y las clasificaciones actuales.
+    #[serde(default)]
+    pub self_withholding_rates: Option<Vec<SelfWithholdingRate>>,
+    #[serde(default)]
+    pub sales_document_types: Option<Vec<SalesDocumentTypeMapping>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -116,6 +125,9 @@ pub struct BackupSummary {
     pub document_title_mappings: Option<usize>,
     /// `None` si el backup es anterior al certificado de ingresos.
     pub identity_document_types: Option<usize>,
+    /// `None` si el backup es anterior a Retención en la fuente ventas.
+    pub self_withholding_rates: Option<usize>,
+    pub sales_document_types: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -176,6 +188,8 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         uvt_values: Some(withholding::list_uvt(conn)?),
         document_title_mappings: Some(withholding::list_titles(conn)?),
         identity_document_types: Some(identity_documents::list(conn)?),
+        self_withholding_rates: Some(self_withholding::list_rates(conn)?),
+        sales_document_types: Some(self_withholding::list_types(conn)?),
     })
 }
 
@@ -208,6 +222,14 @@ fn dropi_input(m: &DropiStatusMapping) -> DropiStatusMappingInput {
         display_status: m.display_status.clone(),
         category: m.category.clone(),
     }
+}
+
+fn self_rate_input(r: &SelfWithholdingRate) -> SelfWithholdingRateInput {
+    SelfWithholdingRateInput { ciiu_code: r.ciiu_code.clone(), economic_activity: r.economic_activity.clone(), rate_bp: r.rate_bp }
+}
+
+fn sales_type_input(m: &SalesDocumentTypeMapping) -> SalesDocumentTypeMappingInput {
+    SalesDocumentTypeMappingInput { normalized_label: m.normalized_label.clone(), original_label: m.original_label.clone(), category: m.category.clone() }
 }
 
 fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
@@ -303,6 +325,24 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
             return Err(AppError::user(format!("El backup tiene repetido el tipo de documento «{}».", v.name)));
         }
     }
+    let mut ciiu_codes = std::collections::HashSet::new();
+    for r in file.self_withholding_rates.iter().flatten() {
+        self_rate_input(r)
+            .validated()
+            .map_err(|e| AppError::user(format!("Código CIIU {} de la Tabla de Autorretenciones del backup: {}", r.ciiu_code, e.0)))?;
+        if !ciiu_codes.insert(normalize_ciiu(&r.ciiu_code)) {
+            return Err(AppError::user(format!("El backup tiene repetido el Código CIIU {} en la Tabla de Autorretenciones.", r.ciiu_code)));
+        }
+    }
+    let mut sales_types = std::collections::HashSet::new();
+    for m in file.sales_document_types.iter().flatten() {
+        let v = sales_type_input(m)
+            .validated()
+            .map_err(|e| AppError::user(format!("Tipo de documento de ventas «{}» del backup: {}", m.original_label, e.0)))?;
+        if !sales_types.insert(v.normalized_label.clone()) {
+            return Err(AppError::user(format!("El backup tiene dos clasificaciones para el tipo de documento «{}».", v.original_label)));
+        }
+    }
     Ok(file)
 }
 
@@ -325,6 +365,7 @@ fn company_input(c: &Company) -> CompanyInput {
         subscribed_nominal_value: c.subscribed_nominal_value,
         paid_total_shares: c.paid_total_shares,
         paid_nominal_value: c.paid_nominal_value,
+        ciiu_code: c.ciiu_code.clone(),
         shareholders: c.shareholders.clone(),
     }
 }
@@ -353,6 +394,8 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         uvt_values: file.uvt_values.as_ref().map(Vec::len),
         document_title_mappings: file.document_title_mappings.as_ref().map(Vec::len),
         identity_document_types: file.identity_document_types.as_ref().map(Vec::len),
+        self_withholding_rates: file.self_withholding_rates.as_ref().map(Vec::len),
+        sales_document_types: file.sales_document_types.as_ref().map(Vec::len),
     }
 }
 
@@ -379,7 +422,7 @@ fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<V
     Ok(written)
 }
 
-/// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi, tipos de documento y configuración en una sola transacción.
+/// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi, tipos de documento, autorretenciones y configuración en una sola transacción.
 pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
     // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
     let new_signatures = match &file.signers {
@@ -451,6 +494,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                     subscribed_nominal_value: v.subscribed_nominal_value,
                     paid_total_shares: v.paid_total_shares,
                     paid_nominal_value: v.paid_nominal_value,
+                    ciiu_code: v.ciiu_code,
                     shareholders: v.shareholders,
                     created_at: c.company.created_at.clone(),
                     updated_at: c.company.updated_at.clone(),
@@ -591,6 +635,42 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        if let Some(list) = &file.self_withholding_rates {
+            tx.execute("DELETE FROM self_withholding_rates", [])?;
+            for r in list {
+                let v = self_rate_input(r).validated()?;
+                self_withholding::insert_rate_full(
+                    &tx,
+                    &SelfWithholdingRate {
+                        id: r.id,
+                        normalized_code: normalize_ciiu(&v.ciiu_code),
+                        ciiu_code: v.ciiu_code,
+                        economic_activity: v.economic_activity,
+                        rate_bp: v.rate_bp,
+                        source: r.source.clone(),
+                        created_at: r.created_at.clone(),
+                        updated_at: r.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
+        if let Some(list) = &file.sales_document_types {
+            tx.execute("DELETE FROM sales_document_type_mappings", [])?;
+            for m in list {
+                let v = sales_type_input(m).validated()?;
+                self_withholding::insert_type_full(
+                    &tx,
+                    &SalesDocumentTypeMapping {
+                        id: m.id,
+                        normalized_label: v.normalized_label,
+                        original_label: v.original_label,
+                        category: v.category,
+                        created_at: m.created_at.clone(),
+                        updated_at: m.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
         for (k, v) in &file.settings {
             if !INTERNAL_SETTINGS.contains(&k.as_str()) {
                 crate::database::set_setting(&tx, k, v)?;
@@ -648,6 +728,7 @@ mod tests {
                 subscribed_nominal_value: None,
                 paid_total_shares: None,
                 paid_nominal_value: None,
+                ciiu_code: "0111".into(),
                 shareholders: vec![],
             },
         )
@@ -705,6 +786,14 @@ mod tests {
         )
         .unwrap();
 
+        let id_6201 = self_withholding::list_rates(&conn).unwrap().into_iter().find(|r| r.normalized_code == "6201").unwrap().id;
+        self_withholding::update_rates(&mut conn, &[crate::models::self_withholding::SelfWithholdingRateUpdate { id: id_6201, rate_bp: 150 }]).unwrap();
+        self_withholding::save_types(
+            &mut conn,
+            &[SalesDocumentTypeMappingInput { normalized_label: "documento x".into(), original_label: "Documento X".into(), category: "credit_note".into() }],
+        )
+        .unwrap();
+
         let passport = identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "Pasaporte".into(), is_numeric: false }).unwrap();
 
         let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
@@ -718,6 +807,9 @@ mod tests {
         withholding::save_uvt(&conn, 2026, 1).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         identity_documents::delete(&conn, passport).unwrap();
+        self_withholding::update_rates(&mut conn, &[crate::models::self_withholding::SelfWithholdingRateUpdate { id: id_6201, rate_bp: 0 }]).unwrap();
+        let x = self_withholding::list_types(&conn).unwrap().into_iter().find(|t| t.normalized_label == "documento x").unwrap();
+        self_withholding::delete_type(&conn, x.id).unwrap();
         identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "NIT".into(), is_numeric: true }).unwrap();
         restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
         let types: Vec<(i64, String, bool)> = identity_documents::list(&conn).unwrap().into_iter().map(|t| (t.id, t.name, t.is_system)).collect();
@@ -748,6 +840,11 @@ mod tests {
         assert!(!sig_dir.join(&signature).exists(), "la firma anterior se elimina");
         let restored = companies::list(&conn, None).unwrap();
         assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].ciiu_code, "0111", "el Código CIIU se restaura con su cero inicial");
+        let rates = self_withholding::list_rates(&conn).unwrap();
+        assert_eq!(rates.len(), 501);
+        assert_eq!(rates.iter().find(|r| r.id == id_6201).unwrap().rate_bp, 150, "la tarifa editada se restaura");
+        assert_eq!(self_withholding::list_types(&conn).unwrap().len(), 3, "los tipos de documento de ventas se restauran");
         let new_logo = restored[0].logo_file.clone().unwrap();
         assert_ne!(new_logo, logo, "el logo se reescribe con un nombre nuevo");
         assert!(dir.join(&new_logo).exists());
@@ -783,6 +880,8 @@ mod tests {
         assert_eq!(withholding::list_uvt(&conn).unwrap().len(), 1);
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
         assert_eq!(identity_documents::list(&conn).unwrap().len(), 2, "sin tipos de documento en el backup se conservan los actuales");
+        assert_eq!(self_withholding::list_rates(&conn).unwrap().len(), 501, "sin Tabla de Autorretenciones en el backup se conserva la actual");
+        assert_eq!(self_withholding::list_types(&conn).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

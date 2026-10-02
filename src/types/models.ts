@@ -13,6 +13,8 @@ export interface Company {
   subscribedNominalValue: number | null;
   paidTotalShares: number | null;
   paidNominalValue: number | null;
+  /** Código CIIU como texto (conserva ceros iniciales: "0111"). Vacío = sin configurar. */
+  ciiuCode: string;
   shareholders: Shareholder[];
   createdAt: string;
   updatedAt: string;
@@ -102,6 +104,9 @@ export interface BackupSummary {
   documentTitleMappings: number | null;
   /** null: backup anterior al certificado de ingresos; al restaurarlo se conservan los tipos de documento actuales. */
   identityDocumentTypes: number | null;
+  /** null: backup anterior a Retención en la fuente ventas; al restaurarlo se conservan la tabla y las clasificaciones actuales. */
+  selfWithholdingRates: number | null;
+  salesDocumentTypes: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */
@@ -230,3 +235,37 @@ export interface DropiStatusMapping {
 }
 
 export type DropiStatusMappingInput = Pick<DropiStatusMapping, "normalizedStatus" | "displayStatus" | "category">;
+
+/** Fila de Datos → Tabla de Autorretenciones (Decreto 572 de 2025, art. 1.2.6.8, editable). */
+export interface SelfWithholdingRate {
+  id: number;
+  /** Código tal como lo trae la fuente ("111") o lo escribió el usuario. */
+  ciiuCode: string;
+  /** Clave de comparación: solo dígitos, a 4 posiciones si tiene 4 o menos ("0111"). */
+  normalizedCode: string;
+  economicActivity: string;
+  /** Centésimas de punto: 1,10 % → 110. */
+  rateBp: number;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SelfWithholdingRateInput = Pick<SelfWithholdingRate, "ciiuCode" | "economicActivity" | "rateBp">;
+
+/** Categoría final de un «Tipo de documento» de la hoja Ventas. */
+export type SalesCategory = "invoice" | "credit_note";
+
+export const SALES_CATEGORY_LABEL: Record<SalesCategory, string> = { invoice: "Facturas", credit_note: "Notas Crédito" };
+
+export interface SalesDocumentTypeMapping {
+  id: number;
+  /** normalizeKey del tipo de documento. */
+  normalizedLabel: string;
+  originalLabel: string;
+  category: SalesCategory;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SalesDocumentTypeMappingInput = Pick<SalesDocumentTypeMapping, "normalizedLabel" | "originalLabel" | "category">;

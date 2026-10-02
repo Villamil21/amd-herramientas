@@ -5,6 +5,7 @@ pub mod concepts;
 pub mod dropi;
 pub mod identity_documents;
 pub mod migrations;
+pub mod self_withholding;
 pub mod signers;
 pub mod suppliers;
 pub mod withholding;

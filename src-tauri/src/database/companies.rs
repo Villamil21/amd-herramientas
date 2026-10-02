@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput, Shareholder};
 use crate::services::time::now_iso;
 
-const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at";
+const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code";
 
 fn map(r: &Row) -> rusqlite::Result<Company> {
     Ok(Company {
@@ -22,6 +22,7 @@ fn map(r: &Row) -> rusqlite::Result<Company> {
         subscribed_nominal_value: r.get(11)?,
         paid_total_shares: r.get(12)?,
         paid_nominal_value: r.get(13)?,
+        ciiu_code: r.get(16)?,
         shareholders: Vec::new(),
         created_at: r.get(14)?,
         updated_at: r.get(15)?,
@@ -67,9 +68,9 @@ fn replace_shareholders(conn: &Connection, company_id: i64, rows: &[Shareholder]
 pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
     let now = now_iso();
     conn.execute(
-        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now],
+        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15)",
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code],
     )?;
     let id = conn.last_insert_rowid();
     replace_shareholders(conn, id, &c.shareholders)?;
@@ -79,8 +80,8 @@ pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
 /// Inserta conservando id y fechas (restauración de backups).
 pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
     conn.execute(
-        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"),
-        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at],
+        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
+        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code],
     )?;
     replace_shareholders(conn, c.id, &c.shareholders)?;
     Ok(())
@@ -89,9 +90,9 @@ pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
 pub fn update(conn: &Connection, id: i64, c: &CompanyInput) -> AppResult<()> {
     let n = conn.execute(
         "UPDATE companies SET razon_social = ?1, nit = ?2, direccion = ?3, ciudad = ?4, telefono = ?5,
-                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14
+                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16
          WHERE id = ?15",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id],
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code],
     )?;
     if n == 0 {
         return Err(AppError::user("La empresa no existe o fue eliminada."));

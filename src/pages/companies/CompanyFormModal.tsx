@@ -6,12 +6,14 @@ import { companyService, getLogoDataUrl } from "../../services/companyService";
 import type { Company, CompanyInput } from "../../types/models";
 
 const EMPTY: CompanyInput = {
-  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, shareholders: [],
+  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, ciiuCode: "", shareholders: [],
 };
 
 interface Props {
   open: boolean;
   company: Company | null; // null = nueva
+  /** Valores sugeridos para una empresa nueva (ej. NIT y razón social leídos de un archivo). */
+  initial?: Partial<CompanyInput>;
   onClose: () => void;
   onSaved: (company: Company) => void;
 }
@@ -23,11 +25,12 @@ function validate(v: CompanyInput): Errors {
   if (!v.razonSocial.trim()) e.razonSocial = "La razón social es obligatoria.";
   if (!v.nit.trim()) e.nit = "El NIT es obligatorio.";
   else if (!/^[\d.\- ]+$/.test(v.nit.trim())) e.nit = "Solo números, puntos y guion.";
+  if (v.ciiuCode.trim() && !/^\d{1,6}$/.test(v.ciiuCode.trim())) e.ciiuCode = "Solo números (ej. 6201 o 0111).";
   if (v.correo.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.correo.trim())) e.correo = "Correo no válido.";
   return e;
 }
 
-export function CompanyFormModal({ open, company, onClose, onSaved }: Props) {
+export function CompanyFormModal({ open, company, initial, onClose, onSaved }: Props) {
   const toast = useToast();
   const [values, setValues] = useState<CompanyInput>(EMPTY);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -38,12 +41,14 @@ export function CompanyFormModal({ open, company, onClose, onSaved }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    const initial = company ? { ...EMPTY, ...company } : EMPTY;
-    setValues(initial);
+    const start = company ? { ...EMPTY, ...company } : { ...EMPTY, ...initial };
+    setValues(start);
     setErrors({});
     setError(null);
     setLogoPreview(null);
-    void getLogoDataUrl(initial.logoFile).then(setLogoPreview);
+    void getLogoDataUrl(start.logoFile).then(setLogoPreview);
+    // `initial` solo se aplica al abrir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, company]);
 
   const set = (key: keyof CompanyInput) => (e: { target: { value: string } }) => setValues((v) => ({ ...v, [key]: e.target.value }));
@@ -143,6 +148,9 @@ export function CompanyFormModal({ open, company, onClose, onSaved }: Props) {
           </Field>
           <Field label="DV" hint="Dígito de verificación">
             {(id) => <Input id={id} value={values.dv} onChange={set("dv")} placeholder="1" />}
+          </Field>
+          <Field label="Código CIIU" hint="Actividad económica; define la tarifa de autorretención." error={errors.ciiuCode}>
+            {(id) => <Input id={id} value={values.ciiuCode} onChange={set("ciiuCode")} invalid={!!errors.ciiuCode} placeholder="6201" inputMode="numeric" />}
           </Field>
           <Field label="Ciudad" hint="Se usa como «Consignado en» en los certificados.">
             {(id) => <Input id={id} value={values.ciudad} onChange={set("ciudad")} />}

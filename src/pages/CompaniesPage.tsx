@@ -75,6 +75,7 @@ export function CompaniesPage() {
               <thead>
                 <tr>
                   <th>Empresa</th>
+                  <th>Código CIIU</th>
                   <th>Ciudad</th>
                   <th>Teléfono</th>
                   <th>Correo</th>
@@ -93,6 +94,7 @@ export function CompaniesPage() {
                         </div>
                       </div>
                     </td>
+                    <td>{c.ciiuCode || <span className="muted">—</span>}</td>
                     <td>{c.ciudad || <span className="muted">—</span>}</td>
                     <td>{c.telefono || <span className="muted">—</span>}</td>
                     <td>{c.correo || <span className="muted">—</span>}</td>

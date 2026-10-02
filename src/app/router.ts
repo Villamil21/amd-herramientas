@@ -43,5 +43,8 @@ export const paths = {
   signers: "/firmas",
   suppliers: "/proveedores",
   withholdingTable: "/tabla-retenciones",
+  selfWithholdingTable: "/tabla-autorretenciones",
+  /** Tabla de Autorretenciones filtrada por un código. */
+  selfWithholdingCode: (code: string) => `/tabla-autorretenciones/${code}`,
   settings: "/configuracion",
 };

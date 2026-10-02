@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Building2, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
+import { BadgePercent, Building2, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
@@ -12,6 +12,7 @@ const DATA_NAV = [
   { key: "concepts", label: "Conceptos", icon: Database, path: paths.concepts },
   { key: "suppliers", label: "Proveedores", icon: Store, path: paths.suppliers },
   { key: "withholding-table", label: "Tabla de retenciones", icon: Percent, path: paths.withholdingTable },
+  { key: "self-withholding-table", label: "Tabla de Autorretenciones", icon: BadgePercent, path: paths.selfWithholdingTable },
 ];
 const SYSTEM_NAV = [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }];
 

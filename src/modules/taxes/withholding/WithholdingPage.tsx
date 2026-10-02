@@ -236,7 +236,7 @@ export default function WithholdingPage() {
     <>
       <PageHeader
         eyebrow="Impuestos"
-        title="Retención en la fuente"
+        title="Retención en la fuente compras"
         description="Selecciona una carpeta con facturas electrónicas en PDF para preparar, validar y resumir la información de la declaración de retención en la fuente."
         actions={
           <>

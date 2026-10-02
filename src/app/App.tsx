@@ -19,6 +19,7 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { SignersPage } from "../pages/SignersPage";
 import { SuppliersPage } from "../pages/SuppliersPage";
 import { WithholdingTablePage } from "../pages/WithholdingTablePage";
+import { SelfWithholdingTablePage } from "../pages/SelfWithholdingTablePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 
 const tools: Crumb = { label: "Herramientas", onClick: () => navigate(paths.tools) };
@@ -68,6 +69,8 @@ function resolve(segments: string[]) {
       return { active: "suppliers", crumbs: [{ label: "Datos" }, { label: "Proveedores" }], page: <SuppliersPage /> };
     case "tabla-retenciones":
       return { active: "withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de retenciones" }], page: <WithholdingTablePage /> };
+    case "tabla-autorretenciones":
+      return { active: "self-withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Autorretenciones" }], page: <SelfWithholdingTablePage initialSearch={moduleId ?? ""} /> };
     case "configuracion":
       return { active: "settings", crumbs: [{ label: "Sistema" }, { label: "Configuración" }], page: <SettingsPage /> };
   }

@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { HandCoins, Landmark, ReceiptText } from "lucide-react";
+import { BadgePercent, HandCoins, Landmark, ReceiptText } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 /**
@@ -23,10 +23,17 @@ export const taxesModule: ModuleDef = {
     },
     {
       id: "retencion-en-la-fuente",
-      name: "Retención en la fuente",
+      name: "Retención en la fuente compras",
       description: "Prepara, valida y resume por PJ / PN las bases y retenciones de la declaración a partir de una carpeta de facturas PDF.",
       icon: HandCoins,
       component: lazy(() => import("./withholding/WithholdingPage")),
+    },
+    {
+      id: "retencion-en-la-fuente-ventas",
+      name: "Retención en la fuente ventas",
+      description: "Calcula la autorretención en la fuente sobre las ventas a partir del Excel de facturación DIAN y el Código CIIU de la empresa.",
+      icon: BadgePercent,
+      component: lazy(() => import("./sales-withholding/SalesWithholdingPage")),
     },
   ],
 };

@@ -1,18 +1,26 @@
 [
   {
-    "version": "1.16.1",
-    "date": "2026-10-01",
+    "version": "1.17.0",
+    "date": "2026-10-02",
     "notes": [
-      "Certificados, Reportes regulatorios, Impuestos, Dropi y Seguridad social: las tarjetas ahora tienen el mismo estilo limpio de Extractos bancarios (nombre centrado y punto verde), sin descripción ni «Abrir».",
-      "Nombres más cortos: «Certificado de Rete fuente e ICA», «TPSV a Excel» (antes UIAF), «IVA» (antes Análisis de IVA de facturas) e «Historial de cartera».",
-      "Datos → Empresas, Proveedores y Tabla de retenciones (incluida la sección Valor UVT): se quitaron los textos explicativos bajo los títulos."
+      "Nuevo submódulo: Impuestos → Retención en la fuente ventas. Importa el Excel de facturación DIAN, usa solo la hoja Ventas y calcula la autorretención en la fuente de Facturas y Notas Crédito por separado; la autorretención neta resta la de las notas.",
+      "La base de cada documento es Total − (IVA, ICA, IC, INC, Timbre, INC Bolsas, IN Carbono, IN Combustibles, IC Datos, ICL, INPP, IBUA, ICUI). Las columnas se buscan por su nombre, no por su letra, y «Ver detalle de cálculo» muestra la resta de cada fila.",
+      "La empresa se identifica por el NIT Emisor (en Empresas, no en Proveedores) y la tarifa sale de su Código CIIU. Si falta la empresa, el CIIU o la tarifa, el módulo lo indica y permite resolverlo sin asumir ninguna tarifa.",
+      "Tipos de documento nuevos: se preguntan una sola vez (Facturas o Notas Crédito) y la decisión queda guardada. Los CUFE/CUDE repetidos no se suman dos veces y los valores no numéricos quedan marcados como «Requiere revisión».",
+      "Exportar Excel genera un archivo nuevo con las hojas Resumen y Detalle; el Excel original nunca se modifica.",
+      "Datos → Tabla de Autorretenciones: los 501 códigos CIIU del Decreto 572 de 2025 (art. 1.2.6.8) con su tarifa. Las tarifas se pueden editar y se conservan al actualizar la app; también puedes agregar o eliminar códigos.",
+      "Datos → Empresas: nuevo campo «Código CIIU» (conserva ceros iniciales, ej. 0111).",
+      "El submódulo anterior ahora se llama «Retención en la fuente compras».",
+      "El backup incluye el Código CIIU de las empresas, la Tabla de Autorretenciones y los tipos de documento de ventas."
     ]
   },
   {
     "version": "1.16.1",
     "date": "2026-10-01",
     "notes": [
-      "(Describe aquí las novedades de esta versión)"
+      "Certificados, Reportes regulatorios, Impuestos, Dropi y Seguridad social: las tarjetas ahora tienen el mismo estilo limpio de Extractos bancarios (nombre centrado y punto verde), sin descripción ni «Abrir».",
+      "Nombres más cortos: «Certificado de Rete fuente e ICA», «TPSV a Excel» (antes UIAF), «IVA» (antes Análisis de IVA de facturas) e «Historial de cartera».",
+      "Datos → Empresas, Proveedores y Tabla de retenciones (incluida la sección Valor UVT): se quitaron los textos explicativos bajo los títulos."
     ]
   },
   {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::models::clean;
+use crate::models::self_withholding::validate_ciiu;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +21,9 @@ pub struct Company {
     pub subscribed_nominal_value: Option<i64>,
     pub paid_total_shares: Option<i64>,
     pub paid_nominal_value: Option<i64>,
+    /// Código CIIU como texto (conserva ceros iniciales). Vacío = sin configurar; ausente en backups anteriores.
+    #[serde(default)]
+    pub ciiu_code: String,
     #[serde(default)]
     pub shareholders: Vec<Shareholder>,
     pub created_at: String,
@@ -59,6 +63,8 @@ pub struct CompanyInput {
     pub paid_total_shares: Option<i64>,
     pub paid_nominal_value: Option<i64>,
     #[serde(default)]
+    pub ciiu_code: String,
+    #[serde(default)]
     pub shareholders: Vec<Shareholder>,
 }
 
@@ -79,6 +85,7 @@ impl CompanyInput {
             subscribed_nominal_value: self.subscribed_nominal_value,
             paid_total_shares: self.paid_total_shares,
             paid_nominal_value: self.paid_nominal_value,
+            ciiu_code: validate_ciiu(&self.ciiu_code)?,
             shareholders: self.shareholders.into_iter().enumerate().map(|(i, s)| Shareholder {
                 id: s.id,
                 name: clean(&s.name, 200),
