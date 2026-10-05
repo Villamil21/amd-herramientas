@@ -27,6 +27,7 @@ describe.skipIf(files.length === 0)("factura electrónica real", () => {
       expect(invoice.supplierNit).toMatch(/^\d+$/);
       expect(invoice.lineIssues).toEqual([]);
       expect(invoice.lines.length).toBeGreaterThan(0);
+      expect(invoice.products).toEqual(invoice.lines);
       const bases = invoice.lines.reduce((s, l) => s + l.baseCents, 0);
       if (invoice.subtotalCents !== undefined) expect(bases).toBe(invoice.subtotalCents);
 
@@ -35,6 +36,7 @@ describe.skipIf(files.length === 0)("factura electrónica real", () => {
       expect(invoice.supplierName).toBe("PRICESMART COLOMBIA S.A.S.");
       expect(invoice.pageCount).toBe(2);
       expect(invoice.lines).toHaveLength(10);
+      expect(invoice.products[0]).toEqual({ page: 1, description: "755610 ComidaPerro", rateBp: 500, vatCents: 666_200, baseCents: 13_323_800 });
       const sum = (rate: number, key: "baseCents" | "vatCents") => invoice.lines.filter((l) => l.rateBp === rate).reduce((s, l) => s + l[key], 0);
       expect(invoice.lines.filter((l) => l.rateBp === 500).map((l) => [l.baseCents, l.vatCents])).toEqual([[13_323_800, 666_200], [10_466_700, 523_300]]);
       expect(sum(500, "baseCents")).toBe(23_790_500);

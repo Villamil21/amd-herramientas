@@ -8,7 +8,7 @@ const line = (rateBp: number, baseCents: number, vatCents: number): InvoiceLine 
 function invoice(nit: string, number: string, lines: InvoiceLine[], extra: Partial<ParsedInvoice> = {}): ParsedInvoice {
   const bases = lines.reduce((s, l) => s + l.baseCents, 0);
   const vat = lines.reduce((s, l) => s + l.vatCents, 0);
-  return { pageCount: 1, documentType: "FACTURA ELECTRÓNICA DE VENTA", invoiceNumber: number, supplierNit: nit, supplierName: `PROV ${nit}`, lines, lineIssues: [], subtotalCents: bases, invoiceVatCents: vat, ...extra };
+  return { pageCount: 1, documentType: "FACTURA ELECTRÓNICA DE VENTA", invoiceNumber: number, supplierNit: nit, supplierName: `PROV ${nit}`, lines, lineIssues: [], products: lines, subtotalCents: bases, invoiceVatCents: vat, ...extra };
 }
 
 const file = (fileName: string, inv: ParsedInvoice): FileResult => ({ fileName, kind: "parsed", invoice: inv });

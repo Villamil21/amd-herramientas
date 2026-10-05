@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
-import { Alert, Badge, Card, Modal, Select } from "../../../../components/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { Alert, Badge, Button, Card, Modal, Select } from "../../../../components/ui";
 import { VAT_TYPE_LABEL } from "../../../../types/models";
 import { normalizeKey } from "../../../../utils/text";
 import { SearchBox, SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { formatCop as formatMoneyCents, formatRateBp } from "../parser/amounts";
-import type { InvoiceRow } from "../types";
+import { ProductsTable } from "../../withholding/components/DocumentDetailModal";
+import type { InvoiceRow, ProductLine } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
 type Filter = "all" | "purchase" | "service" | "pending" | "review";
@@ -33,11 +35,32 @@ function matches(r: InvoiceRow, filter: Filter): boolean {
 
 const money = (cents: number, show: boolean) => (show ? formatMoneyCents(cents) : "—");
 
+const PRODUCT_COLUMNS = ["Descripción", "IVA", "% IVA", "Precio unitario de venta"];
+
+/**
+ * Líneas del análisis con las columnas del módulo IVA. Son los mismos valores
+ * que suman las bases y el IVA; un dato que no se pudo leer queda vacío («—»).
+ */
+function productTable(lines: ProductLine[]) {
+  return {
+    columns: PRODUCT_COLUMNS,
+    rows: lines.map((l) => ({
+      page: l.page,
+      cells: [
+        l.description,
+        l.vatCents === undefined ? "" : formatMoneyCents(l.vatCents),
+        l.rateBp === undefined ? "" : formatRateBp(l.rateBp).replace(" %", "%"),
+        l.baseCents === undefined ? "" : formatMoneyCents(l.baseCents),
+      ],
+    })),
+  };
+}
+
 export function InvoicesTable({ rows }: { rows: InvoiceRow[] }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [docType, setDocType] = useState("");
-  const [selected, setSelected] = useState<InvoiceRow | null>(null);
+  const [selected, setSelected] = useState<{ row: InvoiceRow; products: boolean } | null>(null);
 
   const docTypes = useMemo(() => {
     const map = new Map<string, string>();
@@ -56,7 +79,7 @@ export function InvoicesTable({ rows }: { rows: InvoiceRow[] }) {
   }, [rows, query, filter, docType]);
 
   return (
-    <Card flush title="Facturas" description="Haz clic en una fila para ver sus validaciones.">
+    <Card flush title="Facturas" description="Haz clic en una fila para ver sus validaciones y el detalle de productos.">
       <div className="toolbar row--between">
         <div className="row">
           <SegmentedFilter label="Filtrar facturas" options={FILTERS} value={filter} onChange={setFilter} />
@@ -89,12 +112,13 @@ export function InvoicesTable({ rows }: { rows: InvoiceRow[] }) {
               <th className="num">IVA 19%</th>
               <th className="num">Base 0%</th>
               <th>Estado</th>
+              <th>Productos</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={12} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                <td colSpan={13} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
                   Ninguna factura coincide con el filtro.
                 </td>
               </tr>
@@ -102,7 +126,7 @@ export function InvoicesTable({ rows }: { rows: InvoiceRow[] }) {
             {visible.map((r) => {
               const parsed = Boolean(r.supplierNit);
               return (
-                <tr key={r.fileName} className="is-clickable" onClick={() => setSelected(r)}>
+                <tr key={r.fileName} className="is-clickable" onClick={() => setSelected({ row: r, products: false })}>
                   <td className="table__primary" style={{ minWidth: 220, maxWidth: 300, overflowWrap: "break-word" }}>
                     {r.fileName}
                   </td>
@@ -122,18 +146,46 @@ export function InvoicesTable({ rows }: { rows: InvoiceRow[] }) {
                       {r.duplicateOf && <Badge tone="danger">Posible duplicado</Badge>}
                     </span>
                   </td>
+                  <td>
+                    {parsed && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Eye size={14} />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected({ row: r, products: true });
+                        }}
+                      >
+                        Ver productos
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <InvoiceDetailModal row={selected} onClose={() => setSelected(null)} />
+      <InvoiceDetailModal row={selected?.row ?? null} openProducts={selected?.products ?? false} onClose={() => setSelected(null)} />
     </Card>
   );
 }
 
-function InvoiceDetailModal({ row, onClose }: { row: InvoiceRow | null; onClose: () => void }) {
+function InvoiceDetailModal({ row, openProducts, onClose }: { row: InvoiceRow | null; openProducts: boolean; onClose: () => void }) {
+  const [showProducts, setShowProducts] = useState(false);
+  const productsRef = useRef<HTMLDivElement>(null);
+  const fileName = row?.fileName;
+
+  useEffect(() => {
+    setShowProducts(openProducts);
+  }, [fileName, openProducts]);
+
+  // Abierto desde «Ver productos»: la tabla queda a la vista aunque el detalle sea largo.
+  useEffect(() => {
+    if (fileName && openProducts) productsRef.current?.scrollIntoView({ block: "nearest" });
+  }, [fileName, openProducts, showProducts]);
+
   if (!row) return <Modal open={false} title="" onClose={onClose} />;
   const parsed = Boolean(row.supplierNit);
   const failed = row.status === "incompatible" || row.status === "error";
@@ -168,6 +220,15 @@ function InvoiceDetailModal({ row, onClose }: { row: InvoiceRow | null; onClose:
             {row.lineIssues.length > 0 && (
               <Alert tone="warning" title="Filas no interpretables" items={row.lineIssues.map((l) => `Página ${l.page}: ${l.text} — ${l.reason}`)} />
             )}
+            <div className="stack stack--sm" ref={productsRef}>
+              <div className="row row--between">
+                <strong>Detalle de productos</strong>
+                <Button size="sm" variant="ghost" icon={showProducts ? <EyeOff size={14} /> : <Eye size={14} />} onClick={() => setShowProducts((v) => !v)}>
+                  {showProducts ? "Ocultar productos" : "Ver productos"}
+                </Button>
+              </div>
+              {showProducts && <ProductsTable products={productTable(row.products)} columns={[0, 1, 2, 3]} numericColumns={[1, 2, 3]} />}
+            </div>
             {row.notes.length > 0 && <Alert tone="info" title="Validaciones" items={row.notes} />}
             {row.issues.length === 0 && row.notes.length === 0 && <Alert tone="success">Bases y IVA conciliados con los totales del documento.</Alert>}
           </>

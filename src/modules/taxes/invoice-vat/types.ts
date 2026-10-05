@@ -14,6 +14,19 @@ export interface InvoiceLine {
   baseCents: number;
 }
 
+/**
+ * Fila de «Detalles de Productos» para la vista de auditoría, en el orden del
+ * PDF. Lleva los mismos valores de `lines`; en una fila que no se pudo
+ * interpretar, solo lo que sí se leyó (lo ausente queda sin definir).
+ */
+export interface ProductLine {
+  page: number;
+  description: string;
+  rateBp?: RateBp;
+  vatCents?: number;
+  baseCents?: number;
+}
+
 /** Fila de la tabla que no permitió identificar %, IVA o precio unitario de venta. */
 export interface LineIssue {
   page: number;
@@ -31,6 +44,8 @@ export interface ParsedInvoice {
   supplierName: string;
   lines: InvoiceLine[];
   lineIssues: LineIssue[];
+  /** Todas las filas de la tabla (interpretadas o no), para «Detalle de productos». */
+  products: ProductLine[];
   /** «Subtotal» y «Total Bruto Factura» de Datos Totales, si se encontraron. */
   subtotalCents?: number;
   grossTotalCents?: number;
@@ -79,6 +94,7 @@ export interface InvoiceRow {
   /** Información que no exige revisión (ej. diferencia de redondeo del IVA). */
   notes: string[];
   lineIssues: LineIssue[];
+  products: ProductLine[];
 }
 
 export interface PendingSupplier {

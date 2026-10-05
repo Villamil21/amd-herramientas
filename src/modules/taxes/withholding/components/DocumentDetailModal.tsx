@@ -58,9 +58,17 @@ function visibleProductColumns(columns: string[]): number[] {
   return columns.map((_, i) => i).filter((i) => !hidden.has(i));
 }
 
-export function ProductsTable({ products }: { products: ProductTable }) {
+interface ProductsTableProps {
+  products: ProductTable;
+  /** Columnas a mostrar (índices). Por defecto, todas menos las de impuestos y descuentos. */
+  columns?: number[];
+  /** Columnas alineadas a la derecha aunque sus celdas no tengan decimales. */
+  numericColumns?: number[];
+}
+
+export function ProductsTable({ products, columns, numericColumns = [] }: ProductsTableProps) {
   if (products.rows.length === 0) return <Alert tone="info">No se encontraron productos en «Detalles de Productos».</Alert>;
-  const keep = visibleProductColumns(products.columns);
+  const keep = columns ?? visibleProductColumns(products.columns);
   return (
     <div className="table-wrap table-wrap--scroll" style={{ maxHeight: 320 }}>
       <table className="table">
@@ -77,7 +85,7 @@ export function ProductsTable({ products }: { products: ProductTable }) {
               {keep.map((k) => {
                 const c = r.cells[k] ?? "";
                 return (
-                  <td key={k} className="selectable" style={/,\d{2}$/.test(c) ? { textAlign: "right", whiteSpace: "nowrap" } : { minWidth: normalizeKey(products.columns[k]).startsWith("descripcion") ? 220 : undefined }}>
+                  <td key={k} className="selectable" style={numericColumns.includes(k) || /,\d{2}$/.test(c) ? { textAlign: "right", whiteSpace: "nowrap" } : { minWidth: normalizeKey(products.columns[k]).startsWith("descripcion") ? 220 : undefined }}>
                     {c || "—"}
                   </td>
                 );

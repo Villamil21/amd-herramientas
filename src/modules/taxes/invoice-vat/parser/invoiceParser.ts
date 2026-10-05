@@ -1,7 +1,8 @@
 import type { PdfDocumentText } from "../../../bank-analysis/shared/pdf/pdfTypes";
 import { buildRows, center, joinWords, type TextRow, type Word } from "../../../bank-analysis/shared/pdf/rows";
 import { normalizeKey } from "../../../../utils/text";
-import type { InvoiceLine, LineIssue, ParsedInvoice } from "../types";
+import { productRowKey, readProductDescriptions } from "../../withholding/parser/productTable";
+import type { InvoiceLine, LineIssue, ParsedInvoice, ProductLine } from "../types";
 import { isCopAmount, parseCopAmount, parseDotDecimal, parseRate } from "./amounts";
 
 /**
@@ -170,7 +171,7 @@ export function findAnchors(rows: TextRow[], index: number): ColumnAnchors | und
 type RowReading =
   | { kind: "text" }
   | { kind: "line"; line: Omit<InvoiceLine, "page"> }
-  | { kind: "issue"; text: string; reason: string };
+  | { kind: "issue"; text: string; reason: string; partial: Omit<ProductLine, "page"> };
 
 /** Interpreta una fila de producto con las columnas conocidas. */
 export function readProductRow(row: TextRow, a: ColumnAnchors): RowReading {
@@ -196,18 +197,22 @@ export function readProductRow(row: TextRow, a: ColumnAnchors): RowReading {
   // Tarifa 0 % sin valor de IVA impreso: el IVA es 0 por definición (no se inventa).
   if (vatCents === null && vatText === undefined && rateBp === 0) vatCents = 0;
 
+  const description = joinWords(left);
+  // Lo que sí se leyó de una fila incompleta (solo para mostrarla; no entra al cálculo).
+  const partial = { description, rateBp: rateBp ?? undefined, vatCents: vatCents ?? undefined, baseCents: baseCents ?? undefined };
   const missing = [rateBp === null && "%", vatCents === null && "IVA", baseCents === null && "Precio unitario de venta"].filter(Boolean);
-  if (tax.length > 2) return { kind: "issue", text, reason: "La fila tiene más valores de los esperados en las columnas IVA y %." };
-  if (sale.length > 1) return { kind: "issue", text, reason: "La fila tiene más de un valor en «Precio unitario de venta»." };
+  if (tax.length > 2) return { kind: "issue", text, partial, reason: "La fila tiene más valores de los esperados en las columnas IVA y %." };
+  if (sale.length > 1) return { kind: "issue", text, partial, reason: "La fila tiene más de un valor en «Precio unitario de venta»." };
   if (missing.length || rateBp === null || vatCents === null || baseCents === null) {
-    return { kind: "issue", text, reason: `No se pudo identificar: ${missing.join(", ")}.` };
+    return { kind: "issue", text, partial, reason: `No se pudo identificar: ${missing.join(", ")}.` };
   }
-  return { kind: "line", line: { description: joinWords(left), rateBp, vatCents, baseCents } };
+  return { kind: "line", line: { description, rateBp, vatCents, baseCents } };
 }
 
 interface TableResult {
   lines: InvoiceLine[];
   issues: LineIssue[];
+  products: ProductLine[];
   /** Página y fila donde terminó la tabla (para buscar después los totales). */
   endPage: number;
 }
@@ -215,11 +220,16 @@ interface TableResult {
 function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeading: (r: TextRow) => boolean, titleKey: string): TableResult {
   const lines: InvoiceLine[] = [];
   const issues: LineIssue[] = [];
+  // Filas de la tabla (sin pies ni títulos repetidos) y, por cada fila leída, su posición: para ubicar su descripción.
+  const tablePages: PageRows[] = [];
+  const found: { y: number; line?: InvoiceLine; product: ProductLine }[] = [];
   let anchors: ColumnAnchors | undefined;
   let endPage = pages.length - 1;
 
   outer: for (let pi = start.pi; pi < pages.length; pi++) {
     const { page, rows } = pages[pi];
+    const kept: TextRow[] = [];
+    tablePages.push({ page, rows: kept });
     for (let ri = pi === start.pi ? start.ri + 1 : 0; ri < rows.length; ri++) {
       const row = rows[ri];
       const key = rowKey(row);
@@ -230,18 +240,33 @@ function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeadi
         endPage = pi;
         break outer;
       }
+      kept.push(row);
       if (isHeaderRow(row)) {
         anchors = findAnchors(rows, ri) ?? anchors;
         continue;
       }
       if (!anchors) continue;
       const reading = readProductRow(row, anchors);
-      if (reading.kind === "line") lines.push({ page, ...reading.line });
-      else if (reading.kind === "issue") issues.push({ page, text: reading.text, reason: reading.reason });
+      if (reading.kind === "line") {
+        const line = { page, ...reading.line };
+        lines.push(line);
+        found.push({ y: row.y, line, product: line });
+      } else if (reading.kind === "issue") {
+        issues.push({ page, text: reading.text, reason: reading.reason });
+        found.push({ y: row.y, product: { page, ...reading.partial } });
+      }
     }
   }
   if (!anchors) throw new InvoiceFormatError("No se encontraron las columnas IVA, % y «Precio unitario de venta» en «Detalles de Productos».");
-  return { lines, issues, endPage };
+
+  // Solo la columna «Descripción» (unida si ocupa varias líneas); sin ella, el texto a la izquierda del IVA.
+  const descriptions = readProductDescriptions(tablePages);
+  const products = found.map(({ y, line, product }) => {
+    const description = descriptions.get(productRowKey(product.page, y)) || product.description;
+    if (line) line.description = description;
+    return { ...product, description };
+  });
+  return { lines, issues, products, endPage };
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +366,7 @@ export function parseInvoice(doc: PdfDocumentText): ParsedInvoice {
     supplierName,
     lines: table.lines,
     lineIssues: table.issues,
+    products: table.products,
     subtotalCents: totals.subtotalCents,
     grossTotalCents: totals.grossTotalCents,
     invoiceVatCents: totals.vatCents ?? (qrVat !== undefined ? (parseDotDecimal(qrVat) ?? undefined) : undefined),

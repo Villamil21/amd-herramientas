@@ -97,11 +97,12 @@ function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier 
     issues,
     notes,
     lineIssues: invoice.lineIssues,
+    products: invoice.products,
   };
 }
 
 function failedRow(fileName: string, status: "incompatible" | "error", message: string): InvoiceRow {
-  return { fileName, status, lineCount: 0, base5: 0, vat5: 0, base19: 0, vat19: 0, base0: 0, otherRates: [], detailVatCents: 0, issues: [message], notes: [], lineIssues: [] };
+  return { fileName, status, lineCount: 0, base5: 0, vat5: 0, base19: 0, vat19: 0, base0: 0, otherRates: [], detailVatCents: 0, issues: [message], notes: [], lineIssues: [], products: [] };
 }
 
 /** El nombre más frecuente entre las facturas de un NIT (en empate, el primero). */

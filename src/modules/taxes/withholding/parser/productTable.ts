@@ -123,12 +123,14 @@ interface Draft {
   below: LineCells[];
 }
 
-/**
- * Lee la tabla a partir de las filas que quedan entre el título «Detalles de
- * Productos» y la siguiente sección (ya sin pies de página ni encabezados de
- * página repetidos), en el orden de las páginas.
- */
-export function readProductTable(pages: { page: number; rows: TextRow[] }[]): ProductTable {
+interface FullTable {
+  labels: string[];
+  /** `y` es la posición vertical de la fila con importes del producto. */
+  rows: { page: number; y: number; cells: string[] }[];
+}
+
+/** Todas las columnas de la tabla, sin ocultar ninguna. */
+function readAllColumns(pages: { page: number; rows: TextRow[] }[]): FullTable {
   let columns: Column[] | undefined;
   const drafts: Draft[] = [];
 
@@ -168,19 +170,46 @@ export function readProductTable(pages: { page: number; rows: TextRow[] }[]): Pr
     drafts.push(...pageDrafts);
   }
 
-  if (!columns) return { columns: [], rows: [] };
-  const labels = columns.map(label);
-  const hidden = hiddenColumns(labels);
-  const keep = labels.map((_, i) => i).filter((i) => !hidden.has(i));
-
+  if (!columns) return { labels: [], rows: [] };
   return {
-    columns: keep.map((i) => labels[i]),
+    labels: columns.map(label),
     rows: drafts.map((d) => ({
       page: d.page,
-      cells: keep.map((i) => {
+      y: d.y,
+      cells: columns!.map((_, i) => {
         const lines = [...d.above, d.main, ...d.below].map((c) => c[i].join(" ")).filter(Boolean);
         return lines.join("").trim();
       }),
     })),
   };
+}
+
+/**
+ * Lee la tabla a partir de las filas que quedan entre el título «Detalles de
+ * Productos» y la siguiente sección (ya sin pies de página ni encabezados de
+ * página repetidos), en el orden de las páginas.
+ */
+export function readProductTable(pages: { page: number; rows: TextRow[] }[]): ProductTable {
+  const { labels, rows } = readAllColumns(pages);
+  const hidden = hiddenColumns(labels);
+  const keep = labels.map((_, i) => i).filter((i) => !hidden.has(i));
+  return {
+    columns: keep.map((i) => labels[i]),
+    rows: rows.map((r) => ({ page: r.page, cells: keep.map((i) => r.cells[i]) })),
+  };
+}
+
+export const productRowKey = (page: number, y: number) => `${page}|${y}`;
+
+/**
+ * Texto de la columna «Descripción» de cada producto (ya unido si ocupa
+ * varias líneas), por página y posición vertical de su fila: lo usa el
+ * análisis de IVA para mostrar sus líneas con la misma descripción.
+ */
+export function readProductDescriptions(pages: { page: number; rows: TextRow[] }[]): Map<string, string> {
+  const { labels, rows } = readAllColumns(pages);
+  const index = labels.findIndex((l) => /^descripci[oó]n/i.test(l));
+  const out = new Map<string, string>();
+  if (index !== -1) for (const r of rows) out.set(productRowKey(r.page, r.y), r.cells[index]);
+  return out;
 }

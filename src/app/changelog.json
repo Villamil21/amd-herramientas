@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.17.2",
+    "date": "2026-10-05",
+    "notes": [
+      "IVA: cada factura o nota permite ver su detalle de productos. En la tabla hay un botón «Ver productos» por documento, y el detalle tiene la sección «Detalle de productos» con Ver productos / Ocultar productos.",
+      "El detalle muestra Descripción, IVA, % IVA y Precio unitario de venta de todas las líneas, en el orden del PDF y sin agrupar, incluidas las de 0 % y las que continúan en otra página. Son los mismos valores con los que se calculan las bases y el IVA.",
+      "Las filas que no se pudieron interpretar también aparecen, con lo que sí se leyó y «—» en el dato ausente.",
+      "El cálculo, los resúmenes y la exportación a Excel no cambian."
+    ]
+  },
+  {
     "version": "1.17.1",
     "date": "2026-10-05",
     "notes": [

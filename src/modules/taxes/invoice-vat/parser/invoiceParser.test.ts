@@ -105,6 +105,13 @@ describe("parseInvoice", () => {
       [2, 1900, 380_000, 2_000_000],
     ]);
     expect(inv.lineIssues).toEqual([]);
+    // Detalle de productos: todas las filas de ambas páginas, solo con la columna «Descripción» y los valores de las líneas.
+    expect(inv.products).toEqual([
+      { page: 1, description: "Servicio A", rateBp: 1900, vatCents: 190_000, baseCents: 1_000_000 },
+      { page: 1, description: "Exento", rateBp: 0, vatCents: 0, baseCents: 500_000 },
+      { page: 2, description: "Servicio Bcontinuación de la descripción", rateBp: 1900, vatCents: 380_000, baseCents: 2_000_000 },
+    ]);
+    expect(inv.products).toEqual(inv.lines);
     // Datos Totales: la caja con valores (derecha); «Rete IVA» y «Total factura» no se confunden con IVA.
     expect(inv).toMatchObject({ subtotalCents: 3_500_000, grossTotalCents: 3_500_000, invoiceVatCents: 570_000 });
   });
@@ -131,6 +138,12 @@ describe("parseInvoice", () => {
     });
     expect(inv.lines.map((l) => [l.rateBp, l.vatCents, l.baseCents])).toEqual([[0, 0, 200_000]]);
     expect(inv.lineIssues.map((i) => i.reason)).toEqual(["No se pudo identificar: %.", "No se pudo identificar: Precio unitario de venta."]);
+    // Las filas incompletas siguen en el detalle, en su orden, con lo que sí se leyó.
+    expect(inv.products).toEqual([
+      { page: 1, description: "Sin tarifa", rateBp: undefined, vatCents: 19_000, baseCents: 100_000 },
+      { page: 1, description: "Sin precio de venta", rateBp: 1900, vatCents: 19_000, baseCents: undefined },
+      { page: 1, description: "Cero sin IVA impreso", rateBp: 0, vatCents: 0, baseCents: 200_000 },
+    ]);
   });
 
   it("rechaza PDF sin la tabla o sin texto", () => {
