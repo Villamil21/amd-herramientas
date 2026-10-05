@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Supplier, VatType } from "../../../../types/models";
 import type { FileResult, InvoiceLine, ParsedInvoice, ProductLine, TitleRule } from "../types";
 import { buildReport, interpretLines, nameKey } from "./analysis";
+import { buildPendingActions, lotStatus } from "./pending";
 import { buildInvoiceVatSheets } from "./excelExport";
-import { NOTES_CATEGORY } from "./labels";
+import { NOTES_CATEGORY, summaryTotal } from "./labels";
+import { formatCop } from "../parser/amounts";
 
 const line = (rateBp: number, baseCents: number, vatCents: number): InvoiceLine => ({ page: 1, description: "", rateBp, baseCents, vatCents });
 /** Fila con IVA y % vacíos, como la deja el lector. */
@@ -75,12 +77,38 @@ describe("buildReport: proveedores y renglones de Facturas", () => {
     expect(report.summary.invoices).toMatchObject({ documentCount: 0, purchases5: { baseCents: 0, vatCents: 0 } });
   });
 
-  it("diferencia de redondeo del IVA: informativa y sin alterar valores; una mayor exige revisión", () => {
-    const lines = [line(1900, 10_000, 1_900), line(500, 1_000, 50)];
-    const report = buildReport([file("a.pdf", invoice("1", "A", lines, { invoiceVatCents: 2_050 })), file("b.pdf", invoice("1", "B", lines, { invoiceVatCents: 9_000 }))], P1, TITLES);
-    expect(report.rows[0]).toMatchObject({ status: "processed", detailVatCents: 1_950, vat19: 1_900, vat5: 50 });
-    expect(report.rows[0].notes[0]).toContain("Diferencia por validar $1");
-    expect(report.rows[1]).toMatchObject({ status: "review", problems: [{ code: "vat-mismatch" }] });
+  it("una diferencia de hasta $50 es redondeo: sin alerta, sin pendiente y sin alterar valores", () => {
+    // Calculado $100.000 (base) y $19.000 (IVA); el documento difiere en `diff` centavos.
+    const doc = (name: string, extra: Partial<ParsedInvoice>) => file(name, invoice("1", name, [line(1900, 10_000_000, 1_900_000)], extra));
+    const rowOf = (extra: Partial<ParsedInvoice>) => buildReport([doc("a.pdf", extra)], P1, TITLES).rows[0];
+    const clean = { status: "processed", problems: [], issues: [], notes: [], base19: 10_000_000, vat19: 1_900_000 };
+
+    for (const diff of [0, 1_800, 4_500, 5_000, -5_000]) {
+      expect(rowOf({ subtotalCents: 10_000_000 + diff })).toMatchObject(clean);
+      expect(rowOf({ invoiceVatCents: 1_900_000 + diff })).toMatchObject(clean);
+    }
+    // $50,01 y $51 ya no son redondeo.
+    for (const diff of [5_001, 5_100, -5_001]) {
+      expect(rowOf({ subtotalCents: 10_000_000 + diff })).toMatchObject({ status: "review", problems: [{ code: "base-mismatch" }] });
+      expect(rowOf({ invoiceVatCents: 1_900_000 + diff })).toMatchObject({ status: "review", problems: [{ code: "vat-mismatch" }] });
+    }
+    expect(rowOf({ invoiceVatCents: 1_900_000 + 5_100 }).issues[0]).toContain("Diferencia por validar $51");
+
+    // Lote cuyo único inconveniente es el redondeo: «Listo para declaración».
+    const report = buildReport([doc("a.pdf", { subtotalCents: 10_004_500 }), doc("b.pdf", { invoiceVatCents: 1_905_000 })], P1, TITLES);
+    expect(report.stats).toMatchObject({ validated: 2, pending: 0 });
+    expect(lotStatus(buildPendingActions(report))).toEqual({ kind: "ready" });
+    expect(report.incidents).toEqual([]);
+  });
+
+  it("la tolerancia de redondeo no oculta otros problemas del documento", () => {
+    const rounded = { subtotalCents: 10_004_500 };
+    const inv = (extra: Partial<ParsedInvoice> = {}) => invoice("1", "A", [line(1900, 10_000_000, 1_900_000)], { ...rounded, ...extra });
+    const status = (files: FileResult[], suppliers = P1) => buildReport(files, suppliers, TITLES).rows.slice(-1)[0].status;
+    expect(status([file("a.pdf", inv())], [])).toBe("pending-supplier");
+    expect(status([file("a.pdf", inv({ documentType: "OTRO DOCUMENTO" }))])).toBe("pending-title");
+    expect(status([file("a.pdf", inv()), file("b.pdf", inv())])).toBe("review");
+    expect(status([file("a.pdf", invoice("1", "A", [line(1900, 10_000_000, 1_900_000), blank(undefined)], rounded))])).toBe("review");
   });
 
   it("avisa cuando la razón social de un NIT existente es distinta", () => {
@@ -90,6 +118,20 @@ describe("buildReport: proveedores y renglones de Facturas", () => {
     expect(report.nameMismatches).toMatchObject([{ storedName: "PRICESMART COLOMBIA S.A.S.", invoiceName: "PRICE SMART COLOMBIA S.A.S.", invoiceCount: 1 }]);
     expect(report.rows[0].vatType).toBe("purchase");
     expect(buildReport(files, suppliers, TITLES, { keptNames: new Set([nameKey("900", "PRICE SMART COLOMBIA S.A.S.")]) }).nameMismatches).toEqual([]);
+  });
+});
+
+describe("total del resumen de Factura electrónica", () => {
+  it("suma Base e IVA de los renglones visibles (valores de referencia)", () => {
+    const invoices = {
+      documentCount: 4,
+      purchases5: { baseCents: 49_961_567, vatCents: 2_498_033 },
+      purchases19: { baseCents: 14_883_633_595, vatCents: 2_827_890_261 },
+      services19: { baseCents: 1_201_314_707, vatCents: 228_285_614 },
+      zeroBaseCents: 80_930_065_231,
+    };
+    const total = summaryTotal(invoices);
+    expect([formatCop(total.baseCents), formatCop(total.vatCents)]).toEqual(["$970.649.751", "$30.586.739,08"]);
   });
 });
 
@@ -189,14 +231,18 @@ describe("filas con IVA y % vacíos", () => {
     expect(pendingOf(invoice("1", "F", [rated])).products[0].origin).toBeUndefined();
   });
 
-  it("acepta un peso de redondeo por línea para decidir el 0 %, pero la diferencia de bases se confirma", () => {
+  it("acepta un peso de redondeo por línea para decidir el 0 %, y esa diferencia de bases es redondeo", () => {
     const inv = invoice("1", "FVED-1", [line(1900, 46_875, 8_906), blank(4_008_304_100, "FLETE")], { subtotalCents: 4_008_350_875 });
-    const files = [file("d.pdf", inv)];
-    const row = buildReport(files, P1, TITLES).rows[0];
+    const row = buildReport([file("d.pdf", inv)], P1, TITLES).rows[0];
     expect(row.pendingLines).toEqual([]);
-    expect(row).toMatchObject({ status: "review", problems: [{ code: "base-mismatch" }] });
+    expect(row).toMatchObject({ status: "processed", problems: [], base0: 4_008_304_100 });
+  });
+
+  it("una diferencia de bases mayor a $50 se confirma", () => {
+    const files = [file("d.pdf", invoice("1", "A", [line(1900, 100_000, 19_000)], { subtotalCents: 110_000 }))];
+    expect(buildReport(files, P1, TITLES).rows[0]).toMatchObject({ status: "review", problems: [{ code: "base-mismatch" }] });
     const confirmed = buildReport(files, P1, TITLES, { decisions: { "d.pdf": { confirmed: true } } });
-    expect(confirmed.rows[0]).toMatchObject({ status: "processed", problems: [], base0: 4_008_304_100 });
+    expect(confirmed.rows[0]).toMatchObject({ status: "processed", problems: [], base19: 100_000 });
     expect(confirmed.rows[0].notes.join(" ")).toContain("Confirmado por el usuario");
   });
 

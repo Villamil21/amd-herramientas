@@ -1,6 +1,6 @@
 import { Card } from "../../../../components/ui";
 import { formatCop as formatMoneyCents } from "../parser/amounts";
-import { NOTES_CATEGORY, SUMMARY_CATEGORIES } from "../services/labels";
+import { NOTES_CATEGORY, SUMMARY_CATEGORIES, summaryTotal } from "../services/labels";
 import type { VatSummaryData } from "../types";
 
 const docs = (n: number) => (n === 1 ? "1 documento validado" : `${n} documentos validados`);
@@ -12,6 +12,7 @@ const docs = (n: number) => (n === 1 ? "1 documento validado" : `${n} documentos
  */
 export function VatSummary({ summary }: { summary: VatSummaryData }) {
   const { invoices, notes } = summary;
+  const total = summaryTotal(invoices);
   return (
     <>
       <Card flush title="Factura electrónica" description={docs(invoices.documentCount)}>
@@ -33,6 +34,13 @@ export function VatSummary({ summary }: { summary: VatSummaryData }) {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="table__total">
+                <td>Total</td>
+                <td className="num">{formatMoneyCents(total.baseCents)}</td>
+                <td className="num">{formatMoneyCents(total.vatCents)}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </Card>

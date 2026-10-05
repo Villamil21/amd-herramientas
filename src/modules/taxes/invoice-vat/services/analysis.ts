@@ -68,8 +68,16 @@ function figures(lines: InvoiceLine[]) {
   return f;
 }
 
-/** Hasta un peso por línea se considera redondeo del documento. */
+/** Hasta un peso por línea se considera redondeo del documento (solo para decidir el 0 % automático). */
 const rounding = (lineCount: number) => Math.max(1, lineCount) * 100;
+
+/**
+ * Diferencia de conciliación (calculado vs. documento) que se trata como
+ * redondeo: hasta $50 COP no genera alerta ni pendiente. Solo aplica a
+ * diferencias monetarias; no oculta ningún otro problema del documento.
+ */
+export const ROUNDING_TOLERANCE_CENTS = 5_000;
+export const isRounding = (calculatedCents: number, documentCents: number) => Math.abs(calculatedCents - documentCents) <= ROUNDING_TOLERANCE_CENTS;
 
 const references = (invoice: ParsedInvoice) => [invoice.subtotalCents, invoice.grossTotalCents].filter((v): v is number => v !== undefined);
 
@@ -177,19 +185,14 @@ function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier 
   const bases = sum(lines, "baseCents");
   const refs = references(invoice);
   if (refs.length === 0) notes.push("No se encontró el subtotal del documento para validar las bases.");
-  else if (!refs.includes(bases) && lines.length > 0) {
+  else if (!refs.some((r) => isRounding(bases, r)) && lines.length > 0) {
     problem("base-mismatch", `La suma de bases por línea (${formatCop(bases)}) no coincide con el subtotal del documento (${formatCop(refs[0])}).`);
   }
 
   if (invoice.invoiceVatCents === undefined) notes.push("No se encontró el IVA total del documento para validar.");
-  else {
-    const diff = invoice.invoiceVatCents - f.detailVatCents;
-    if (diff !== 0) {
-      const text = `IVA según detalle ${formatCop(f.detailVatCents)} · IVA según total factura ${formatCop(invoice.invoiceVatCents)} · Diferencia por validar ${formatCop(Math.abs(diff))}.`;
-      // Hasta un peso por línea gravada se considera redondeo del documento (informativo).
-      if (Math.abs(diff) <= rounding(lines.filter((l) => l.rateBp > 0).length)) notes.push(text);
-      else problem("vat-mismatch", text);
-    }
+  else if (!isRounding(f.detailVatCents, invoice.invoiceVatCents)) {
+    const diff = Math.abs(invoice.invoiceVatCents - f.detailVatCents);
+    problem("vat-mismatch", `IVA según detalle ${formatCop(f.detailVatCents)} · IVA según total factura ${formatCop(invoice.invoiceVatCents)} · Diferencia por validar ${formatCop(diff)}.`);
   }
 
   const status: InvoiceRow["status"] = decision.excluded ? "excluded" : problems.length ? "review" : !category ? "pending-title" : !supplier ? "pending-supplier" : "processed";

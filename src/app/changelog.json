@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.18.1",
+    "date": "2026-10-05",
+    "notes": [
+      "IVA de compras: una diferencia de hasta $50 entre lo calculado y los totales del documento (bases contra subtotal, IVA del detalle contra IVA total) se trata como redondeo: no genera alerta ni pendiente y no impide «● Listo para declaración». Desde $50,01 el documento sigue quedando en «Requiere revisión».",
+      "La tolerancia solo aplica a diferencias de conciliación: proveedores o tipos de documento pendientes, productos no interpretables, duplicados y errores de lectura se siguen avisando igual.",
+      "El resumen de «Factura electrónica» termina con una fila «Total» con la suma de Base e IVA de sus cuatro renglones."
+    ]
+  },
+  {
     "version": "1.18.0",
     "date": "2026-10-05",
     "notes": [
