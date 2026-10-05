@@ -13,10 +13,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readDocumentText } from "../../../bank-analysis/shared/pdf/pdfText";
-import { buildReport } from "../services/analysis";
+import { buildReport, interpretLines } from "../services/analysis";
+import type { TitleRule } from "../types";
 import { parseInvoice } from "./invoiceParser";
 
 const files = (process.env.INVOICE_VAT_PDF ?? "").split(":").filter(Boolean);
+
+const TITLES: TitleRule[] = [{ normalizedTitle: "factura electronica de venta", category: "invoice" }];
 
 describe.skipIf(files.length === 0)("factura electrónica real", () => {
   for (const file of files) {
@@ -25,17 +28,33 @@ describe.skipIf(files.length === 0)("factura electrónica real", () => {
       const invoice = parseInvoice(await readDocumentText(doc));
 
       expect(invoice.supplierNit).toMatch(/^\d+$/);
-      expect(invoice.lineIssues).toEqual([]);
-      expect(invoice.lines.length).toBeGreaterThan(0);
-      expect(invoice.products).toEqual(invoice.lines);
-      const bases = invoice.lines.reduce((s, l) => s + l.baseCents, 0);
-      if (invoice.subtotalCents !== undefined) expect(bases).toBe(invoice.subtotalCents);
+      expect(invoice.products.length).toBeGreaterThan(0);
+      // Sin ambigüedad no queda ninguna fila pendiente: las de IVA y % vacíos se interpretan como 0 %.
+      const reading = interpretLines(invoice);
+      expect(reading.pending).toEqual([]);
+      expect(reading.products.filter((p) => p.origin === "auto-zero").every((p) => p.rateBp === 0 && p.vatCents === 0)).toBe(true);
+      const bases = reading.lines.reduce((s, l) => s + l.baseCents, 0);
+      const refs = [invoice.subtotalCents, invoice.grossTotalCents].filter((v) => v !== undefined);
+      // Hasta un peso por línea es redondeo del documento.
+      if (refs.length) expect(Math.min(...refs.map((r) => Math.abs(r - bases)))).toBeLessThanOrEqual(reading.lines.length * 100);
+
+      if (invoice.invoiceNumber === "FEFL-3798332") {
+        // Peaje F2X: una línea con IVA y % vacíos, subtotal $13.300 e IVA $0.
+        expect(invoice.products).toMatchObject([{ baseCents: 1_330_000, emptyTax: true }]);
+        expect(reading.products).toMatchObject([{ rateBp: 0, vatCents: 0, baseCents: 1_330_000, origin: "auto-zero" }]);
+        const f2x = { id: 1, nit: invoice.supplierNit, businessName: invoice.supplierName, vatType: "service" as const, createdAt: "", updatedAt: "" };
+        const report = buildReport([{ fileName: "f2x.pdf", kind: "parsed", invoice }], [f2x], TITLES);
+        expect(report.rows[0]).toMatchObject({ status: "processed", category: "invoice", base0: 1_330_000, detailVatCents: 0, pendingLines: [] });
+        expect(report.summary.invoices.zeroBaseCents).toBe(1_330_000);
+      }
 
       if (invoice.supplierNit !== "900319753" || invoice.invoiceNumber !== "COFE-3333593") return;
       expect(invoice.documentType).toBe("FACTURA ELECTRÓNICA DE VENTA");
       expect(invoice.supplierName).toBe("PRICESMART COLOMBIA S.A.S.");
       expect(invoice.pageCount).toBe(2);
       expect(invoice.lines).toHaveLength(10);
+      expect(invoice.lineIssues).toEqual([]);
+      expect(invoice.products).toEqual(invoice.lines);
       expect(invoice.products[0]).toEqual({ page: 1, description: "755610 ComidaPerro", rateBp: 500, vatCents: 666_200, baseCents: 13_323_800 });
       const sum = (rate: number, key: "baseCents" | "vatCents") => invoice.lines.filter((l) => l.rateBp === rate).reduce((s, l) => s + l[key], 0);
       expect(invoice.lines.filter((l) => l.rateBp === 500).map((l) => [l.baseCents, l.vatCents])).toEqual([[13_323_800, 666_200], [10_466_700, 523_300]]);
@@ -53,12 +72,12 @@ describe.skipIf(files.length === 0)("factura electrónica real", () => {
 
       // Con el proveedor registrado como Compras: 44.082 por líneas frente a 44.083 del documento.
       const supplier = { id: 1, nit: "900319753", businessName: "PRICESMART COLOMBIA S.A.S.", vatType: "purchase" as const, createdAt: "", updatedAt: "" };
-      const report = buildReport([{ fileName: "f.pdf", kind: "parsed", invoice }], [supplier]);
+      const report = buildReport([{ fileName: "f.pdf", kind: "parsed", invoice }], [supplier], TITLES);
       const row = report.rows[0];
-      expect(row).toMatchObject({ status: "processed", base5: 23_790_500, vat5: 1_189_500, base19: 16_941_200, vat19: 3_218_700, base0: 19_256_700, detailVatCents: 4_408_200, invoiceVatCents: 4_408_300 });
+      expect(row).toMatchObject({ status: "processed", category: "invoice", base5: 23_790_500, vat5: 1_189_500, base19: 16_941_200, vat19: 3_218_700, base0: 19_256_700, detailVatCents: 4_408_200, invoiceVatCents: 4_408_300 });
       expect(row.notes.join(" ")).toContain("$1");
-      expect(report.summaries[0]).toMatchObject({
-        documentType: "FACTURA ELECTRÓNICA DE VENTA",
+      expect(report.summary.invoices).toMatchObject({
+        documentCount: 1,
         purchases5: { baseCents: 23_790_500, vatCents: 1_189_500 },
         purchases19: { baseCents: 16_941_200, vatCents: 3_218_700 },
         services19: { baseCents: 0, vatCents: 0 },

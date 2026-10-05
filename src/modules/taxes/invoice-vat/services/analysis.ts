@@ -1,22 +1,48 @@
 import type { Supplier } from "../../../../types/models";
 import { normalizeKey } from "../../../../utils/text";
 import { formatCop, formatRateBp } from "../parser/amounts";
-import type { BaseVat, DocumentTypeSummary, FileResult, Incident, InvoiceReport, InvoiceRow, NameMismatch, ParsedInvoice, PendingSupplier, RateBp } from "../types";
+import type {
+  BaseVat,
+  Decisions,
+  DocCategory,
+  DocDecision,
+  FileResult,
+  Incident,
+  InvoiceLine,
+  InvoiceReport,
+  InvoiceRow,
+  NameMismatch,
+  ParsedInvoice,
+  PendingSupplier,
+  ProductLine,
+  RateBp,
+  RowProblem,
+  TitleRule,
+  UnknownTitle,
+  VatSummaryData,
+} from "../types";
 
 export interface ReportOptions {
-  /** Sumar también los posibles duplicados (por defecto se excluyen del resumen). */
-  includeDuplicates?: boolean;
+  /** Decisiones del usuario por archivo (tarifa de una fila, confirmar, excluir, incluir duplicado). */
+  decisions?: Decisions;
   /** Diferencias de razón social que el usuario decidió mantener: `${nit}|${normalizeKey(nombre)}`. */
   keptNames?: ReadonlySet<string>;
 }
 
 export const nameKey = (nit: string, name: string) => `${nit}|${normalizeKey(name)}`;
 
+export const NO_TITLE = "Documento sin título";
+
+/** Problemas que el usuario puede aceptar con «Confirmar interpretación». */
+export const CONFIRMABLE: ReadonlySet<RowProblem["code"]> = new Set(["supplier-name", "base-mismatch", "vat-mismatch"]);
+
 const zero = (): BaseVat => ({ baseCents: 0, vatCents: 0 });
 const add = (t: BaseVat, baseCents: number, vatCents: number) => {
   t.baseCents += baseCents;
   t.vatCents += vatCents;
 };
+const sum = (lines: InvoiceLine[], key: "baseCents" | "vatCents") => lines.reduce((s, l) => s + l[key], 0);
+const rows = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", String(n)));
 
 function mergeRates(target: (BaseVat & { rateBp: RateBp })[], rateBp: RateBp, baseCents: number, vatCents: number) {
   const found = target.find((r) => r.rateBp === rateBp);
@@ -24,10 +50,10 @@ function mergeRates(target: (BaseVat & { rateBp: RateBp })[], rateBp: RateBp, ba
   else target.push({ rateBp, baseCents, vatCents });
 }
 
-/** Totales por tarifa de una factura (suma de sus líneas; la base es «Precio unitario de venta»). */
-function figures(invoice: ParsedInvoice) {
+/** Totales por tarifa de un documento (suma de sus líneas; la base es «Precio unitario de venta»). */
+function figures(lines: InvoiceLine[]) {
   const f = { base5: 0, vat5: 0, base19: 0, vat19: 0, base0: 0, detailVatCents: 0, otherRates: [] as (BaseVat & { rateBp: RateBp })[] };
-  for (const l of invoice.lines) {
+  for (const l of lines) {
     f.detailVatCents += l.vatCents;
     if (l.rateBp === 500) {
       f.base5 += l.baseCents;
@@ -42,29 +68,117 @@ function figures(invoice: ParsedInvoice) {
   return f;
 }
 
+/** Hasta un peso por línea se considera redondeo del documento. */
+const rounding = (lineCount: number) => Math.max(1, lineCount) * 100;
+
+const references = (invoice: ParsedInvoice) => [invoice.subtotalCents, invoice.grossTotalCents].filter((v): v is number => v !== undefined);
+
+interface Interpretation {
+  /** Líneas que suman (leídas, 0 % automático o tarifa manual). */
+  lines: InvoiceLine[];
+  /** Todas las filas con su interpretación final, en el orden del PDF. */
+  products: ProductLine[];
+  /** Índices de las filas que siguen sin tarifa. */
+  pending: number[];
+  autoZero: number;
+  manual: number;
+  ignored: number;
+}
+
+const complete = (p: ProductLine): p is ProductLine & InvoiceLine => !p.issue && p.rateBp !== undefined && p.vatCents !== undefined && p.baseCents !== undefined;
+
+/**
+ * Interpretación final de las filas de «Detalle de productos».
+ *
+ * Una fila con IVA y % vacíos se toma como 0 % solo si no hay ambigüedad: se
+ * leyó su «Precio unitario de venta», el IVA de las demás líneas ya explica
+ * el IVA total del documento (no hay IVA para ella) y, sumando su precio, las
+ * bases concilian con el subtotal. Si algo no cuadra queda para revisión y el
+ * usuario puede definir la tarifa o ignorar la fila. El PDF no se modifica.
+ */
+export function interpretLines(invoice: ParsedInvoice, decision: DocDecision = {}): Interpretation {
+  const products = invoice.products.map((p) => ({ ...p }));
+  const lines: (InvoiceLine | undefined)[] = products.map(() => undefined);
+  const candidates: number[] = [];
+  const pending: number[] = [];
+  let manual = 0;
+  let ignored = 0;
+
+  products.forEach((p, i) => {
+    if (complete(p)) {
+      lines[i] = { page: p.page, description: p.description, rateBp: p.rateBp, vatCents: p.vatCents, baseCents: p.baseCents };
+      return;
+    }
+    const choice = decision.lines?.[i];
+    if (choice === "ignore") {
+      p.origin = "ignored";
+      ignored++;
+    } else if (choice !== undefined && p.baseCents !== undefined) {
+      // Tarifa definida por el usuario: el IVA es el impreso o, si la celda está vacía, base × tarifa.
+      const vatCents = p.vatCents ?? Math.round((p.baseCents * choice) / 10_000);
+      Object.assign(p, { rateBp: choice, vatCents, origin: "manual" });
+      lines[i] = { page: p.page, description: p.description, rateBp: choice, vatCents, baseCents: p.baseCents };
+      manual++;
+    } else if (p.emptyTax && p.baseCents !== undefined && p.rateBp === undefined && p.vatCents === undefined) candidates.push(i);
+    else pending.push(i);
+  });
+
+  let autoZero = 0;
+  if (candidates.length) {
+    const known = lines.filter((l): l is InvoiceLine => l !== undefined);
+    const vatExplained = invoice.invoiceVatCents !== undefined && Math.abs(invoice.invoiceVatCents - sum(known, "vatCents")) <= rounding(known.filter((l) => l.rateBp > 0).length);
+    const bases = sum(known, "baseCents") + candidates.reduce((s, i) => s + products[i].baseCents!, 0);
+    const basesReconcile = references(invoice).some((r) => Math.abs(r - bases) <= rounding(known.length + candidates.length));
+    if (vatExplained && basesReconcile) {
+      for (const i of candidates) {
+        const p = products[i];
+        Object.assign(p, { rateBp: 0, vatCents: 0, origin: "auto-zero" });
+        lines[i] = { page: p.page, description: p.description, rateBp: 0, vatCents: 0, baseCents: p.baseCents! };
+      }
+      autoZero = candidates.length;
+    } else pending.push(...candidates);
+  }
+
+  return { lines: lines.filter((l): l is InvoiceLine => l !== undefined), products, pending: pending.sort((a, b) => a - b), autoZero, manual, ignored };
+}
+
 const invoiceKey = (nit: string, number: string) => `${nit}|${number.replace(/[\s-]/g, "").toUpperCase()}`;
 
-function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier | undefined, duplicateOf: string | undefined): InvoiceRow {
-  const f = figures(invoice);
-  const issues: string[] = [];
+function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier | undefined, category: DocCategory | undefined, duplicateOf: string | undefined, decision: DocDecision): InvoiceRow {
+  const reading = interpretLines(invoice, decision);
+  const { lines } = reading;
+  const f = figures(lines);
+  const problems: RowProblem[] = [];
   const notes: string[] = [];
+  const problem = (code: RowProblem["code"], text: string) => {
+    // Lo que el usuario confirmó deja de bloquear y queda como información.
+    if (decision.confirmed && CONFIRMABLE.has(code)) notes.push(`${text} Confirmado por el usuario.`);
+    else problems.push({ code, text });
+  };
 
-  if (invoice.documentType === "Documento sin título") issues.push("No se encontró el título del documento.");
-  if (!invoice.supplierName) issues.push("No se encontró la razón social del emisor.");
-  if (invoice.lineIssues.length) {
-    const n = invoice.lineIssues.length;
-    issues.push(n === 1 ? "1 fila de productos no permite identificar %, IVA o precio unitario de venta." : `${n} filas de productos no permiten identificar %, IVA o precio unitario de venta.`);
+  if (invoice.documentType === NO_TITLE) problem("title-missing", "No se encontró el título del documento.");
+  if (!invoice.supplierName) problem("supplier-name", "No se encontró la razón social del emisor.");
+  if (reading.pending.length) problem("lines", rows(reading.pending.length, "1 fila de productos no permite identificar la tarifa de IVA.", "# filas de productos no permiten identificar la tarifa de IVA."));
+  if (invoice.products.length === 0) problem("no-products", "No se encontraron productos en «Detalles de Productos».");
+  // Las Notas crédito suman todo en una sola fila: no dependen de la tarifa ni del tipo de proveedor.
+  if (category !== "credit_note") {
+    for (const r of f.otherRates) problem("other-rate", `Se encontró una tarifa de IVA no configurada: ${formatRateBp(r.rateBp)}.`);
+    if (supplier?.vatType === "service" && (f.base5 || f.vat5)) problem("services-5", "Servicios al 5 % detectados: el resumen no tiene renglón para ellos.");
   }
-  if (invoice.lines.length === 0 && invoice.lineIssues.length === 0) issues.push("No se encontraron productos en «Detalles de Productos».");
-  for (const r of f.otherRates) issues.push(`Se encontró una tarifa de IVA no configurada: ${formatRateBp(r.rateBp)}.`);
-  if (supplier?.vatType === "service" && (f.base5 || f.vat5)) issues.push("Servicios al 5 % detectados: requieren clasificación en el resumen.");
-  if (duplicateOf) issues.push(`Posible duplicado de «${duplicateOf}» (mismo NIT y número de factura).`);
+  if (duplicateOf) {
+    if (decision.includeDuplicate) notes.push(`Posible duplicado de «${duplicateOf}»: incluido por decisión del usuario.`);
+    else problem("duplicate", `Posible duplicado de «${duplicateOf}» (mismo NIT y número de factura).`);
+  }
 
-  const bases = invoice.lines.reduce((s, l) => s + l.baseCents, 0);
-  const references = [invoice.subtotalCents, invoice.grossTotalCents].filter((v): v is number => v !== undefined);
-  if (references.length === 0) notes.push("No se encontró el subtotal del documento para validar las bases.");
-  else if (!references.includes(bases) && invoice.lines.length > 0) {
-    issues.push(`La suma de bases por línea (${formatCop(bases)}) no coincide con el subtotal del documento (${formatCop(references[0])}).`);
+  if (reading.autoZero) notes.push(rows(reading.autoZero, "1 fila sin IVA ni % se interpretó como 0 % (el documento no reporta IVA para ella).", "# filas sin IVA ni % se interpretaron como 0 % (el documento no reporta IVA para ellas)."));
+  if (reading.manual) notes.push(rows(reading.manual, "1 fila con tarifa definida por el usuario.", "# filas con tarifa definida por el usuario."));
+  if (reading.ignored) notes.push(rows(reading.ignored, "1 fila ignorada por decisión del usuario (no suma).", "# filas ignoradas por decisión del usuario (no suman)."));
+
+  const bases = sum(lines, "baseCents");
+  const refs = references(invoice);
+  if (refs.length === 0) notes.push("No se encontró el subtotal del documento para validar las bases.");
+  else if (!refs.includes(bases) && lines.length > 0) {
+    problem("base-mismatch", `La suma de bases por línea (${formatCop(bases)}) no coincide con el subtotal del documento (${formatCop(refs[0])}).`);
   }
 
   if (invoice.invoiceVatCents === undefined) notes.push("No se encontró el IVA total del documento para validar.");
@@ -73,36 +187,54 @@ function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier 
     if (diff !== 0) {
       const text = `IVA según detalle ${formatCop(f.detailVatCents)} · IVA según total factura ${formatCop(invoice.invoiceVatCents)} · Diferencia por validar ${formatCop(Math.abs(diff))}.`;
       // Hasta un peso por línea gravada se considera redondeo del documento (informativo).
-      const taxedLines = invoice.lines.filter((l) => l.rateBp > 0).length;
-      if (Math.abs(diff) <= Math.max(1, taxedLines) * 100) notes.push(text);
-      else issues.push(text);
+      if (Math.abs(diff) <= rounding(lines.filter((l) => l.rateBp > 0).length)) notes.push(text);
+      else problem("vat-mismatch", text);
     }
   }
 
+  const status: InvoiceRow["status"] = decision.excluded ? "excluded" : problems.length ? "review" : !category ? "pending-title" : !supplier ? "pending-supplier" : "processed";
   return {
     fileName,
-    status: issues.length ? "review" : supplier ? "processed" : "pending-supplier",
+    status,
     documentType: invoice.documentType,
     documentTypeKey: normalizeKey(invoice.documentType),
+    category,
     invoiceNumber: invoice.invoiceNumber,
     supplierNit: invoice.supplierNit,
     supplierName: invoice.supplierName,
     vatType: supplier?.vatType,
     pageCount: invoice.pageCount,
-    lineCount: invoice.lines.length,
+    lineCount: lines.length,
     ...f,
     invoiceVatCents: invoice.invoiceVatCents,
     subtotalCents: invoice.subtotalCents ?? invoice.grossTotalCents,
     duplicateOf,
-    issues,
+    problems,
+    issues: problems.map((p) => p.text),
     notes,
-    lineIssues: invoice.lineIssues,
-    products: invoice.products,
+    pendingLines: reading.pending,
+    products: reading.products,
   };
 }
 
-function failedRow(fileName: string, status: "incompatible" | "error", message: string): InvoiceRow {
-  return { fileName, status, lineCount: 0, base5: 0, vat5: 0, base19: 0, vat19: 0, base0: 0, otherRates: [], detailVatCents: 0, issues: [message], notes: [], lineIssues: [], products: [] };
+function failedRow(fileName: string, status: "incompatible" | "error", message: string, excluded: boolean): InvoiceRow {
+  return {
+    fileName,
+    status: excluded ? "excluded" : status,
+    lineCount: 0,
+    base5: 0,
+    vat5: 0,
+    base19: 0,
+    vat19: 0,
+    base0: 0,
+    otherRates: [],
+    detailVatCents: 0,
+    problems: [],
+    issues: [message],
+    notes: [],
+    pendingLines: [],
+    products: [],
+  };
 }
 
 /** El nombre más frecuente entre las facturas de un NIT (en empate, el primero). */
@@ -112,17 +244,46 @@ function mostFrequent(names: string[]): string {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 }
 
+/** Solo documentos validados: Facturas por renglón y Notas crédito en una sola fila. */
+function summarize(rowsToSum: InvoiceRow[]): VatSummaryData {
+  const invoices = { documentCount: 0, purchases5: zero(), purchases19: zero(), services19: zero(), zeroBaseCents: 0 };
+  const notes = { documentCount: 0, baseCents: 0, vatCents: 0 };
+  for (const r of rowsToSum) {
+    if (r.status !== "processed") continue;
+    if (r.category === "credit_note") {
+      notes.documentCount++;
+      // Todas las bases y todo el IVA de la nota, sin separar tarifa ni Compras / Servicios.
+      add(notes, r.base0 + r.base5 + r.base19 + r.otherRates.reduce((s, o) => s + o.baseCents, 0), r.detailVatCents);
+      continue;
+    }
+    invoices.documentCount++;
+    if (r.vatType === "purchase") {
+      add(invoices.purchases5, r.base5, r.vat5);
+      add(invoices.purchases19, r.base19, r.vat19);
+    } else add(invoices.services19, r.base19, r.vat19);
+    invoices.zeroBaseCents += r.base0;
+  }
+  return { invoices, notes };
+}
+
+/** Documentos que requieren intervención del usuario. */
+export const needsAttention = (r: InvoiceRow) => r.status !== "processed" && r.status !== "excluded";
+
 /**
- * Cruza las facturas leídas con los proveedores y arma tabla, pendientes y
- * resumen. Es una función pura: al crear o editar un proveedor basta con
- * volver a llamarla (no se releen los PDF).
+ * Cruza los documentos leídos con los proveedores, la clasificación de
+ * títulos y las decisiones del usuario, y arma tabla, pendientes y resumen.
+ * Es una función pura: al resolver un pendiente basta con volver a llamarla
+ * (no se releen los PDF).
  */
-export function buildReport(results: FileResult[], suppliers: Supplier[], options: ReportOptions = {}): InvoiceReport {
+export function buildReport(results: FileResult[], suppliers: Supplier[], titles: TitleRule[], options: ReportOptions = {}): InvoiceReport {
   const byNit = new Map(suppliers.map((s) => [s.nit, s]));
+  const categories = new Map(titles.map((t) => [t.normalizedTitle, t.category]));
+  const decisions = options.decisions ?? {};
   const seen = new Map<string, string>();
 
-  const rows = results.map((r) => {
-    if (r.kind !== "parsed") return failedRow(r.fileName, r.kind, r.message);
+  const reportRows = results.map((r) => {
+    const decision = decisions[r.fileName] ?? {};
+    if (r.kind !== "parsed") return failedRow(r.fileName, r.kind, r.message, Boolean(decision.excluded));
     const { invoice } = r;
     let duplicateOf: string | undefined;
     if (invoice.invoiceNumber) {
@@ -130,19 +291,29 @@ export function buildReport(results: FileResult[], suppliers: Supplier[], option
       duplicateOf = seen.get(key);
       if (!duplicateOf) seen.set(key, r.fileName);
     }
-    return parsedRow(r.fileName, invoice, byNit.get(invoice.supplierNit), duplicateOf);
+    return parsedRow(r.fileName, invoice, byNit.get(invoice.supplierNit), categories.get(normalizeKey(invoice.documentType)), duplicateOf, decision);
   });
-  const parsed = rows.filter((r) => r.supplierNit);
+  const parsed = reportRows.filter((r) => r.supplierNit);
+  const active = parsed.filter((r) => r.status !== "excluded");
 
   // Proveedores sin registrar: uno por NIT, sin importar cuántas facturas tenga.
   const pendingNames = new Map<string, string[]>();
-  for (const r of parsed) {
+  for (const r of active) {
     if (r.vatType) continue;
     const list = pendingNames.get(r.supplierNit!) ?? [];
     list.push(r.supplierName ?? "");
     pendingNames.set(r.supplierNit!, list);
   }
   const pendingSuppliers: PendingSupplier[] = [...pendingNames.entries()].map(([nit, names]) => ({ nit, name: mostFrequent(names.filter(Boolean)), invoiceCount: names.length }));
+
+  // Títulos sin clasificar: uno por título normalizado.
+  const unknown = new Map<string, UnknownTitle>();
+  for (const r of active) {
+    if (r.category || r.documentType === NO_TITLE) continue;
+    const t = unknown.get(r.documentTypeKey!);
+    if (t) t.documentCount++;
+    else unknown.set(r.documentTypeKey!, { normalizedTitle: r.documentTypeKey!, displayTitle: r.documentType!, documentCount: 1 });
+  }
 
   // Razón social distinta a la registrada para un NIT existente.
   const mismatches = new Map<string, NameMismatch>();
@@ -156,53 +327,36 @@ export function buildReport(results: FileResult[], suppliers: Supplier[], option
     else mismatches.set(key, { supplierId: s.id, nit: s.nit, vatType: s.vatType, storedName: s.businessName, invoiceName: r.supplierName, invoiceCount: 1 });
   }
 
-  const summaries: DocumentTypeSummary[] = [];
-  if (pendingSuppliers.length === 0) {
-    for (const r of parsed) {
-      if (!r.vatType || (r.duplicateOf && !options.includeDuplicates)) continue;
-      let s = summaries.find((x) => x.documentTypeKey === r.documentTypeKey);
-      if (!s) {
-        s = { documentType: r.documentType!, documentTypeKey: r.documentTypeKey!, invoiceCount: 0, purchases5: zero(), purchases19: zero(), services19: zero(), zeroBaseCents: 0, services5: zero(), otherRates: [] };
-        summaries.push(s);
-      }
-      s.invoiceCount++;
-      if (r.vatType === "purchase") {
-        add(s.purchases5, r.base5, r.vat5);
-        add(s.purchases19, r.base19, r.vat19);
-      } else {
-        add(s.services5, r.base5, r.vat5);
-        add(s.services19, r.base19, r.vat19);
-      }
-      s.zeroBaseCents += r.base0;
-      for (const o of r.otherRates) mergeRates(s.otherRates, o.rateBp, o.baseCents, o.vatCents);
-    }
-  }
-
   const incidents: Incident[] = [];
-  for (const r of rows) {
-    const type = r.status === "incompatible" ? "No compatible" : r.status === "error" ? "Error" : "Requiere revisión";
+  for (const r of reportRows) {
+    const type = r.status === "incompatible" ? "No compatible" : r.status === "error" ? "Error" : r.supplierNit ? "Requiere revisión" : "No procesado";
     for (const issue of r.issues) incidents.push({ fileName: r.fileName, type, detail: issue });
-    for (const li of r.lineIssues) incidents.push({ fileName: r.fileName, type: "Fila no interpretable", detail: `Página ${li.page}: ${li.text} — ${li.reason}` });
+    if (r.status === "excluded") incidents.push({ fileName: r.fileName, type: "Excluido por el usuario", detail: "El documento no se incluye en el resumen." });
+    for (const i of r.pendingLines) {
+      const p = r.products[i];
+      incidents.push({ fileName: r.fileName, type: "Fila no interpretable", detail: `Página ${p.page}: ${p.description || "(sin descripción)"} — ${p.issue ?? "Sin tarifa de IVA."}` });
+    }
     for (const note of r.notes) incidents.push({ fileName: r.fileName, type: "Información", detail: note });
   }
 
-  const count = (status: InvoiceRow["status"]) => rows.filter((r) => r.status === status).length;
+  const count = (test: (r: InvoiceRow) => boolean) => reportRows.filter(test).length;
   return {
-    rows,
+    rows: reportRows,
     stats: {
-      files: rows.length,
-      processed: count("processed"),
-      review: count("review"),
-      pending: count("pending-supplier"),
-      failed: count("incompatible") + count("error"),
+      files: reportRows.length,
+      validated: count((r) => r.status === "processed"),
+      pending: count(needsAttention),
+      excluded: count((r) => r.status === "excluded"),
+      invoices: count((r) => r.category === "invoice"),
+      notes: count((r) => r.category === "credit_note"),
       suppliers: new Set(parsed.map((r) => r.supplierNit)).size,
       newSuppliers: pendingSuppliers.length,
-      documentTypes: new Set(parsed.map((r) => r.documentTypeKey)).size,
       duplicates: parsed.filter((r) => r.duplicateOf).length,
     },
     pendingSuppliers,
+    unknownTitles: [...unknown.values()],
     nameMismatches: [...mismatches.values()],
-    summaries,
+    summary: summarize(reportRows),
     incidents,
   };
 }

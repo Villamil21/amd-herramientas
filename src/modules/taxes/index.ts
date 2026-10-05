@@ -16,8 +16,8 @@ export const taxesModule: ModuleDef = {
   submodules: [
     {
       id: "analisis-iva-facturas",
-      name: "IVA",
-      description: "Resume bases e IVA por tarifa, tipo de proveedor y tipo de documento a partir de una carpeta de facturas PDF.",
+      name: "IVA de compras",
+      description: "Prepara y revisa la información de la declaración de IVA de compras a partir de una carpeta de facturas PDF.",
       icon: ReceiptText,
       component: lazy(() => import("./invoice-vat/InvoiceVatPage")),
     },

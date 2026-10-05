@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.18.0",
+    "date": "2026-10-05",
+    "notes": [
+      "El módulo «IVA» ahora se llama «IVA de compras» y está pensado para dejar lista la declaración: importar, clasificar, revisar, resolver y validar.",
+      "Estado global siempre visible: «● Listo para declaración» o «● Requiere atención — X pendientes». El bloque «Pendientes por resolver» agrupa los problemas en una frase por tipo y «Resolver pendientes» lleva de uno al siguiente; el resumen se recalcula al resolver cada uno, sin volver a importar la carpeta.",
+      "Solo dos categorías de documento: Factura electrónica y Nota crédito. Un título nuevo se pregunta una sola vez y la decisión queda guardada (también en el backup); se puede cambiar en «Tipos de documento».",
+      "Resumen: las Facturas electrónicas conservan sus cuatro renglones y las Notas crédito van en una sola fila, «Devoluciones en compras anuladas, rescindidas o resueltas en este periodo», con la suma de todas sus bases y todo su IVA. Solo suman los documentos validados.",
+      "Una línea de producto con IVA y % vacíos se interpreta como 0 % cuando el documento concilia (no reporta IVA para ella y las bases cuadran con el subtotal): su «Precio unitario de venta» suma como excluido, exento o no gravado y el detalle muestra $0 y 0%. Si hay dudas queda en revisión y se elige 19 %, 5 %, 0 % o Ignorar fila.",
+      "Cada pendiente tiene su acción: configurar el Tipo IVA del proveedor, clasificar el documento, revisar producto, confirmar interpretación (diferencias entre líneas y totales), incluir o excluir un posible duplicado y excluir un documento que no corresponde.",
+      "Tabla de documentos: filtros Todos / Pendientes / Validados / Notas crédito / Facturas, tarjetas de conteo que filtran al hacer clic y filas pendientes resaltadas con botón «Revisar».",
+      "Corregido: el detalle de un documento ya no se corta al abrirlo con la tabla filtrada por proveedor; siempre se puede desplazar hasta el final y el buscador se conserva al cerrar.",
+      "Corregido: productos cuya descripción y cuyos importes venían en dos renglones del PDF ya no aparecen como una fila «no interpretable».",
+      "Exportar Excel se habilita cuando no quedan pendientes; la hoja Resumen usa las dos categorías nuevas."
+    ]
+  },
+  {
     "version": "1.17.2",
     "date": "2026-10-05",
     "notes": [

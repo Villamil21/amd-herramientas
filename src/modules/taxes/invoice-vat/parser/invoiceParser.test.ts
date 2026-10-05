@@ -140,10 +140,34 @@ describe("parseInvoice", () => {
     expect(inv.lineIssues.map((i) => i.reason)).toEqual(["No se pudo identificar: %.", "No se pudo identificar: Precio unitario de venta."]);
     // Las filas incompletas siguen en el detalle, en su orden, con lo que sí se leyó.
     expect(inv.products).toEqual([
-      { page: 1, description: "Sin tarifa", rateBp: undefined, vatCents: 19_000, baseCents: 100_000 },
-      { page: 1, description: "Sin precio de venta", rateBp: 1900, vatCents: 19_000, baseCents: undefined },
+      { page: 1, description: "Sin tarifa", rateBp: undefined, vatCents: 19_000, baseCents: 100_000, issue: "No se pudo identificar: %." },
+      { page: 1, description: "Sin precio de venta", rateBp: 1900, vatCents: 19_000, baseCents: undefined, issue: "No se pudo identificar: Precio unitario de venta." },
       { page: 1, description: "Cero sin IVA impreso", rateBp: 0, vatCents: 0, baseCents: 200_000 },
     ]);
+  });
+
+  it("señala la fila con IVA y % vacíos (sin asumir la tarifa: lo decide el análisis con los totales)", () => {
+    const inv = parseInvoice({
+      pageCount: 2,
+      pages: [firstPage("FACTURA ELECTRÓNICA DE VENTA", "900", "F2X", "FEFL-1", product(317, 1, "Peaje: ESTAMBUL", null, null, "13.300,00"), 2), totalsPage(2, 2, "13.300,00", "0,00")],
+    });
+    expect(inv.lines).toEqual([]);
+    expect(inv.products).toEqual([{ page: 1, description: "Peaje: ESTAMBUL", baseCents: 1_330_000, emptyTax: true, issue: "No se pudo identificar: %, IVA." }]);
+    expect([inv.subtotalCents, inv.invoiceVatCents]).toEqual([1_330_000, 0]);
+  });
+
+  it("une la línea de un producto escrita unos puntos aparte de sus importes (no es otra fila)", () => {
+    // «Nro., descripción y cantidad» en y=300 y los importes del mismo producto en y=305.
+    const amounts = product(305, 2, "", "0,00", "0.00", "6.400,00").filter((i) => i.x > 220);
+    const label = [t("2", 39, 300), t("QUESITO", 90, 300), t("1,00", 199, 300)];
+    const inv = parseInvoice({
+      pageCount: 1,
+      pages: [firstPage("FACTURA ELECTRÓNICA DE VENTA", "900", "A", "F-1", [...product(317, 1, "Blanqueador", "190,00", "19.00", "1.000,00"), ...amounts, ...label], 1)],
+    });
+    expect(inv.lineIssues).toEqual([]);
+    expect(inv.lines.map((l) => [l.rateBp, l.vatCents, l.baseCents])).toEqual([[1900, 19_000, 100_000], [0, 0, 640_000]]);
+    expect(inv.products).toHaveLength(2);
+    expect(inv.products[1].description).toContain("QUESITO");
   });
 
   it("rechaza PDF sin la tabla o sin texto", () => {

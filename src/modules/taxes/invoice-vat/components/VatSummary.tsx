@@ -1,57 +1,61 @@
-import { Alert, Card } from "../../../../components/ui";
-import { formatCop as formatMoneyCents, formatRateBp } from "../parser/amounts";
-import { SUMMARY_CATEGORIES } from "../services/labels";
-import type { DocumentTypeSummary } from "../types";
+import { Card } from "../../../../components/ui";
+import { formatCop as formatMoneyCents } from "../parser/amounts";
+import { NOTES_CATEGORY, SUMMARY_CATEGORIES } from "../services/labels";
+import type { VatSummaryData } from "../types";
 
-/** Un bloque independiente por cada título de documento encontrado (sin netear entre ellos). */
-export function VatSummary({ summaries }: { summaries: DocumentTypeSummary[] }) {
+const docs = (n: number) => (n === 1 ? "1 documento validado" : `${n} documentos validados`);
+
+/**
+ * Resumen para la declaración: las Facturas electrónicas por renglón y, en su
+ * propia sección, las Notas crédito en una sola fila (sin netear entre ellas).
+ * Solo suman los documentos validados.
+ */
+export function VatSummary({ summary }: { summary: VatSummaryData }) {
+  const { invoices, notes } = summary;
   return (
     <>
-      {summaries.map((s) => {
-        const hasServices5 = s.services5.baseCents !== 0 || s.services5.vatCents !== 0;
-        return (
-          <Card key={s.documentTypeKey} flush title={s.documentType} description={s.invoiceCount === 1 ? "1 documento" : `${s.invoiceCount} documentos`}>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Categoría</th>
-                    <th className="num">Base</th>
-                    <th className="num">IVA</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {SUMMARY_CATEGORIES.map((c) => (
-                    <tr key={c.label}>
-                      <td className="table__primary">{c.label}</td>
-                      <td className="num">{formatMoneyCents(c.value(s).baseCents)}</td>
-                      <td className="num">{formatMoneyCents(c.value(s).vatCents)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {(hasServices5 || s.otherRates.length > 0) && (
-              <div className="card__body">
-                <Alert tone="warning" title="Valores que requieren clasificación (no incluidos arriba)">
-                  <ul>
-                    {hasServices5 && (
-                      <li>
-                        Servicios al 5% detectados: base {formatMoneyCents(s.services5.baseCents)} · IVA {formatMoneyCents(s.services5.vatCents)}.
-                      </li>
-                    )}
-                    {s.otherRates.map((o) => (
-                      <li key={o.rateBp}>
-                        Tarifa no configurada {formatRateBp(o.rateBp)}: base {formatMoneyCents(o.baseCents)} · IVA {formatMoneyCents(o.vatCents)}.
-                      </li>
-                    ))}
-                  </ul>
-                </Alert>
-              </div>
-            )}
-          </Card>
-        );
-      })}
+      <Card flush title="Factura electrónica" description={docs(invoices.documentCount)}>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Categoría</th>
+                <th className="num">Base</th>
+                <th className="num">IVA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SUMMARY_CATEGORIES.map((c) => (
+                <tr key={c.label}>
+                  <td className="table__primary">{c.label}</td>
+                  <td className="num">{formatMoneyCents(c.value(invoices).baseCents)}</td>
+                  <td className="num">{formatMoneyCents(c.value(invoices).vatCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <Card flush title="Notas crédito" description={docs(notes.documentCount)}>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Categoría</th>
+                <th className="num">Base</th>
+                <th className="num">IVA</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="table__primary">{NOTES_CATEGORY}</td>
+                <td className="num">{formatMoneyCents(notes.baseCents)}</td>
+                <td className="num">{formatMoneyCents(notes.vatCents)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </>
   );
 }

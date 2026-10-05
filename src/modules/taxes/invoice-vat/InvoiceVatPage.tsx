@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileSpreadsheet, FolderOpen, FolderSearch, Play } from "lucide-react";
+import { FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
 import { Alert, Button, Card, PageHeader, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
 import { supplierService } from "../../../services/supplierService";
 import { errorMessage } from "../../../services/tauri";
-import type { Supplier } from "../../../types/models";
+import { vatTitleService } from "../../../services/vatTitleService";
+import type { DocumentTitleMapping, Supplier } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
-import { InvoicesTable } from "./components/InvoicesTable";
+import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
+import { INVOICES_ANCHOR, InvoicesTable, type InvoiceFilter } from "./components/InvoicesTable";
 import { InvoiceStats } from "./components/InvoiceStats";
 import { NameMismatchPanel } from "./components/NameMismatchPanel";
-import { PendingSuppliersPanel } from "./components/PendingSuppliersPanel";
+import { LotStatusIndicator, PendingPanel, pendingItemId } from "./components/PendingPanel";
+import { TitleMappingsModal } from "./components/TitleMappingsModal";
 import { VatSummary } from "./components/VatSummary";
 import { buildReport, nameKey } from "./services/analysis";
 import { exportInvoiceVatExcel } from "./services/excelExport";
 import { pickInvoiceFolder, processInvoiceFolder, type InvoiceFolder } from "./services/invoiceFolderService";
-import type { FileResult } from "./types";
+import { actionsByFile, buildPendingActions, nextPending, type PendingAction } from "./services/pending";
+import type { Decisions, DocDecision, FileResult } from "./types";
 
 type Phase = { status: "idle" } | { status: "ready" } | { status: "processing"; done: number; total: number } | { status: "done"; results: FileResult[] };
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", formatInteger(n)));
+
+const scrollToId = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
 
 export default function InvoiceVatPage() {
   const toast = useToast();
@@ -26,28 +32,50 @@ export default function InvoiceVatPage() {
   const [phase, setPhase] = useState<Phase>({ status: "idle" });
   const [picking, setPicking] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [titles, setTitles] = useState<DocumentTitleMapping[]>([]);
+  const [titlesOpen, setTitlesOpen] = useState(false);
   const [keptNames, setKeptNames] = useState<Set<string>>(() => new Set());
-  const [includeDuplicates, setIncludeDuplicates] = useState(false);
+  /** Decisiones del usuario por archivo (tarifa de una fila, confirmar, excluir, incluir duplicado). */
+  const [decisions, setDecisions] = useState<Decisions>({});
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ fileName: string; products: boolean } | null>(null);
+  const [filter, setFilter] = useState<InvoiceFilter>("all");
+  const [pendingExpanded, setPendingExpanded] = useState(false);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  /** «Resolver pendientes» en curso: al resolver uno se pasa al siguiente. */
+  const [resolving, setResolving] = useState(false);
+  const [advance, setAdvance] = useState(false);
+  const [justAnalyzed, setJustAnalyzed] = useState(false);
   const cancelled = useRef(false);
   const processing = phase.status === "processing";
 
-  const loadSuppliers = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      setSuppliers(await supplierService.list());
+      const [s, t] = await Promise.all([supplierService.list(), vatTitleService.list()]);
+      setSuppliers(s);
+      setTitles(t);
     } catch (e) {
       toast(errorMessage(e), "error");
     }
   }, [toast]);
 
   useEffect(() => {
-    void loadSuppliers();
+    void loadData();
     // Al salir de la pantalla se detiene un análisis en curso.
     return () => {
       cancelled.current = true;
     };
-  }, [loadSuppliers]);
+  }, [loadData]);
+
+  function resetLot() {
+    setExportedPath(null);
+    setKeptNames(new Set());
+    setDecisions({});
+    setSelected(null);
+    setResolving(false);
+    setFocusId(null);
+  }
 
   async function pick() {
     if (processing) return;
@@ -57,8 +85,7 @@ export default function InvoiceVatPage() {
       if (!picked) return;
       setFolder(picked);
       setPhase({ status: "ready" });
-      setExportedPath(null);
-      setKeptNames(new Set());
+      resetLot();
     } catch (e) {
       toast(errorMessage(e), "error");
     } finally {
@@ -69,24 +96,85 @@ export default function InvoiceVatPage() {
   async function analyze() {
     if (!folder || processing || folder.files.length === 0) return;
     cancelled.current = false;
-    setExportedPath(null);
+    resetLot();
     setPhase({ status: "processing", done: 0, total: folder.files.length });
-    await loadSuppliers();
+    await loadData();
     const results = await processInvoiceFolder(
       folder.files.map((f) => f.name),
       (done, total) => setPhase({ status: "processing", done, total }),
       () => cancelled.current,
     );
-    if (!cancelled.current) setPhase({ status: "done", results });
+    if (!cancelled.current) {
+      setPhase({ status: "done", results });
+      setJustAnalyzed(true);
+    }
   }
 
-  const report = useMemo(
-    () => (phase.status === "done" ? buildReport(phase.results, suppliers, { includeDuplicates, keptNames }) : null),
-    [phase, suppliers, includeDuplicates, keptNames],
-  );
+  const report = useMemo(() => (phase.status === "done" ? buildReport(phase.results, suppliers, titles, { decisions, keptNames }) : null), [phase, suppliers, titles, decisions, keptNames]);
+  const actions = useMemo(() => (report ? buildPendingActions(report) : []), [report]);
+  const attention = useMemo(() => actionsByFile(actions), [actions]);
+  const selectedRow = report?.rows.find((r) => r.fileName === selected?.fileName) ?? null;
+  const selectedActionId = selected ? attention.get(selected.fileName)?.id : undefined;
+  /** Con pendientes no se exporta: el Excel sería una declaración incompleta. */
+  const exportBlocked = actions.length > 0;
+
+  // Tras analizar: con pendientes, la tabla abre filtrada y el detalle abierto si son pocos.
+  useEffect(() => {
+    if (!justAnalyzed) return;
+    setJustAnalyzed(false);
+    setFilter(attention.size ? "pending" : "all");
+    setPendingExpanded(actions.length > 0 && actions.length <= 6);
+  }, [justAnalyzed, attention, actions]);
+
+  function runAction(a: PendingAction) {
+    setFocusId(a.id);
+    if (a.target.kind === "document") return setSelected({ fileName: a.target.fileName, products: a.group === "product" });
+    setPendingExpanded(true);
+    scrollToId(pendingItemId(a.id));
+  }
+
+  /** Lleva al siguiente pendiente y deja activo el recorrido. */
+  function resolveNext(skipId?: string) {
+    const next = nextPending(actions, skipId);
+    if (!next) {
+      setResolving(false);
+      setSelected(null);
+      setFocusId(null);
+      toast("No quedan pendientes por resolver.");
+      return;
+    }
+    setResolving(true);
+    if (next.target.kind !== "document") setSelected(null);
+    runAction(next);
+  }
+
+  // Al resolver algo durante el recorrido, pasar al siguiente con los datos ya recalculados.
+  useEffect(() => {
+    if (!advance) return;
+    setAdvance(false);
+    // El documento abierto todavía tiene algo propio por resolver: se sigue en él.
+    if (selected && actions.some((a) => a.target.kind === "document" && a.target.fileName === selected.fileName)) return;
+    resolveNext();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advance]);
+
+  async function reloadAndAdvance() {
+    await loadData();
+    if (resolving) setAdvance(true);
+  }
+
+  function decide(fileName: string, decision: DocDecision) {
+    setDecisions((prev) => ({ ...prev, [fileName]: decision }));
+    if (resolving) setAdvance(true);
+  }
+
+  function showDocuments(f: InvoiceFilter) {
+    setFilter(f);
+    scrollToId(INVOICES_ANCHOR);
+  }
 
   async function exportExcel() {
-    if (!report || !folder || exporting) return;
+    if (!report || !folder || exporting || exportBlocked) return;
     setExporting(true);
     try {
       const path = await exportInvoiceVatExcel(report, suppliers, folder.folderName);
@@ -101,28 +189,30 @@ export default function InvoiceVatPage() {
     }
   }
 
-  const failed = report?.rows.filter((r) => r.status === "incompatible" || r.status === "error") ?? [];
-  const pendingCount = report?.pendingSuppliers.length ?? 0;
-
   return (
     <>
       <PageHeader
         eyebrow="Impuestos"
-        title="IVA"
-        description="Selecciona una carpeta con facturas electrónicas en PDF para resumir bases e IVA por tarifa, tipo de proveedor y tipo de documento."
+        title="IVA de compras"
+        description="Selecciona una carpeta con facturas electrónicas en PDF para preparar y revisar la información de la declaración de IVA de compras."
         actions={
-          report && (
-            <Button
-              variant="primary"
-              icon={<FileSpreadsheet size={15} />}
-              onClick={() => void exportExcel()}
-              loading={exporting}
-              disabled={pendingCount > 0}
-              title={pendingCount > 0 ? "Clasifica primero los proveedores pendientes." : undefined}
-            >
-              Exportar Excel
+          <>
+            <Button icon={<Tags size={15} />} onClick={() => setTitlesOpen(true)}>
+              Tipos de documento
             </Button>
-          )
+            {report && (
+              <Button
+                variant="primary"
+                icon={<FileSpreadsheet size={15} />}
+                onClick={() => void exportExcel()}
+                loading={exporting}
+                disabled={exportBlocked}
+                title={exportBlocked ? "Resuelve primero los pendientes." : undefined}
+              >
+                Exportar Excel
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -174,51 +264,65 @@ export default function InvoiceVatPage() {
         )}
       </Card>
 
+      {processing && <LotStatusIndicator processing />}
+
       {report && (
         <>
-          <InvoiceStats stats={report.stats} />
+          <LotStatusIndicator actions={actions} />
+          <PendingPanel
+            actions={actions}
+            expanded={pendingExpanded}
+            onExpandedChange={setPendingExpanded}
+            focusId={focusId}
+            onResolveAll={() => resolveNext()}
+            onOpenDocument={(fileName) => setSelected({ fileName, products: false })}
+            onExclude={(fileName) => decide(fileName, { ...decisions[fileName], excluded: true })}
+            onChanged={reloadAndAdvance}
+          />
 
-          {failed.length > 0 && (
-            <Alert
-              tone="danger"
-              title={plural(failed.length, "1 archivo no pudo procesarse.", "# archivos no pudieron procesarse.")}
-              items={failed.map((r) => `${r.fileName}: ${r.issues[0]}`)}
-            />
-          )}
-          {report.stats.review > 0 && (
-            <Alert tone="warning" title={plural(report.stats.review, "1 factura requiere revisión.", "# facturas requieren revisión.")}>
-              Usa el filtro «Requiere revisión» en la tabla y haz clic en cada factura para ver el motivo.
-            </Alert>
-          )}
-          {report.stats.duplicates > 0 && (
-            <Alert tone="warning" title={plural(report.stats.duplicates, "1 posible factura duplicada (mismo NIT y número).", "# posibles facturas duplicadas (mismo NIT y número).")}>
-              <label className="checkbox" style={{ marginTop: 6 }}>
-                <input type="checkbox" checked={includeDuplicates} onChange={(e) => setIncludeDuplicates(e.target.checked)} />
-                Incluir los posibles duplicados en el resumen (por defecto se suma solo el primer archivo).
-              </label>
-            </Alert>
-          )}
-
-          {report.pendingSuppliers.length > 0 && <PendingSuppliersPanel pending={report.pendingSuppliers} onCreated={() => void loadSuppliers()} />}
           {report.nameMismatches.length > 0 && (
             <NameMismatchPanel
               mismatches={report.nameMismatches}
               onKeep={(m) => setKeptNames((prev) => new Set(prev).add(nameKey(m.nit, m.invoiceName)))}
-              onUpdated={() => void loadSuppliers()}
+              onUpdated={() => void loadData()}
             />
           )}
 
-          <InvoicesTable rows={report.rows} />
+          <InvoiceStats stats={report.stats} filter={filter} onFilter={showDocuments} />
+          <InvoicesTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r, products = false) => setSelected({ fileName: r.fileName, products })} onAction={runAction} />
 
-          {pendingCount > 0 ? (
-            <Alert tone="info" title="Resumen pendiente">
-              {plural(pendingCount, "Falta 1 proveedor por clasificar.", "Faltan # proveedores por clasificar.")} El resumen se genera automáticamente al terminar.
+          {report.stats.pending > 0 && (
+            <Alert tone="warning" title="Resumen parcial: NO está listo para declaración">
+              <div className="row row--between" style={{ marginTop: 2 }}>
+                <span>
+                  {plural(report.stats.pending, "1 documento pendiente no está incluido en el resumen.", "# documentos pendientes no están incluidos en el resumen.")} Se actualiza al resolverlos, sin volver a importar la carpeta.
+                </span>
+                <Button size="sm" onClick={() => showDocuments("pending")}>
+                  Ver pendientes
+                </Button>
+              </div>
             </Alert>
-          ) : report.summaries.length > 0 ? (
-            <VatSummary summaries={report.summaries} />
-          ) : null}
+          )}
+          <VatSummary summary={report.summary} />
         </>
       )}
+
+      <InvoiceDetailModal
+        row={selectedRow}
+        openProducts={selected?.products ?? false}
+        decision={selected ? decisions[selected.fileName] : undefined}
+        supplier={selectedRow?.supplierNit ? suppliers.find((s) => s.nit === selectedRow.supplierNit) : undefined}
+        unknownTitle={selectedRow && !selectedRow.category ? report?.unknownTitles.find((t) => t.normalizedTitle === selectedRow.documentTypeKey) : undefined}
+        onDecision={decide}
+        onChanged={reloadAndAdvance}
+        onClose={() => {
+          setSelected(null);
+          setResolving(false);
+        }}
+        remainingPending={actions.filter((a) => a.id !== selectedActionId).length}
+        onNextPending={() => resolveNext(selectedActionId)}
+      />
+      <TitleMappingsModal open={titlesOpen} titles={titles} onClose={() => setTitlesOpen(false)} onChanged={() => void loadData()} />
     </>
   );
 }

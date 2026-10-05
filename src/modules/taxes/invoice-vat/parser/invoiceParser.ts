@@ -168,10 +168,29 @@ export function findAnchors(rows: TextRow[], index: number): ColumnAnchors | und
   return { taxLeft, taxRight, taxSplit: (center(iva) + center(pct)) / 2, saleLeft: Math.max(saleLeft, taxRight) };
 }
 
+const hasDigits = (w: Word) => /\d/.test(w.text);
+
+/** La fila tiene alguna cifra en las columnas IVA / % o «Precio unitario de venta». */
+const hasValues = (row: TextRow, a: ColumnAnchors) => row.words.some((w) => w.text !== "$" && hasDigits(w) && center(w) >= a.taxLeft);
+
+/** Separación vertical máxima entre las dos líneas visuales de un mismo producto. */
+const SPLIT_ROW_GAP = 6;
+
+/**
+ * Algunas plantillas escriben «Nro., descripción, U/M y cantidad» unos puntos
+ * más abajo (o arriba) que los importes del mismo producto. Esa línea sin
+ * importes no es otro producto: sus valores están en la línea vecina.
+ */
+function splitRowPartner(rows: TextRow[], index: number, a: ColumnAnchors): TextRow | undefined {
+  const row = rows[index];
+  if (hasValues(row, a)) return undefined;
+  return [rows[index - 1], rows[index + 1]].find((n) => n && Math.abs(n.y - row.y) <= SPLIT_ROW_GAP && hasValues(n, a) && !isHeaderRow(n));
+}
+
 type RowReading =
   | { kind: "text" }
   | { kind: "line"; line: Omit<InvoiceLine, "page"> }
-  | { kind: "issue"; text: string; reason: string; partial: Omit<ProductLine, "page"> };
+  | { kind: "issue"; text: string; reason: string; partial: Omit<ProductLine, "page" | "issue" | "origin"> };
 
 /** Interpreta una fila de producto con las columnas conocidas. */
 export function readProductRow(row: TextRow, a: ColumnAnchors): RowReading {
@@ -180,7 +199,6 @@ export function readProductRow(row: TextRow, a: ColumnAnchors): RowReading {
   const sale = words.filter((w) => center(w) >= a.saleLeft);
   const left = words.filter((w) => center(w) < a.taxLeft);
   // Sin cifras en IVA / % / precio de venta ni importes a la izquierda: texto (descripción partida, encabezado en varias líneas).
-  const hasDigits = (w: Word) => /\d/.test(w.text);
   if (!tax.some(hasDigits) && !sale.some(hasDigits) && !left.some(isDecimalMoney)) return { kind: "text" };
 
   const text = joinWords(row.words);
@@ -199,10 +217,11 @@ export function readProductRow(row: TextRow, a: ColumnAnchors): RowReading {
 
   const description = joinWords(left);
   // Lo que sí se leyó de una fila incompleta (solo para mostrarla; no entra al cálculo).
-  const partial = { description, rateBp: rateBp ?? undefined, vatCents: vatCents ?? undefined, baseCents: baseCents ?? undefined };
+  // emptyTax: IVA y % en blanco; el análisis decide si la fila es 0 % según los totales del documento.
+  const partial = { description, rateBp: rateBp ?? undefined, vatCents: vatCents ?? undefined, baseCents: baseCents ?? undefined, emptyTax: tax.length === 0 || undefined };
   const missing = [rateBp === null && "%", vatCents === null && "IVA", baseCents === null && "Precio unitario de venta"].filter(Boolean);
-  if (tax.length > 2) return { kind: "issue", text, partial, reason: "La fila tiene más valores de los esperados en las columnas IVA y %." };
-  if (sale.length > 1) return { kind: "issue", text, partial, reason: "La fila tiene más de un valor en «Precio unitario de venta»." };
+  if (tax.length > 2) return { kind: "issue", text, partial: { ...partial, emptyTax: undefined }, reason: "La fila tiene más valores de los esperados en las columnas IVA y %." };
+  if (sale.length > 1) return { kind: "issue", text, partial: { ...partial, emptyTax: undefined }, reason: "La fila tiene más de un valor en «Precio unitario de venta»." };
   if (missing.length || rateBp === null || vatCents === null || baseCents === null) {
     return { kind: "issue", text, partial, reason: `No se pudo identificar: ${missing.join(", ")}.` };
   }
@@ -223,6 +242,8 @@ function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeadi
   // Filas de la tabla (sin pies ni títulos repetidos) y, por cada fila leída, su posición: para ubicar su descripción.
   const tablePages: PageRows[] = [];
   const found: { y: number; line?: InvoiceLine; product: ProductLine }[] = [];
+  // Fila con importes → fila vecina con el resto del mismo producto (su descripción).
+  const splitRows = new Map<string, string>();
   let anchors: ColumnAnchors | undefined;
   let endPage = pages.length - 1;
 
@@ -246,6 +267,11 @@ function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeadi
         continue;
       }
       if (!anchors) continue;
+      const partner = splitRowPartner(rows, ri, anchors);
+      if (partner) {
+        splitRows.set(productRowKey(page, partner.y), productRowKey(page, row.y));
+        continue;
+      }
       const reading = readProductRow(row, anchors);
       if (reading.kind === "line") {
         const line = { page, ...reading.line };
@@ -253,7 +279,7 @@ function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeadi
         found.push({ y: row.y, line, product: line });
       } else if (reading.kind === "issue") {
         issues.push({ page, text: reading.text, reason: reading.reason });
-        found.push({ y: row.y, product: { page, ...reading.partial } });
+        found.push({ y: row.y, product: { page, ...reading.partial, issue: reading.reason } });
       }
     }
   }
@@ -262,7 +288,8 @@ function readTable(pages: PageRows[], start: { pi: number; ri: number }, isHeadi
   // Solo la columna «Descripción» (unida si ocupa varias líneas); sin ella, el texto a la izquierda del IVA.
   const descriptions = readProductDescriptions(tablePages);
   const products = found.map(({ y, line, product }) => {
-    const description = descriptions.get(productRowKey(product.page, y)) || product.description;
+    const key = productRowKey(product.page, y);
+    const description = descriptions.get(key) || descriptions.get(splitRows.get(key) ?? "") || product.description;
     if (line) line.description = description;
     return { ...product, description };
   });

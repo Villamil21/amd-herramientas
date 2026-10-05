@@ -107,6 +107,8 @@ export interface BackupSummary {
   /** null: backup anterior a Retención en la fuente ventas; al restaurarlo se conservan la tabla y las clasificaciones actuales. */
   selfWithholdingRates: number | null;
   salesDocumentTypes: number | null;
+  /** null: backup anterior a la clasificación de títulos de IVA de compras; al restaurarlo se conservan los actuales. */
+  vatDocumentTitles: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */

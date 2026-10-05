@@ -122,6 +122,7 @@ export function BackupSection() {
                     Tabla de Autorretenciones ({pending.selfWithholdingRates} códigos CIIU, {pending.salesDocumentTypes ?? 0} tipos de documento de ventas)
                   </li>
                 )}
+                {pending.vatDocumentTitles !== null && <li>{pending.vatDocumentTitles} títulos de IVA de compras (Factura electrónica / Nota crédito)</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>

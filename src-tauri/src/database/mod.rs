@@ -8,6 +8,7 @@ pub mod migrations;
 pub mod self_withholding;
 pub mod signers;
 pub mod suppliers;
+pub mod vat_titles;
 pub mod withholding;
 
 use std::path::Path;

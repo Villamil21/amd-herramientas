@@ -1,8 +1,7 @@
 import { saveExcelSheets, type ExportSheet } from "../../../bank-analysis/shared/excelExportService";
 import { VAT_TYPE_LABEL, type Supplier } from "../../../../types/models";
-import { formatRateBp } from "../parser/amounts";
-import type { InvoiceReport } from "../types";
-import { STATUS_LABEL, SUMMARY_CATEGORIES } from "./labels";
+import { DOC_CATEGORY_LABEL, type InvoiceReport } from "../types";
+import { NOTES_CATEGORY, STATUS_LABEL, SUMMARY_CATEGORIES } from "./labels";
 
 const pesos = (cents: number) => cents / 100;
 
@@ -15,11 +14,10 @@ export function buildInvoiceVatSheets(report: InvoiceReport, suppliers: Supplier
       { header: "Base", kind: "money" },
       { header: "IVA", kind: "money" },
     ],
-    rows: report.summaries.flatMap((s) => [
-      ...SUMMARY_CATEGORIES.map((c) => [s.documentType, c.label, pesos(c.value(s).baseCents), pesos(c.value(s).vatCents)]),
-      ...(s.services5.baseCents || s.services5.vatCents ? [[s.documentType, "Revisión: servicios al 5 %", pesos(s.services5.baseCents), pesos(s.services5.vatCents)]] : []),
-      ...s.otherRates.map((o) => [s.documentType, `Revisión: tarifa no configurada ${formatRateBp(o.rateBp)}`, pesos(o.baseCents), pesos(o.vatCents)]),
-    ]),
+    rows: [
+      ...SUMMARY_CATEGORIES.map((c) => [DOC_CATEGORY_LABEL.invoice, c.label, pesos(c.value(report.summary.invoices).baseCents), pesos(c.value(report.summary.invoices).vatCents)]),
+      [DOC_CATEGORY_LABEL.credit_note, NOTES_CATEGORY, pesos(report.summary.notes.baseCents), pesos(report.summary.notes.vatCents)],
+    ],
   };
 
   const invoices: ExportSheet = {

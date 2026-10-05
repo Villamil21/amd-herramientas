@@ -12,7 +12,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::statements::is_pdf;
 use crate::commands::to_path;
+use crate::database::{vat_titles, Db};
 use crate::error::{AppError, AppResult};
+use crate::models::withholding::{validate_title_category, DocumentTitleMapping, DocumentTitleMappingInput};
 use crate::state::AppState;
 
 const MAX_INVOICE_BYTES: u64 = 50 * 1024 * 1024;
@@ -96,6 +98,30 @@ pub fn read_invoice_pdf(state: State<'_, AppState>, file_name: String) -> AppRes
         return Err(AppError::user("El archivo no es un PDF válido."));
     }
     Ok(Response::new(bytes))
+}
+
+// Clasificación persistente de títulos de documento (Factura electrónica / Nota crédito).
+
+#[tauri::command]
+pub fn list_vat_document_titles(db: State<'_, Db>) -> AppResult<Vec<DocumentTitleMapping>> {
+    db.with(|c| vat_titles::list(c))
+}
+
+#[tauri::command]
+pub fn save_vat_document_titles(db: State<'_, Db>, items: Vec<DocumentTitleMappingInput>) -> AppResult<()> {
+    let items = items.into_iter().map(DocumentTitleMappingInput::validated).collect::<AppResult<Vec<_>>>()?;
+    db.with(|c| vat_titles::save(c, &items))
+}
+
+#[tauri::command]
+pub fn update_vat_document_title(db: State<'_, Db>, id: i64, category: String) -> AppResult<()> {
+    let category = validate_title_category(&category)?;
+    db.with(|c| vat_titles::update_category(c, id, &category))
+}
+
+#[tauri::command]
+pub fn delete_vat_document_title(db: State<'_, Db>, id: i64) -> AppResult<()> {
+    db.with(|c| vat_titles::delete(c, id))
 }
 
 #[cfg(test)]

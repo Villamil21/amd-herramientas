@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -24,7 +25,9 @@ export function Modal({ open, title, description, onClose, footer, size = "md", 
   }, [open, locked, onClose]);
 
   if (!open) return null;
-  return (
+  // Portal a <body>: dentro de una tarjeta (backdrop-filter) el fondo «fixed» quedaría limitado
+  // a la tarjeta y un modal más alto que ella se cortaría sin poder desplazarse.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !locked && onClose()}>
       <div className={`modal ${size !== "md" ? `modal--${size}` : ""}`} role="dialog" aria-modal="true">
         <div className="modal__header">
@@ -39,6 +42,7 @@ export function Modal({ open, title, description, onClose, footer, size = "md", 
         {children && <div className="modal__body">{children}</div>}
         {footer && <div className="modal__footer">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

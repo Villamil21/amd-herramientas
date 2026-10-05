@@ -1396,6 +1396,7 @@ a {
 
 .modal__body {
   padding: var(--space-2) var(--space-5) var(--space-5);
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -2623,4 +2624,10 @@ button.stat--link {
 
 .sales-calc__item--total {
   background: var(--color-primary-softer);
+}
+
+/* Opción no disponible de un filtro segmentado (ej. tarifa de una fila sin precio de venta). */
+.segmented button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

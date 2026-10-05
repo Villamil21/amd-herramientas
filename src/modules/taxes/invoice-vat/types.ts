@@ -1,4 +1,4 @@
-import type { VatType } from "../../../types/models";
+import type { TitleCategory, VatType } from "../../../types/models";
 
 /** Tarifa en centésimas de punto: 19 % → 1900, 5 % → 500 (sin decimales binarios). */
 export type RateBp = number;
@@ -25,7 +25,19 @@ export interface ProductLine {
   rateBp?: RateBp;
   vatCents?: number;
   baseCents?: number;
+  /** Fila que el lector no pudo interpretar: el motivo. */
+  issue?: string;
+  /** Las columnas IVA y % están vacías en el PDF (candidata a 0 % si el documento concilia). */
+  emptyTax?: boolean;
+  /** Cómo se resolvió una fila con `issue` (el PDF no se modifica: es una decisión del análisis). */
+  origin?: LineOrigin;
 }
+
+/**
+ * auto-zero: IVA y % vacíos y el documento concilia sin IVA para la fila → 0 %.
+ * manual: el usuario definió la tarifa. ignored: el usuario decidió no sumarla.
+ */
+export type LineOrigin = "auto-zero" | "manual" | "ignored";
 
 /** Fila de la tabla que no permitió identificar %, IVA o precio unitario de venta. */
 export interface LineIssue {
@@ -59,7 +71,48 @@ export type FileResult =
   | { fileName: string; kind: "incompatible"; message: string }
   | { fileName: string; kind: "error"; message: string };
 
-export type InvoiceStatus = "processed" | "pending-supplier" | "review" | "incompatible" | "error";
+/** Las dos categorías finales del resumen: Factura electrónica (invoice) o Nota crédito (credit_note). */
+export type DocCategory = TitleCategory;
+
+export const DOC_CATEGORY_LABEL: Record<DocCategory, string> = { invoice: "Factura electrónica", credit_note: "Nota crédito" };
+
+/** Título normalizado → categoría (la clasificación guardada en SQLite). */
+export interface TitleRule {
+  normalizedTitle: string;
+  category: DocCategory;
+}
+
+/** Tarifa que el usuario define para una fila sin interpretar, o no sumarla. */
+export type LineChoice = 0 | 500 | 1900 | "ignore";
+
+/** Decisiones del usuario sobre un documento del lote (no se guardan en el PDF ni en la base). */
+export interface DocDecision {
+  /** Por índice de la fila en «Detalle de productos». */
+  lines?: Record<number, LineChoice>;
+  /** Acepta la lectura aunque bases o IVA no concilien con los totales del documento. */
+  confirmed?: boolean;
+  /** Documento fuera del resumen (no bloquea la declaración). */
+  excluded?: boolean;
+  /** Posible duplicado que el usuario decidió sumar. */
+  includeDuplicate?: boolean;
+}
+
+export type Decisions = Record<string, DocDecision>;
+
+/**
+ * processed: validado, suma en el resumen. pending-title / pending-supplier:
+ * falta clasificar el título o el proveedor. review: tiene un problema por
+ * resolver. excluded: el usuario lo dejó fuera.
+ */
+export type InvoiceStatus = "processed" | "pending-supplier" | "pending-title" | "review" | "excluded" | "incompatible" | "error";
+
+export type ProblemCode = "title-missing" | "supplier-name" | "lines" | "no-products" | "other-rate" | "services-5" | "duplicate" | "base-mismatch" | "vat-mismatch";
+
+/** Motivo que impide validar un documento. */
+export interface RowProblem {
+  code: ProblemCode;
+  text: string;
+}
 
 export interface BaseVat {
   baseCents: number;
@@ -71,6 +124,8 @@ export interface InvoiceRow {
   status: InvoiceStatus;
   documentType?: string;
   documentTypeKey?: string;
+  /** Sin definir mientras el título no esté clasificado. */
+  category?: DocCategory;
   invoiceNumber?: string;
   supplierNit?: string;
   supplierName?: string;
@@ -89,11 +144,15 @@ export interface InvoiceRow {
   subtotalCents?: number;
   /** Nombre del archivo que ya tiene el mismo NIT + número de factura. */
   duplicateOf?: string;
-  /** Motivos de revisión (o el error / incompatibilidad). */
+  /** Problemas sin resolver (bloquean la declaración). */
+  problems: RowProblem[];
+  /** Textos de `problems` (o el error / incompatibilidad del archivo). */
   issues: string[];
-  /** Información que no exige revisión (ej. diferencia de redondeo del IVA). */
+  /** Información que no exige revisión (ej. diferencia de redondeo del IVA, filas interpretadas como 0 %). */
   notes: string[];
-  lineIssues: LineIssue[];
+  /** Filas de productos que siguen sin tarifa (índices en `products`). */
+  pendingLines: number[];
+  /** Todas las filas, con la interpretación final de cada una. */
   products: ProductLine[];
 }
 
@@ -101,6 +160,13 @@ export interface PendingSupplier {
   nit: string;
   name: string;
   invoiceCount: number;
+}
+
+/** Título de documento que aún no está clasificado como Factura electrónica o Nota crédito. */
+export interface UnknownTitle {
+  normalizedTitle: string;
+  displayTitle: string;
+  documentCount: number;
 }
 
 export interface NameMismatch {
@@ -112,10 +178,9 @@ export interface NameMismatch {
   invoiceCount: number;
 }
 
-export interface DocumentTypeSummary {
-  documentType: string;
-  documentTypeKey: string;
-  invoiceCount: number;
+/** Resumen de las Facturas electrónicas validadas. */
+export interface InvoiceSummary {
+  documentCount: number;
   /** De bienes gravados a la tarifa del 5 % (Compras, 5 %). */
   purchases5: BaseVat;
   /** De bienes gravados a la tarifa general (Compras, 19 %). */
@@ -124,9 +189,16 @@ export interface DocumentTypeSummary {
   services19: BaseVat;
   /** De bienes y servicios excluidos, exentos y no gravados (0 %, Compras y Servicios). */
   zeroBaseCents: number;
-  /** Servicios al 5 %: no tienen renglón en el resumen; se muestran para revisión. */
-  services5: BaseVat;
-  otherRates: (BaseVat & { rateBp: RateBp })[];
+}
+
+/** Resumen de las Notas crédito validadas: una sola fila, sin separar tarifas ni tipo de proveedor. */
+export interface NotesSummary extends BaseVat {
+  documentCount: number;
+}
+
+export interface VatSummaryData {
+  invoices: InvoiceSummary;
+  notes: NotesSummary;
 }
 
 export interface Incident {
@@ -139,18 +211,21 @@ export interface InvoiceReport {
   rows: InvoiceRow[];
   stats: {
     files: number;
-    processed: number;
-    review: number;
-    failed: number;
+    /** Documentos que suman en el resumen. */
+    validated: number;
+    /** Documentos que requieren intervención. */
     pending: number;
+    excluded: number;
+    invoices: number;
+    notes: number;
     suppliers: number;
     newSuppliers: number;
-    documentTypes: number;
     duplicates: number;
   };
   pendingSuppliers: PendingSupplier[];
+  unknownTitles: UnknownTitle[];
   nameMismatches: NameMismatch[];
-  /** Vacío mientras haya proveedores pendientes. */
-  summaries: DocumentTypeSummary[];
+  /** Solo documentos validados; es parcial mientras `stats.pending` sea mayor que cero. */
+  summary: VatSummaryData;
   incidents: Incident[];
 }
