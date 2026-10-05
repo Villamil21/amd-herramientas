@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, XCircle } from "lucide-react";
 import { Badge, Button, Card } from "../../../../components/ui";
-import { RETENTION_TYPE_LABEL, TITLE_CATEGORY_LABEL } from "../../../../types/models";
+import { TITLE_CATEGORY_LABEL } from "../../../../types/models";
 import { normalizeKey } from "../../../../utils/text";
 import { SearchBox, SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { formatCop } from "../../invoice-vat/parser/amounts";
-import { ignoredGroup } from "../services/labels";
-import { formatDate, formatRateBp } from "../services/money";
+import { ignoredGroup, rateText, ruleSubtypeText, ruleTypeText } from "../services/labels";
+import { formatDate } from "../services/money";
 import type { PendingAction } from "../services/pending";
 import type { DocRow } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -137,11 +137,11 @@ export function DocumentsTable({ rows, attention, filter, onFilterChange, onOpen
                   <td style={{ minWidth: 160 }}>{r.supplierName || "—"}</td>
                   <td>{r.personType ?? "—"}</td>
                   <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.fiscalCodes.join(";") || "—"}</td>
-                  <td>{r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : "—"}</td>
-                  <td style={{ minWidth: 180 }}>{r.rule?.subtypeName ?? "—"}</td>
+                  <td>{ruleTypeText(r) ?? "—"}</td>
+                  <td style={{ minWidth: 180 }}>{ruleSubtypeText(r) ?? "—"}</td>
                   <td className="num">{money(r.baseCents)}</td>
                   <td className="num">{money(r.minBaseCents)}</td>
-                  <td className="num">{r.rateBp !== undefined ? formatRateBp(r.rateBp) : "—"}</td>
+                  <td className="num">{rateText(r) ?? "—"}</td>
                   <td className="num">{money(r.calculatedCents)}</td>
                   <td className="num">{money(r.informedCents)}</td>
                 </tr>

@@ -1,4 +1,6 @@
-import type { DocStatus } from "../types";
+import { RETENTION_TYPE_LABEL } from "../../../../types/models";
+import type { DocRow, DocStatus, RuleLine } from "../types";
+import { formatRateBp } from "./money";
 
 export const STATUS_LABEL: Record<DocStatus, string> = {
   validated: "Validada",
@@ -49,4 +51,25 @@ export function ignoredGroup(status: DocStatus): string | undefined {
     default:
       return undefined;
   }
+}
+
+const distinct = (values: string[]) => [...new Set(values)].join(" / ");
+
+/** Reglas que aplican en el documento (la única, o las marcadas como «Aplica»). */
+export const appliedLines = (r: DocRow): RuleLine[] => r.lines.filter((l) => l.state === "applies");
+
+/** Tipo(s) de retención del documento: «Servicios», o «Servicios / Compras» si aplican varias reglas. */
+export const ruleTypeText = (r: DocRow) => distinct(appliedLines(r).map((l) => RETENTION_TYPE_LABEL[l.rule.retentionType])) || undefined;
+
+export const ruleSubtypeText = (r: DocRow) => distinct(appliedLines(r).map((l) => l.rule.subtypeName)) || undefined;
+
+/** Tarifa(s) del documento: «4 %», o «1 % / 4 %» si aplican varias reglas. */
+export function rateText(r: DocRow): string | undefined {
+  if (r.rateBp !== undefined) return formatRateBp(r.rateBp);
+  return distinct(appliedLines(r).map((l) => formatRateBp(l.rateBp))) || undefined;
+}
+
+/** Reglas aplicadas cuya base no superó su tope, de documentos válidos: se conservan para auditoría. */
+export function belowMinimumLines(rows: DocRow[]): { row: DocRow; line: RuleLine }[] {
+  return rows.filter((r) => r.status === "below-minimum" || r.status === "validated").flatMap((row) => row.lines.filter((l) => l.belowMinimum).map((line) => ({ row, line })));
 }

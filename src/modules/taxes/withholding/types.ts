@@ -51,12 +51,20 @@ export type DocStatus =
 
 /** Decisiones del usuario para un documento en este análisis (no se guardan en la base). */
 export interface DocDecision {
-  /** «Cambiar para esta factura»: regla (id de la tabla de retenciones) a aplicar. */
-  rateId?: number;
+  /** Proveedor con varias reglas: decisión de cada una (por id de la tabla de retenciones). */
+  rules?: Record<number, RuleDecision>;
   /** Base de retención para reglas con base diferente / manual. */
   manualBaseCents?: number;
   /** Respuesta a «¿La base y tarifa detectadas son correctas?». */
   review?: { kind: "accept-informed" } | { kind: "corrected"; baseCents: number; rateBp: number };
+}
+
+/** Decisión del usuario sobre una regla del proveedor en un documento. No cambia la configuración del proveedor. */
+export interface RuleDecision {
+  /** ¿Aplica en esta factura? Sin definir = pendiente (o lo que indique la regla predeterminada). */
+  applies?: boolean;
+  /** Base de retención de esta regla en el documento. */
+  baseCents?: number;
 }
 
 export interface AppliedRule {
@@ -64,6 +72,21 @@ export interface AppliedRule {
   retentionType: RetentionType;
   subtypeName: string;
   baseMode: BaseMode;
+}
+
+/** Una regla del proveedor evaluada en un documento: su base, tope, tarifa y retención propios. */
+export interface RuleLine {
+  rule: AppliedRule;
+  state: "applies" | "not-applicable" | "pending";
+  baseUvtCenti: number;
+  minBaseCents: number;
+  rateBp: number;
+  baseCents?: number;
+  /** 0 si la base no supera la base mínima de la regla. */
+  calculatedCents?: number;
+  belowMinimum: boolean;
+  /** Alimenta el resumen de la declaración (documento válido y la regla generó retención). */
+  counts: boolean;
 }
 
 export interface DocRow {
@@ -88,9 +111,16 @@ export interface DocRow {
   fiscalCodes: string[];
   /** O-15 / O-47 que excluyó el documento. */
   excludedCode?: string;
+  /** Regla aplicada cuando el proveedor tiene una sola. */
   rule?: AppliedRule;
-  /** Reglas del proveedor disponibles para «Cambiar para esta factura». */
+  /** Reglas configuradas en el proveedor. */
   ruleOptions: AppliedRule[];
+  /**
+   * Retenciones del documento, una por regla. Con varias reglas, base, tope y
+   * tarifa se evalúan por separado y `baseCents` / `calculatedCents` son la suma
+   * de las que aplican.
+   */
+  lines: RuleLine[];
   uvtYear?: number;
   uvtPesos?: number;
   baseUvtCenti?: number;

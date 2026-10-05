@@ -20,7 +20,7 @@ import { WithholdingStats } from "./components/WithholdingStats";
 import { buildWithholdingReport, fiscalDismissKey, suggestPersonType } from "./services/analysis";
 import { exportWithholdingExcel } from "./services/excelExport";
 import { processWithholdingFolder } from "./services/folder";
-import { ignoredGroup } from "./services/labels";
+import { belowMinimumLines, ignoredGroup } from "./services/labels";
 import { actionable, actionsByFile, buildPendingActions, lotStatus, nextPending, type PendingAction } from "./services/pending";
 import type { DocDecision, DocRow, FileResult, PendingSupplier } from "./types";
 
@@ -228,7 +228,7 @@ export default function WithholdingPage() {
   }
 
   const failed = report?.rows.filter((r) => r.status === "incompatible" || r.status === "error") ?? [];
-  const belowRows = report?.rows.filter((r) => r.status === "below-minimum") ?? [];
+  const belowRows = report && belowMinimumLines(report.rows).length > 0 ? report.rows : [];
   const noteRows = report?.rows.filter((r) => r.category === "credit_note" && !ignoredGroup(r.status)) ?? [];
   const ignoredRows = report?.rows.filter((r) => ignoredGroup(r.status)) ?? [];
 

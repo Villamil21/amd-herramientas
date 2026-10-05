@@ -2,7 +2,7 @@ import { Card } from "../../../../components/ui";
 import { PERSON_TYPE_LABEL, RETENTION_TYPE_LABEL, TITLE_CATEGORY_LABEL } from "../../../../types/models";
 import { formatCop } from "../../invoice-vat/parser/amounts";
 import { Stat } from "../../../bank-analysis/shared/components/Stat";
-import { ignoredGroup, STATUS_LABEL } from "../services/labels";
+import { belowMinimumLines, ignoredGroup, ruleSubtypeText, ruleTypeText, STATUS_LABEL } from "../services/labels";
 import { formatDate, formatRateBp } from "../services/money";
 import type { DocRow, WithholdingReport } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -125,10 +125,10 @@ export function SubtypeDetailTable({ report }: { report: WithholdingReport }) {
   );
 }
 
-/** Documentos válidos cuya base no superó la base mínima: sin base ni retención en la declaración. */
+/** Reglas de documentos válidos cuya base no superó su base mínima: sin base ni retención en la declaración. */
 export function BelowMinimumTable({ rows, onOpen }: { rows: DocRow[]; onOpen: (r: DocRow) => void }) {
   return (
-    <Card flush title="No aplicó retención por base mínima" description="Documentos válidos que no superan el tope: se conservan para auditoría pero no suman base ni retención.">
+    <Card flush title="No aplicó retención por base mínima" description="Retenciones de documentos válidos que no superan el tope: se conservan para auditoría pero no suman base ni retención.">
       <div className="table-wrap table-wrap--scroll">
         <table className="table">
           <thead>
@@ -147,19 +147,19 @@ export function BelowMinimumTable({ rows, onOpen }: { rows: DocRow[]; onOpen: (r
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.fileName} className="is-clickable" onClick={() => onOpen(r)}>
+            {belowMinimumLines(rows).map(({ row: r, line: l }) => (
+              <tr key={`${r.fileName}|${l.rule.rateId}`} className="is-clickable" onClick={() => onOpen(r)}>
                 <td>{r.category ? TITLE_CATEGORY_LABEL[r.category] : "—"}</td>
                 <td className="table__primary">{r.supplierName || "—"}</td>
                 <td className="selectable">{r.nit}</td>
                 <td className="selectable" style={{ whiteSpace: "nowrap" }}>{r.number ?? r.fileName}</td>
                 <td>{r.personType ?? "—"}</td>
-                <td>{r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : "—"}</td>
-                <td style={{ minWidth: 180 }}>{r.rule?.subtypeName ?? "—"}</td>
-                <td className="num">{money(r.baseCents)}</td>
-                <td className="num">{money(r.minBaseCents)}</td>
-                <td className="num">{r.rateBp !== undefined ? formatRateBp(r.rateBp) : "—"}</td>
-                <td className="num">{money(r.minBaseCents! - r.baseCents!)}</td>
+                <td>{RETENTION_TYPE_LABEL[l.rule.retentionType]}</td>
+                <td style={{ minWidth: 180 }}>{l.rule.subtypeName}</td>
+                <td className="num">{money(l.baseCents)}</td>
+                <td className="num">{money(l.minBaseCents)}</td>
+                <td className="num">{formatRateBp(l.rateBp)}</td>
+                <td className="num">{money(l.minBaseCents - l.baseCents!)}</td>
               </tr>
             ))}
           </tbody>
@@ -193,8 +193,8 @@ export function NotesSection({ rows, totalCents, onOpen }: { rows: DocRow[]; tot
                 <td className="table__primary" style={{ whiteSpace: "nowrap" }}>{r.number ?? r.fileName}</td>
                 <td>{r.supplierName || "—"}</td>
                 <td className="selectable">{r.nit}</td>
-                <td>{r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : "—"}</td>
-                <td style={{ minWidth: 180 }}>{r.rule?.subtypeName ?? "—"}</td>
+                <td>{ruleTypeText(r) ?? "—"}</td>
+                <td style={{ minWidth: 180 }}>{ruleSubtypeText(r) ?? "—"}</td>
                 <td className="num">{money(r.baseCents)}</td>
                 <td className="num">{r.counts ? money(r.retentionCents) : "—"}</td>
                 <td>

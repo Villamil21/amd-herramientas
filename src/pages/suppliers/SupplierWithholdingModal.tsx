@@ -284,7 +284,7 @@ export function SupplierWithholdingModal({ open, supplier, draft, rates, onClose
           </div>
           <p className="muted" style={{ fontSize: "var(--text-sm)", margin: 0 }}>
             «Base diferente / manual» no guarda un valor: en cada factura se pide la base de retención (con los productos a la vista).
-            {filled > 1 && " Sin regla predeterminada, se preguntará cuál aplicar en cada factura."}
+            {filled > 1 && " Una factura puede llevar varias reglas a la vez: en cada factura se marca cuáles aplican. La predeterminada queda marcada de entrada; sin predeterminada, se pregunta por cada una."}
           </p>
         </div>
       </div>

@@ -1,8 +1,10 @@
 import {
+  RETENTION_TYPE_LABEL,
   RETENTION_TYPES,
   type DocumentTitleMapping,
   type PersonType,
   type Supplier,
+  type SupplierWithholdingRule,
   type UvtValue,
   type WithholdingRate,
 } from "../../../../types/models";
@@ -18,6 +20,7 @@ import type {
   MonthCount,
   ParsedDocument,
   PendingSupplier,
+  RuleLine,
   SubtypeDetail,
   SummaryLine,
   UnknownTitle,
@@ -89,6 +92,7 @@ function baseRow(fileName: string, doc: ParsedDocument): DocRow {
     fiscalText: doc.fiscalText,
     fiscalCodes: doc.fiscalCodes,
     ruleOptions: [],
+    lines: [],
     subtotalCents: doc.subtotalCents,
     informedCents: informed,
     impliedRateBp: informed && doc.subtotalCents ? impliedRateBp(informed, doc.subtotalCents) : undefined,
@@ -126,21 +130,14 @@ function evaluate(row: DocRow, doc: ParsedDocument, supplier: Supplier | undefin
     return;
   }
 
-  // Regla: la elegida para esta factura, la única o la predeterminada.
-  const chosen =
-    (decision.rateId !== undefined && rules.find((r) => r.rateId === decision.rateId)) ||
-    (rules.length === 1 ? rules[0] : rules.find((r) => r.isDefault));
-  if (!chosen) {
-    row.status = "review";
-    row.issues.push("El proveedor tiene varias reglas de retención y ninguna predeterminada: elige cuál aplica a este documento.");
-    return;
-  }
-  const rate = rates.get(chosen.rateId);
-  if (!rate) {
+  if (rules.some((r) => !rates.has(r.rateId))) {
     row.status = "review";
     row.issues.push("Error de configuración: el subtipo de retención del proveedor ya no existe en la Tabla de retenciones.");
     return;
   }
+  if (rules.length > 1) return evaluateRules(row, doc, rules, decision, ctx, rates);
+  const chosen = rules[0];
+  const rate = rates.get(chosen.rateId)!;
   row.rule = { rateId: rate.id, retentionType: rate.retentionType, subtypeName: rate.name, baseMode: chosen.baseMode };
 
   const year = Number(doc.issueDate!.slice(0, 4));
@@ -218,6 +215,127 @@ function evaluate(row: DocRow, doc: ParsedDocument, supplier: Supplier | undefin
   if (calculated === 0) row.notes.push(`No genera retención (tarifa ${formatRateBp(rateBp)}): no se lleva a la declaración.`);
 }
 
+const ruleName = (rule: AppliedRule) => `${RETENTION_TYPE_LABEL[rule.retentionType]} — ${rule.subtypeName}`;
+
+/** Valor común a todas las líneas, o undefined si difieren. */
+function shared<T>(values: T[]): T | undefined {
+  return values.length > 0 && values.every((v) => v === values[0]) ? values[0] : undefined;
+}
+
+/**
+ * Proveedor con varias reglas: cada una se decide por documento (aplica / no
+ * aplica) y tiene su propia base, tope y tarifa. La Rete fuente del PDF se
+ * compara con la suma de las que aplican.
+ */
+function evaluateRules(row: DocRow, doc: ParsedDocument, rules: SupplierWithholdingRule[], decision: DocDecision, ctx: AnalysisContext, rates: Map<number, WithholdingRate>): void {
+  const year = Number(doc.issueDate!.slice(0, 4));
+  const uvt = ctx.uvts.find((u) => u.year === year);
+  if (!uvt) {
+    row.status = "review";
+    row.issues.push(`Error de configuración: no hay valor UVT para ${year} en la Tabla de retenciones.`);
+    return;
+  }
+  row.uvtYear = year;
+  row.uvtPesos = uvt.valuePesos;
+
+  // Sin decisión del usuario manda la predeterminada: ella aplica y las demás no.
+  const hasDefault = rules.some((r) => r.isDefault);
+  const lines = rules.map((r): RuleLine => {
+    const rate = rates.get(r.rateId)!;
+    const d = decision.rules?.[r.rateId] ?? {};
+    const applies = d.applies ?? (hasDefault ? r.isDefault : undefined);
+    const min = minBaseCents(rate.baseUvtCenti, uvt.valuePesos);
+    const line: RuleLine = {
+      rule: { rateId: rate.id, retentionType: rate.retentionType, subtypeName: rate.name, baseMode: r.baseMode },
+      state: applies === undefined ? "pending" : applies ? "applies" : "not-applicable",
+      baseUvtCenti: rate.baseUvtCenti,
+      minBaseCents: min,
+      rateBp: rate.rateBp,
+      belowMinimum: false,
+      counts: false,
+    };
+    if (!applies) return line;
+    line.baseCents = d.baseCents ?? (r.baseMode === "manual" ? undefined : doc.subtotalCents);
+    if (line.baseCents !== undefined) {
+      line.belowMinimum = line.baseCents < min;
+      line.calculatedCents = line.belowMinimum ? 0 : retentionCents(line.baseCents, rate.rateBp);
+    }
+    return line;
+  });
+  row.lines = lines;
+
+  const applied = lines.filter((l) => l.state === "applies");
+  const undecided = lines.filter((l) => l.state === "pending");
+  const withoutBase = applied.filter((l) => l.baseCents === undefined);
+  if (undecided.length) row.issues.push(`Indica si aplica en este documento: ${undecided.map((l) => `«${ruleName(l.rule)}»`).join(", ")}.`);
+  for (const l of withoutBase) row.issues.push(`Falta la base de retención de «${ruleName(l.rule)}» (puedes revisar los productos).`);
+  if (undecided.length || withoutBase.length) {
+    row.status = undecided.length ? "review" : "pending-base";
+    return;
+  }
+
+  // Cada regla aporta solo su propia base: el subtotal no se repite por regla.
+  const total = applied.reduce((s, l) => s + l.calculatedCents!, 0);
+  const bases = applied.reduce((s, l) => s + l.baseCents!, 0);
+  row.baseCents = applied.length ? bases : undefined;
+  row.calculatedCents = total;
+  row.rateBp = shared(applied.map((l) => l.rateBp));
+  row.minBaseCents = shared(applied.map((l) => l.minBaseCents));
+  for (const l of applied) {
+    if (l.belowMinimum) row.notes.push(`«${ruleName(l.rule)}»: la base (${formatCop(l.baseCents!)}) no supera la base mínima (${formatCop(l.minBaseCents)}); no genera retención.`);
+  }
+  if (applied.length > 1 && doc.subtotalCents !== undefined && bases > doc.subtotalCents) {
+    row.notes.push(`Las bases de las reglas suman ${formatCop(bases)}, más que el Subtotal del documento (${formatCop(doc.subtotalCents)}).`);
+  }
+
+  const informed = doc.retefuenteCents ?? 0;
+  if (informed > 0) {
+    if (!sameRetention(total, informed)) {
+      row.comparison = "difference";
+      row.status = "difference";
+      row.issues.push(
+        applied.length
+          ? `La suma de las retenciones calculadas (${formatCop(total)}) no coincide con la Rete fuente del documento (${formatCop(informed)}): revisa las reglas y sus bases.`
+          : `Ninguna regla aplica, pero el documento informa Rete fuente de ${formatCop(informed)}.`,
+      );
+      return;
+    }
+    row.comparison = "match";
+  } else {
+    if (applied.length && applied.every((l) => l.belowMinimum)) {
+      row.status = "below-minimum";
+      return;
+    }
+    row.comparison = "none";
+    if (total > 0) row.notes.push("El documento no informa Rete fuente: se usa la retención calculada con la configuración.");
+  }
+
+  row.status = "validated";
+  row.retentionCents = total;
+  row.counts = total > 0;
+  for (const l of applied) l.counts = l.calculatedCents! > 0;
+  if (!applied.length) row.notes.push("Ninguna regla aplica en esta factura: no se lleva a la declaración.");
+  else if (total === 0) row.notes.push("No genera retención: no se lleva a la declaración.");
+}
+
+/** Proveedor con una sola regla: su retención como línea única, con los datos ya resueltos del documento. */
+function singleLine(row: DocRow, rates: Map<number, WithholdingRate>): RuleLine[] {
+  if (!row.rule || row.minBaseCents === undefined) return [];
+  return [
+    {
+      rule: row.rule,
+      state: "applies",
+      baseUvtCenti: row.baseUvtCenti!,
+      minBaseCents: row.minBaseCents,
+      rateBp: row.rateBp ?? rates.get(row.rule.rateId)!.rateBp,
+      baseCents: row.baseCents,
+      calculatedCents: row.calculatedCents,
+      belowMinimum: row.status === "below-minimum",
+      counts: row.counts,
+    },
+  ];
+}
+
 /**
  * Cruza los documentos leídos con proveedores, tabla de retenciones, UVT y
  * títulos. Función pura: al cambiar una configuración o una decisión basta
@@ -233,7 +351,7 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
 
   const rows: DocRow[] = results.map((r) => {
     if (r.kind !== "parsed") {
-      return { fileName: r.fileName, status: r.kind, counts: false, issues: [r.message], notes: [], fiscalCodes: [], ruleOptions: [], retentionCents: 0 };
+      return { fileName: r.fileName, status: r.kind, counts: false, issues: [r.message], notes: [], fiscalCodes: [], ruleOptions: [], lines: [], retentionCents: 0 };
     }
     const { doc } = r;
     const row = baseRow(r.fileName, doc);
@@ -284,6 +402,7 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
       return row;
     }
     evaluate(row, doc, supplier, ctx, rates);
+    if (!row.lines.length) row.lines = singleLine(row, rates);
     return row;
   });
 
@@ -361,26 +480,30 @@ export function buildWithholdingReport(results: FileResult[], ctx: AnalysisConte
   const notesSummary = { baseCents: 0, retentionCents: 0, documentCount: 0 };
   for (const r of counted) {
     const person = r.personType!;
-    if (r.category === "invoice") {
-      const line = summary.find((l) => l.retentionType === r.rule!.retentionType)!;
-      const cell = person === "PJ" ? line.pj : line.pn;
-      cell.baseCents += r.baseCents!;
-      cell.retentionCents += r.retentionCents;
-      invoicesCents += r.retentionCents;
-    } else {
-      notesSummary.baseCents += r.baseCents!;
-      notesSummary.retentionCents += r.retentionCents;
-      notesSummary.documentCount++;
-    }
-    const d = detail.find(
-      (x) => x.category === r.category && x.retentionType === r.rule!.retentionType && x.subtypeName === r.rule!.subtypeName && x.personType === person && x.rateBp === r.rateBp,
-    );
-    if (d) {
-      d.baseCents += r.baseCents!;
-      d.retentionCents += r.retentionCents;
-      d.documentCount++;
-    } else {
-      detail.push({ category: r.category!, retentionType: r.rule!.retentionType, subtypeName: r.rule!.subtypeName, personType: person, rateBp: r.rateBp!, baseCents: r.baseCents!, retentionCents: r.retentionCents, documentCount: 1 });
+    if (r.category !== "invoice") notesSummary.documentCount++;
+    // Una línea por regla que generó retención: cada una suma su propia base.
+    for (const l of r.lines) {
+      if (!l.counts) continue;
+      const base = l.baseCents!;
+      const retention = l.calculatedCents!;
+      if (r.category === "invoice") {
+        const line = summary.find((x) => x.retentionType === l.rule.retentionType)!;
+        const cell = person === "PJ" ? line.pj : line.pn;
+        cell.baseCents += base;
+        cell.retentionCents += retention;
+        invoicesCents += retention;
+      } else {
+        notesSummary.baseCents += base;
+        notesSummary.retentionCents += retention;
+      }
+      const d = detail.find((x) => x.category === r.category && x.retentionType === l.rule.retentionType && x.subtypeName === l.rule.subtypeName && x.personType === person && x.rateBp === l.rateBp);
+      if (d) {
+        d.baseCents += base;
+        d.retentionCents += retention;
+        d.documentCount++;
+      } else {
+        detail.push({ category: r.category!, retentionType: l.rule.retentionType, subtypeName: l.rule.subtypeName, personType: person, rateBp: l.rateBp, baseCents: base, retentionCents: retention, documentCount: 1 });
+      }
     }
   }
   detail.sort((a, b) => a.category.localeCompare(b.category) || RETENTION_TYPES.indexOf(a.retentionType) - RETENTION_TYPES.indexOf(b.retentionType) || a.subtypeName.localeCompare(b.subtypeName) || a.personType.localeCompare(b.personType));

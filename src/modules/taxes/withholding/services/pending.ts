@@ -45,7 +45,7 @@ const GROUP_LABEL: Record<PendingGroup, [one: string, many: string]> = {
   title: ["título de documento sin clasificar", "títulos de documento sin clasificar"],
   difference: ["documento con diferencia de retención", "documentos con diferencia de retención"],
   "manual-base": ["documento con base manual pendiente", "documentos con base manual pendiente"],
-  "rule-choice": ["documento sin regla de retención elegida", "documentos sin regla de retención elegida"],
+  "rule-choice": ["documento con reglas de retención por definir", "documentos con reglas de retención por definir"],
   "document-review": ["documento por revisar", "documentos por revisar"],
   "fiscal-conflict": ["proveedor con régimen fiscal en conflicto", "proveedores con régimen fiscal en conflicto"],
   "fiscal-change": ["cambio de régimen fiscal por confirmar", "cambios de régimen fiscal por confirmar"],
@@ -92,16 +92,16 @@ function documentAction(r: DocRow): PendingAction | undefined {
     case "difference":
       return { ...base, id: `doc:${r.fileName}`, category: "withholding", group: "difference", detail: r.issues[0] ?? "Diferencia de retención.", actionLabel: "Revisar" };
     case "pending-base":
-      return { ...base, id: `doc:${r.fileName}`, category: "withholding", group: "manual-base", detail: "Indica la base de retención de este documento.", actionLabel: "Indicar base" };
+      return { ...base, id: `doc:${r.fileName}`, category: "withholding", group: "manual-base", detail: r.lines.length > 1 ? (r.issues[0] ?? "Falta la base de una regla.") : "Indica la base de retención de este documento.", actionLabel: "Indicar base" };
     case "review": {
-      const choice = !r.rule && r.ruleOptions.length > 1;
+      const choice = r.lines.some((l) => l.state === "pending");
       return {
         ...base,
         id: `doc:${r.fileName}`,
         category: choice ? "withholding" : "documents",
         group: choice ? "rule-choice" : "document-review",
         detail: r.issues[0] ?? "Requiere revisión.",
-        actionLabel: choice ? "Elegir regla" : "Revisar",
+        actionLabel: choice ? "Definir reglas" : "Revisar",
       };
     }
     default:

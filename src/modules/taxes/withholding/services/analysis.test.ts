@@ -3,7 +3,10 @@ import type { DocumentTitleMapping, PersonType, Supplier, SupplierWithholdingRul
 import type { DocDecision, FileResult, ParsedDocument } from "../types";
 import { buildWithholdingReport, suggestPersonType, type AnalysisContext } from "./analysis";
 import { fiscalCodes, regimeKey } from "./fiscal";
+import { buildWithholdingSheets } from "./excelExport";
+import { belowMinimumLines } from "./labels";
 import { mulDivRound, parseHundredths, parsePesosInput, retentionCents, roundToThousands } from "./money";
+import { buildPendingActions } from "./pending";
 
 const pesos = (n: number) => n * 100;
 
@@ -11,6 +14,7 @@ const RATES: WithholdingRate[] = [
   { id: 6, retentionType: "services", name: "Servicios generales (declarantes)", baseUvtCenti: 200, rateBp: 400, sortOrder: 6, createdAt: "", updatedAt: "" },
   { id: 1, retentionType: "purchases", name: "Compras generales (declarantes)", baseUvtCenti: 1000, rateBp: 250, sortOrder: 1, createdAt: "", updatedAt: "" },
   { id: 13, retentionType: "fees", name: "Honorarios y comisiones (personas jurídicas)", baseUvtCenti: 0, rateBp: 1100, sortOrder: 13, createdAt: "", updatedAt: "" },
+  { id: 7, retentionType: "services", name: "Servicios de transporte de carga", baseUvtCenti: 200, rateBp: 100, sortOrder: 7, createdAt: "", updatedAt: "" },
 ];
 const UVTS: UvtValue[] = [{ year: 2026, valuePesos: 52_374, updatedAt: "" }];
 const TITLES: DocumentTitleMapping[] = [
@@ -269,13 +273,22 @@ describe("buildWithholdingReport", () => {
     expect(services.pn).toEqual({ baseCents: pesos(2_000_000), retentionCents: pesos(80_000) });
   });
 
-  it("varias reglas: usa la predeterminada, permite cambiarla por factura y pregunta si no hay predeterminada", () => {
+  it("varias reglas: la predeterminada aplica de entrada, se pueden sumar otras por factura y sin predeterminada se pregunta por cada una", () => {
     const files = [file("a.pdf", doc("1", "A", 1_000_000))];
     const noDefault = supplier(1, "1", "PJ", [rule(6), rule(13)]);
-    expect(report(files, [noDefault]).rows[0]).toMatchObject({ status: "review", ruleOptions: [{ rateId: 6 }, { rateId: 13 }] });
+    const asked = report(files, [noDefault]);
+    expect(asked.rows[0]).toMatchObject({ status: "review", counts: false, ruleOptions: [{ rateId: 6 }, { rateId: 13 }], lines: [{ state: "pending" }, { state: "pending" }] });
+    expect(buildPendingActions(asked).map((a) => [a.group, a.actionLabel])).toEqual([["rule-choice", "Definir reglas"]]);
+    // Definir solo una no basta: la otra sigue pendiente.
+    expect(report(files, [noDefault], decisions({ "a.pdf": { rules: { 6: { applies: true } } } })).rows[0].status).toBe("review");
+
     const withDefault = supplier(1, "1", "PJ", [rule(6), rule(13, { isDefault: true })]);
-    expect(report(files, [withDefault]).rows[0]).toMatchObject({ status: "validated", rule: { retentionType: "fees" }, retentionCents: pesos(110_000) });
-    expect(report(files, [withDefault], decisions({ "a.pdf": { rateId: 6 } })).rows[0]).toMatchObject({ rule: { retentionType: "services" }, retentionCents: pesos(40_000) });
+    expect(report(files, [withDefault]).rows[0]).toMatchObject({ status: "validated", retentionCents: pesos(110_000), lines: [{ state: "not-applicable" }, { state: "applies", counts: true }] });
+    const both = report(files, [withDefault], decisions({ "a.pdf": { rules: { 6: { applies: true } } } }));
+    expect(both.rows[0]).toMatchObject({ status: "validated", retentionCents: pesos(150_000) });
+    const swapped = report(files, [withDefault], decisions({ "a.pdf": { rules: { 6: { applies: true }, 13: { applies: false } } } }));
+    expect(swapped.rows[0]).toMatchObject({ status: "validated", retentionCents: pesos(40_000) });
+    expect(swapped.summary.find((l) => l.retentionType === "fees")!.pj).toEqual({ baseCents: 0, retentionCents: 0 });
   });
 
   it("errores de configuración: subtipo eliminado, sin UVT del año, falta número", () => {
@@ -291,5 +304,95 @@ describe("buildWithholdingReport", () => {
   it("archivos no compatibles no detienen el lote", () => {
     const r = report([{ fileName: "x.pdf", kind: "incompatible", message: "No se encontró la sección «Detalles de Productos»." }, file("a.pdf", doc("1", "A", 1_000_000))], [supplier(1, "1", "PJ", [rule(6)])]);
     expect(r.stats).toMatchObject({ files: 2, processed: 1, ignored: 1, failed: 1, validated: 1 });
+  });
+
+  describe("varias retenciones en una misma factura", () => {
+    // Transporte de carga 1 % y Servicios generales 4 %, ambas con base manual y sin predeterminada.
+    const s = supplier(1, "1", "PJ", [rule(7, { baseMode: "manual" }), rule(6, { baseMode: "manual" })]);
+    const fe100 = (retefuente = 0) => [file("fe100.pdf", doc("1", "FE-100", 5_000_000, { retefuenteCents: pesos(retefuente) }))];
+    const rules = (a: DocDecision["rules"]) => decisions({ "fe100.pdf": { rules: a } });
+    const services = (r: ReturnType<typeof report>) => r.summary.find((l) => l.retentionType === "services")!.pj;
+
+    it("dos reglas manuales aplican: cada una con su base, sin repetir el subtotal", () => {
+      const r = report(fe100(), [s], rules({ 7: { applies: true, baseCents: pesos(2_000_000) }, 6: { applies: true, baseCents: pesos(1_000_000) } }));
+      expect(r.rows[0]).toMatchObject({ status: "validated", counts: true, baseCents: pesos(3_000_000), calculatedCents: pesos(60_000), retentionCents: pesos(60_000) });
+      expect(r.rows[0].rule).toBeUndefined();
+      expect(r.rows[0].lines).toMatchObject([
+        { state: "applies", baseCents: pesos(2_000_000), rateBp: 100, calculatedCents: pesos(20_000), counts: true },
+        { state: "applies", baseCents: pesos(1_000_000), rateBp: 400, calculatedCents: pesos(40_000), counts: true },
+      ]);
+      expect(services(r)).toEqual({ baseCents: pesos(3_000_000), retentionCents: pesos(60_000) });
+      expect(r.totals.invoicesCents).toBe(pesos(60_000));
+      // La misma factura aparece en los dos subtipos.
+      expect(r.detail.map((d) => [d.subtypeName, d.baseCents, d.rateBp, d.retentionCents, d.documentCount])).toEqual([
+        ["Servicios de transporte de carga", pesos(2_000_000), 100, pesos(20_000), 1],
+        ["Servicios generales (declarantes)", pesos(1_000_000), 400, pesos(40_000), 1],
+      ]);
+      const byRule = buildWithholdingSheets(r, RATES).find((x) => x.name === "Retenciones por factura")!;
+      expect(byRule.rows.map((x) => [x[1], x[6], x[7], x[8], x[11], x[12]])).toEqual([
+        ["FE-100", "Servicios de transporte de carga", "Aplica", 2_000_000, 20_000, "Sí"],
+        ["FE-100", "Servicios generales (declarantes)", "Aplica", 1_000_000, 40_000, "Sí"],
+      ]);
+    });
+
+    it("solo una de dos aplica: la otra queda «No aplica» solo en esta factura", () => {
+      const r = report(fe100(), [s], rules({ 7: { applies: true, baseCents: pesos(2_000_000) }, 6: { applies: false } }));
+      expect(r.rows[0]).toMatchObject({ status: "validated", retentionCents: pesos(20_000), rateBp: 100, lines: [{ state: "applies", counts: true }, { state: "not-applicable", counts: false }] });
+      expect(services(r)).toEqual({ baseCents: pesos(2_000_000), retentionCents: pesos(20_000) });
+      expect(r.detail).toHaveLength(1);
+      expect(s.withholdingRules).toHaveLength(2);
+      // Ninguna aplica: documento resuelto que no suma.
+      const none = report(fe100(), [s], rules({ 7: { applies: false }, 6: { applies: false } }));
+      expect(none.rows[0]).toMatchObject({ status: "validated", counts: false, retentionCents: 0 });
+      expect(report(fe100(60_000), [s], rules({ 7: { applies: false }, 6: { applies: false } })).rows[0].status).toBe("difference");
+    });
+
+    it("una no supera su tope y la otra sí: solo la segunda alimenta el resumen", () => {
+      const r = report(fe100(), [s], rules({ 7: { applies: true, baseCents: pesos(90_000) }, 6: { applies: true, baseCents: pesos(500_000) } }));
+      expect(r.rows[0]).toMatchObject({ status: "validated", counts: true, retentionCents: pesos(20_000) });
+      expect(r.rows[0].lines).toMatchObject([
+        { minBaseCents: pesos(104_748), belowMinimum: true, calculatedCents: 0, counts: false },
+        { minBaseCents: pesos(104_748), belowMinimum: false, calculatedCents: pesos(20_000), counts: true },
+      ]);
+      expect(services(r)).toEqual({ baseCents: pesos(500_000), retentionCents: pesos(20_000) });
+      expect(r.detail.map((d) => d.subtypeName)).toEqual(["Servicios generales (declarantes)"]);
+      expect(belowMinimumLines(r.rows).map((x) => x.line.rule.subtypeName)).toEqual(["Servicios de transporte de carga"]);
+      // Ninguna supera el tope y el PDF no informa Rete fuente: no supera tope.
+      const all = report(fe100(), [s], rules({ 7: { applies: true, baseCents: pesos(90_000) }, 6: { applies: true, baseCents: pesos(50_000) } }));
+      expect(all.rows[0]).toMatchObject({ status: "below-minimum", counts: false });
+    });
+
+    it("conciliación: la Rete fuente del PDF se compara con la suma de las reglas", () => {
+      const r = report(fe100(60_000), [s], rules({ 7: { applies: true, baseCents: pesos(2_000_000) }, 6: { applies: true, baseCents: pesos(1_000_000) } }));
+      expect(r.rows[0]).toMatchObject({ status: "validated", comparison: "match", calculatedCents: pesos(60_000), informedCents: pesos(60_000), counts: true });
+    });
+
+    it("no coincidencia: 55.000 calculado frente a 60.000 del PDF queda pendiente y no suma", () => {
+      const r = report(fe100(60_000), [s], rules({ 7: { applies: true, baseCents: pesos(1_500_000) }, 6: { applies: true, baseCents: pesos(1_000_000) } }));
+      expect(r.rows[0]).toMatchObject({ status: "difference", comparison: "difference", calculatedCents: pesos(55_000), counts: false, retentionCents: 0 });
+      expect(services(r)).toEqual({ baseCents: 0, retentionCents: 0 });
+      expect(buildPendingActions(r).map((a) => [a.group, a.severity])).toEqual([["difference", "blocking"]]);
+    });
+
+    it("pendiente mientras falte la base de una regla que aplica", () => {
+      const r = report(fe100(), [s], rules({ 7: { applies: true }, 6: { applies: false } }));
+      expect(r.rows[0]).toMatchObject({ status: "pending-base", counts: false });
+      expect(r.rows[0].issues[0]).toContain("Servicios de transporte de carga");
+      expect(buildPendingActions(r).map((a) => a.group)).toEqual(["manual-base"]);
+    });
+
+    it("regla automática (subtotal) y regla manual en la misma factura", () => {
+      const mixed = supplier(1, "1", "PJ", [rule(7), rule(6, { baseMode: "manual" })]);
+      const r = report(fe100(), [mixed], rules({ 7: { applies: true }, 6: { applies: true, baseCents: pesos(1_000_000) } }));
+      expect(r.rows[0]).toMatchObject({ status: "validated", retentionCents: pesos(90_000), lines: [{ baseCents: pesos(5_000_000), calculatedCents: pesos(50_000) }, { baseCents: pesos(1_000_000), calculatedCents: pesos(40_000) }] });
+      expect(services(r)).toEqual({ baseCents: pesos(6_000_000), retentionCents: pesos(90_000) });
+      expect(r.rows[0].notes.some((n) => n.includes("más que el Subtotal"))).toBe(true);
+    });
+
+    it("proveedor con una sola regla: mismo flujo de siempre, con una línea", () => {
+      const r = report(fe100(200_000), [supplier(1, "1", "PJ", [rule(6)])]);
+      expect(r.rows[0]).toMatchObject({ status: "validated", rule: { rateId: 6 }, retentionCents: pesos(200_000), lines: [{ state: "applies", baseCents: pesos(5_000_000), calculatedCents: pesos(200_000), counts: true }] });
+      expect(r.rows[0].lines).toHaveLength(1);
+    });
   });
 });

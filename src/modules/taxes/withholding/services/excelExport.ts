@@ -1,11 +1,12 @@
 import { saveExcelSheets, type ExportSheet } from "../../../bank-analysis/shared/excelExportService";
 import { PERSON_TYPE_LABEL, RETENTION_TYPE_LABEL, TITLE_CATEGORY_LABEL, type WithholdingRate } from "../../../../types/models";
 import type { WithholdingReport } from "../types";
-import { ignoredGroup, STATUS_LABEL } from "./labels";
-import { formatDate, formatRateBp, formatUvt, minBaseCents } from "./money";
+import { belowMinimumLines, ignoredGroup, rateText, ruleSubtypeText, ruleTypeText, STATUS_LABEL } from "./labels";
+import { formatDate, formatRateBp, formatUvt } from "./money";
 
 const pesos = (cents: number | undefined) => (cents === undefined ? null : cents / 100);
-const rate = (bp: number | undefined) => (bp === undefined ? null : formatRateBp(bp));
+
+const RULE_STATE_LABEL = { applies: "Aplica", "not-applicable": "No aplica en esta factura", pending: "Pendiente" } as const;
 
 export function buildWithholdingSheets(report: WithholdingReport, rates: WithholdingRate[]): ExportSheet[] {
   const summary: ExportSheet = {
@@ -39,8 +40,8 @@ export function buildWithholdingSheets(report: WithholdingReport, rates: Withhol
         r.number ?? r.fileName,
         r.supplierName ?? null,
         r.nit ?? null,
-        r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : null,
-        r.rule?.subtypeName ?? null,
+        ruleTypeText(r) ?? null,
+        ruleSubtypeText(r) ?? null,
         r.counts ? pesos(r.baseCents) : null,
         r.counts ? pesos(r.retentionCents) : 0,
         r.counts ? `${STATUS_LABEL[r.status]} (suma en Total notas)` : STATUS_LABEL[r.status],
@@ -81,12 +82,12 @@ export function buildWithholdingSheets(report: WithholdingReport, rates: Withhol
       r.supplierName ?? null,
       r.personType ?? null,
       r.fiscalCodes.join(";") || null,
-      r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : null,
-      r.rule?.subtypeName ?? null,
+      ruleTypeText(r) ?? null,
+      ruleSubtypeText(r) ?? null,
       pesos(r.subtotalCents),
       pesos(r.baseCents),
       pesos(r.minBaseCents),
-      rate(r.rateBp),
+      rateText(r) ?? null,
       pesos(r.calculatedCents),
       pesos(r.informedCents),
       r.counts ? "Sí" : "No",
@@ -110,21 +111,58 @@ export function buildWithholdingSheets(report: WithholdingReport, rates: Withhol
       { header: "Tarifa", kind: "text" },
       { header: "Diferencia frente al tope", kind: "money" },
     ],
-    rows: report.rows
-      .filter((r) => r.status === "below-minimum")
-      .map((r) => [
+    rows: belowMinimumLines(report.rows).map(({ row: r, line: l }) => [
+      r.category ? TITLE_CATEGORY_LABEL[r.category] : null,
+      r.number ?? r.fileName,
+      r.supplierName ?? null,
+      r.nit ?? null,
+      r.personType ?? null,
+      RETENTION_TYPE_LABEL[l.rule.retentionType],
+      l.rule.subtypeName,
+      pesos(l.baseCents),
+      pesos(l.minBaseCents),
+      formatRateBp(l.rateBp),
+      pesos(l.minBaseCents - l.baseCents!),
+    ]),
+  };
+
+  // Una fila por regla del documento: una misma factura puede aparecer en varios subtipos.
+  const byRule: ExportSheet = {
+    name: "Retenciones por factura",
+    columns: [
+      { header: "Categoría", kind: "text" },
+      { header: "Factura", kind: "text" },
+      { header: "Proveedor", kind: "text" },
+      { header: "NIT", kind: "text" },
+      { header: "PJ / PN", kind: "text" },
+      { header: "Tipo", kind: "text" },
+      { header: "Subtipo", kind: "text" },
+      { header: "Aplica", kind: "text" },
+      { header: "Base", kind: "money" },
+      { header: "Base mínima", kind: "money" },
+      { header: "Tarifa", kind: "text" },
+      { header: "Retención", kind: "money" },
+      { header: "Va a la declaración", kind: "text" },
+      { header: "Estado del documento", kind: "text" },
+    ],
+    rows: report.rows.flatMap((r) =>
+      r.lines.map((l) => [
         r.category ? TITLE_CATEGORY_LABEL[r.category] : null,
         r.number ?? r.fileName,
         r.supplierName ?? null,
         r.nit ?? null,
         r.personType ?? null,
-        r.rule ? RETENTION_TYPE_LABEL[r.rule.retentionType] : null,
-        r.rule?.subtypeName ?? null,
-        pesos(r.baseCents),
-        pesos(r.minBaseCents),
-        rate(r.rateBp),
-        pesos(r.minBaseCents! - r.baseCents!),
+        RETENTION_TYPE_LABEL[l.rule.retentionType],
+        l.rule.subtypeName,
+        RULE_STATE_LABEL[l.state],
+        pesos(l.baseCents),
+        pesos(l.minBaseCents),
+        formatRateBp(l.rateBp),
+        pesos(l.calculatedCents),
+        l.counts ? "Sí" : "No",
+        STATUS_LABEL[r.status],
       ]),
+    ),
   };
 
   const ignored: ExportSheet = {
@@ -180,19 +218,21 @@ export function buildWithholdingSheets(report: WithholdingReport, rates: Withhol
   // Registro de auditoría: base UVT y tarifa usadas por subtipo.
   const used = new Map<string, (string | number | null)[]>();
   for (const r of report.rows) {
-    if (!r.rule || r.uvtYear === undefined || r.baseUvtCenti === undefined) continue;
-    const configured = rates.find((x) => x.id === r.rule!.rateId);
-    const key = `${r.rule.rateId}|${r.uvtYear}`;
-    if (used.has(key)) continue;
-    used.set(key, [
-      RETENTION_TYPE_LABEL[r.rule.retentionType],
-      r.rule.subtypeName,
-      String(r.uvtYear),
-      r.uvtPesos!,
-      formatUvt(r.baseUvtCenti),
-      pesos(minBaseCents(r.baseUvtCenti, r.uvtPesos!)),
-      configured ? formatRateBp(configured.rateBp) : null,
-    ]);
+    if (r.uvtYear === undefined) continue;
+    for (const l of r.lines) {
+      const key = `${l.rule.rateId}|${r.uvtYear}`;
+      if (l.state !== "applies" || used.has(key)) continue;
+      const configured = rates.find((x) => x.id === l.rule.rateId);
+      used.set(key, [
+        RETENTION_TYPE_LABEL[l.rule.retentionType],
+        l.rule.subtypeName,
+        String(r.uvtYear),
+        r.uvtPesos!,
+        formatUvt(l.baseUvtCenti),
+        pesos(l.minBaseCents),
+        configured ? formatRateBp(configured.rateBp) : null,
+      ]);
+    }
   }
   const snapshot: ExportSheet = {
     name: "Tarifas usadas",
@@ -232,7 +272,7 @@ export function buildWithholdingSheets(report: WithholdingReport, rates: Withhol
     ]),
   };
 
-  return [summary, notes, documents, below, ignored, config, detail, snapshot];
+  return [summary, notes, documents, byRule, below, ignored, config, detail, snapshot];
 }
 
 export function exportWithholdingExcel(report: WithholdingReport, rates: WithholdingRate[], folderName: string) {

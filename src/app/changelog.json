@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.17.1",
+    "date": "2026-10-05",
+    "notes": [
+      "Retención en la fuente compras: una misma factura puede llevar varias retenciones a la vez. Si el proveedor tiene más de una regla, el detalle muestra cada una por separado con su «¿Aplica en esta factura?» (Sí / No), su propia base y su retención calculada; ya no hay que elegir una sola.",
+      "Cada regla evalúa su base mínima y su tarifa de forma independiente, y la Rete fuente del PDF se compara con la suma de todas. Si no coincide, el documento queda en «Diferencia de retención» hasta ajustar las reglas o sus bases.",
+      "La factura sigue pendiente mientras falte definir si alguna regla aplica o falte la base de una regla marcada como «Aplica». Marcar «No aplica» solo afecta esa factura: la configuración del proveedor no cambia.",
+      "El resumen para la declaración y el detalle por subtipo suman la base propia de cada regla (sin repetir el subtotal) y solo las reglas que generaron retención.",
+      "Si el proveedor tiene una regla predeterminada, esa queda marcada de entrada y las demás como «No aplica»; sin predeterminada se pregunta por cada una. Con una sola regla el flujo es el de siempre.",
+      "Exportar Excel: nueva hoja «Retenciones por factura», con una fila por cada regla del documento."
+    ]
+  },
+  {
     "version": "1.17.0",
     "date": "2026-10-02",
     "notes": [

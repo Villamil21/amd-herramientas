@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowRight, Eye, EyeOff, Pencil } from "lucide-react";
-import { Alert, Badge, Button, Field, Input, Modal, Select } from "../../../../components/ui";
+import { Alert, Badge, Button, Field, Input, Modal } from "../../../../components/ui";
 import { BASE_MODE_LABEL, PERSON_TYPE_LABEL, RETENTION_TYPE_LABEL, TITLE_CATEGORY_LABEL } from "../../../../types/models";
 import { normalizeKey } from "../../../../utils/text";
 import { formatCop } from "../../invoice-vat/parser/amounts";
 import { PENDING_STATUSES, STATUS_LABEL } from "../services/labels";
 import { formatDate, formatRateBp, formatUvt, parseHundredths, parsePesosInput, retentionCents, sameRetention } from "../services/money";
-import type { DocDecision, DocRow, ProductTable } from "../types";
+import type { DocDecision, DocRow, ProductTable, RuleDecision, RuleLine } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
 interface Props {
@@ -96,6 +96,101 @@ const COMPARISON: Record<NonNullable<DocRow["comparison"]>, { label: string; ton
   none: { label: "Sin Rete fuente en el PDF", tone: "dark" },
 };
 
+const RULE_STATE: Record<RuleLine["state"], { label: string; tone?: "success" | "gold" }> = {
+  applies: { label: "Aplica", tone: "success" },
+  "not-applicable": { label: "No aplica en esta factura" },
+  pending: { label: "Pendiente", tone: "gold" },
+};
+
+const sumCents = (values: (number | undefined)[]) => values.reduce<number>((s, v) => s + (v ?? 0), 0);
+
+/**
+ * Proveedor con varias reglas: cada una se marca por separado (Sí / No) y lleva
+ * su propia base. Lo elegido vale solo para este documento.
+ */
+function RuleBlocks({ row, rules, onChange }: { row: DocRow; rules: DocDecision["rules"]; onChange: (rules: Record<number, RuleDecision>) => void }) {
+  const [texts, setTexts] = useState<Record<number, string>>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
+  const setRule = (rateId: number, patch: RuleDecision) => onChange({ ...rules, [rateId]: { ...rules?.[rateId], ...patch } });
+
+  function applyBase(rateId: number) {
+    const cents = parsePesosInput(texts[rateId] ?? "");
+    setErrors((prev) => ({ ...prev, [rateId]: cents === null ? "Escribe la base en pesos (ej. 400.000)." : "" }));
+    if (cents !== null) setRule(rateId, { applies: true, baseCents: cents });
+  }
+
+  return (
+    <>
+      {row.lines.map((l, i) => {
+        const { rateId } = l.rule;
+        const fromSubtotal = l.rule.baseMode !== "manual" && rules?.[rateId]?.baseCents === undefined;
+        const hint = l.baseCents !== undefined ? `Base aplicada: ${formatCop(l.baseCents)}${fromSubtotal ? " (Subtotal de la factura)" : ""}` : "Revisa los productos y escribe la base que aplica.";
+        return (
+          <div key={rateId} className={`rule-block${l.state === "not-applicable" ? " rule-block--off" : ""}`}>
+            <div className="row row--between">
+              <strong>
+                {i + 1}. {RETENTION_TYPE_LABEL[l.rule.retentionType]} — {l.rule.subtypeName}
+              </strong>
+              <Badge tone={RULE_STATE[l.state].tone}>{RULE_STATE[l.state].label}</Badge>
+            </div>
+            <span className="muted">
+              Base mínima: {formatCop(l.minBaseCents)} ({formatUvt(l.baseUvtCenti)} UVT) · Tarifa: {formatRateBp(l.rateBp)} · {BASE_MODE_LABEL[l.rule.baseMode]}
+            </span>
+            <div className="row">
+              <span>¿Aplica en esta factura?</span>
+              <Button size="sm" variant={l.state === "applies" ? "primary" : "secondary"} aria-pressed={l.state === "applies"} onClick={() => setRule(rateId, { applies: true })}>
+                Sí
+              </Button>
+              <Button size="sm" variant={l.state === "not-applicable" ? "dark" : "secondary"} aria-pressed={l.state === "not-applicable"} onClick={() => setRule(rateId, { applies: false })}>
+                No
+              </Button>
+            </div>
+            {l.state === "applies" && (
+              <>
+                <div className="row" style={{ alignItems: "flex-end" }}>
+                  <Field label="Base de retención" hint={hint}>
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={texts[rateId] ?? ""}
+                        onChange={(e) => setTexts((prev) => ({ ...prev, [rateId]: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && applyBase(rateId)}
+                        placeholder="400.000"
+                        inputMode="decimal"
+                        invalid={Boolean(errors[rateId])}
+                      />
+                    )}
+                  </Field>
+                  <Button variant="primary" onClick={() => applyBase(rateId)}>
+                    Aplicar base
+                  </Button>
+                  {l.rule.baseMode !== "manual" && !fromSubtotal && (
+                    <Button variant="ghost" onClick={() => setRule(rateId, { baseCents: undefined })}>
+                      Usar subtotal
+                    </Button>
+                  )}
+                </div>
+                {errors[rateId] && <Alert tone="danger">{errors[rateId]}</Alert>}
+                <span>
+                  Retención calculada: <strong>{money(l.calculatedCents)}</strong>
+                  {l.belowMinimum && <span className="muted"> · La base no supera la base mínima: no genera retención.</span>}
+                </span>
+              </>
+            )}
+          </div>
+        );
+      })}
+      <div className="row row--between">
+        <strong>Retención total de la factura: {formatCop(sumCents(row.lines.map((l) => l.calculatedCents)))}</strong>
+        <span className="row">
+          Rete fuente del PDF: {money(row.informedCents)}
+          {row.comparison && <Badge tone={COMPARISON[row.comparison].tone}>{COMPARISON[row.comparison].label}</Badge>}
+        </span>
+      </div>
+    </>
+  );
+}
+
 export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier, onClose, remainingPending = 0, onNextPending }: Props) {
   const [showProducts, setShowProducts] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -140,31 +235,16 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
     set({ manualBaseCents: cents });
   }
 
+  // Varias reglas: cada una se resuelve en «Retenciones aplicables», después de los totales.
+  const multi = row.lines.length > 1;
+  const applied = row.lines.filter((l) => l.state === "applies");
   const askInformed = informed > 0 && (row.status === "difference" || d.review) && row.rule;
   const needsManual = row.rule?.baseMode === "manual" && !d.review;
   // Pendiente: el problema y su acción van arriba, no al final del detalle.
   const pending = PENDING_STATUSES.includes(row.status);
-  const ruleOnTop = pending && !row.rule && row.ruleOptions.length > 1;
   // Pendiente base: se resuelve en «Base de retención», después de los totales.
   const basePending = row.status === "pending-base";
   const informedOnTop = pending && row.status === "difference" && askInformed;
-
-  const ruleSelect = (
-    <Field label="Cambiar para esta factura" hint="Solo afecta este documento en este análisis.">
-      {(id) => (
-        <Select id={id} value={d.rateId ?? row.rule?.rateId ?? ""} onChange={(e) => set({ rateId: Number(e.target.value), manualBaseCents: undefined, review: undefined })} style={{ maxWidth: 520 }}>
-          <option value="" disabled>
-            Elige la regla que aplica…
-          </option>
-          {row.ruleOptions.map((o) => (
-            <option key={o.rateId} value={o.rateId}>
-              {RETENTION_TYPE_LABEL[o.retentionType]} — {o.subtypeName} ({BASE_MODE_LABEL[o.baseMode]})
-            </option>
-          ))}
-        </Select>
-      )}
-    </Field>
-  );
 
   const manualBase = (
     <div className="row" style={{ alignItems: "flex-end" }}>
@@ -260,7 +340,6 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
                     </div>
                   )}
                 </Alert>
-                {ruleOnTop && ruleSelect}
                 {informedOnTop && informedReview}
                 {error && !needsManual && <Alert tone="danger">{error}</Alert>}
               </div>
@@ -291,7 +370,7 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
               </div>
             </Section>
 
-            {(row.rule || row.ruleOptions.length > 0) && (
+            {!multi && (row.rule || row.ruleOptions.length > 0) && (
               <Section title="Configuración de retención">
                 <div className="summary-grid">
                   <Item label="Tipo" value={row.rule ? RETENTION_TYPE_LABEL[row.rule.retentionType] : "Pendiente"} />
@@ -302,20 +381,34 @@ export function DocumentDetailModal({ row, decision, onDecision, onEditSupplier,
                   <Item label="Base mínima" value={money(row.minBaseCents)} />
                   <Item label="Tarifa" value={row.rateBp !== undefined ? formatRateBp(row.rateBp) : "—"} />
                 </div>
-                {row.ruleOptions.length > 1 && !ruleOnTop && ruleSelect}
               </Section>
             )}
 
             <Section title="Datos totales">
               <div className="summary-grid">
                 <Item label="Subtotal" value={money(row.subtotalCents)} />
-                <Item label="Base de retención" value={money(row.baseCents)} />
-                <Item label="Retención calculada" value={money(row.calculatedCents)} />
+                <Item label="Base de retención" value={money(multi && applied.some((l) => l.baseCents !== undefined) ? sumCents(applied.map((l) => l.baseCents)) : row.baseCents)} />
+                <Item label="Retención calculada" value={money(multi && applied.some((l) => l.calculatedCents !== undefined) ? sumCents(applied.map((l) => l.calculatedCents)) : row.calculatedCents)} />
                 <Item label="Rete fuente del PDF" value={money(row.informedCents)} />
                 <Item label="Tarifa implícita" value={row.impliedRateBp !== undefined ? formatRateBp(row.impliedRateBp, true) : "—"} />
                 <Item label="Comparación" value={row.comparison ? <Badge tone={COMPARISON[row.comparison].tone}>{COMPARISON[row.comparison].label}</Badge> : "Pendiente de revisión"} />
               </div>
             </Section>
+
+            {multi && (
+              <Section title="Retenciones aplicables" actions={pending ? <Badge tone="gold">Pendiente</Badge> : undefined}>
+                <span className="muted">
+                  El proveedor tiene {row.lines.length} reglas: marca cuáles aplican en esta factura y la base de cada una. Solo afecta este documento; la configuración del proveedor no cambia.
+                  {row.uvtPesos ? ` Valor UVT ${row.uvtYear}: ${formatCop(row.uvtPesos * 100)}.` : ""}
+                </span>
+                {basePending && row.issues.map((issue) => (
+                  <span key={issue} className="muted">
+                    {issue}
+                  </span>
+                ))}
+                <RuleBlocks key={row.fileName} row={row} rules={d.rules} onChange={(rules) => set({ rules })} />
+              </Section>
+            )}
 
             {needsManual && (
               <Section title="Base de retención" actions={basePending && <Badge tone="gold">Pendiente</Badge>}>
