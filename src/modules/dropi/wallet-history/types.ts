@@ -5,7 +5,7 @@
  */
 
 /** Incidencias posibles de un movimiento; una fila puede tener varias. */
-export type Incident = "description" | "type" | "duplicate" | "invalid_amount";
+export type Incident = "type" | "duplicate" | "invalid_amount";
 
 export interface WalletMovement {
   /** Número de fila en Excel (1 = primera fila de la hoja). */
@@ -71,6 +71,7 @@ export interface WalletTotals {
 }
 
 export interface WalletAnalysis {
+  /** Solo los retiros de saldo en cartera: los demás conceptos del archivo se ignoran. */
   movements: AnalyzedMovement[];
   /** Solo filas validadas: las que requieren revisión no se suman. */
   totals: WalletTotals;

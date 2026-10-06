@@ -37,8 +37,12 @@ describe.skipIf(files.length === 0)("historiales de cartera reales", () => {
       const col = (name: string) => header.indexOf(name);
       const data = sheet.rows.slice(1).filter((r) => r.some((c) => c.t !== "e"));
       expect(file.movements).toHaveLength(data.length);
+      // Solo se analizan los retiros de saldo; el resto de filas del archivo se ignora.
+      const analyzed = new Map(analysis.movements.map((m) => [m.rowNumber, m]));
+      expect(analysis.movements).toHaveLength(file.movements.filter((m) => m.description.replace(/\s+/g, " ").trim().toUpperCase() === EXPECTED_DESCRIPTION).length);
       data.forEach((r, i) => {
-        const m = analysis.movements[i];
+        const m = analyzed.get(file.movements[i].rowNumber);
+        if (!m) return;
         const amount = r[col("MONTO")];
         expect(m.id).toBe(text(r[col("ID")]));
         expect(m.concept.trim()).toBe(text(r[col("CONCEPTO DE RETIRO")]));
@@ -72,7 +76,7 @@ describe.skipIf(files.length === 0)("historiales de cartera reales", () => {
       }
 
       const sheets = buildWalletSheets(analysis);
-      expect(sheets[0].rows.slice(0, file.movements.length).map((r) => r[4])).toEqual(analysis.movements.map((m) => (m.incidents.length ? expect.any(String) : "Validado")));
+      expect(sheets[0].rows.slice(0, analysis.movements.length).map((r) => r[4])).toEqual(analysis.movements.map((m) => (m.incidents.length ? expect.any(String) : "Validado")));
     });
   }
 });

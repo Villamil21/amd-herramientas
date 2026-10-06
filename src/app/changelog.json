@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.19.2",
+    "date": "2026-10-06",
+    "notes": [
+      "Dropi → Historial de cartera: ahora solo se procesan los movimientos cuya descripción es «SALIDA POR PETICION DE RETIRO DE SALDO EN CARTERA». Los demás conceptos del archivo (cobros de flete, devoluciones, entradas, etc.) se ignoran: ya no aparecen como «Movimientos por revisar», no generan alertas y no salen en la tabla ni en el Excel exportado.",
+      "La descripción se compara completa, sin distinguir mayúsculas ni espacios de más; un concepto parecido no cuenta como retiro.",
+      "Solo los retiros de saldo pueden quedar en «Requiere revisión» (MONTO vacío, no numérico, negativo o en cero, tipo distinto de SALIDA o ID repetido).",
+      "Si el archivo no trae ningún retiro de saldo se indica «No se encontraron retiros de saldo en cartera en este archivo.». Los cálculos de valor pagado y 4x1000 no cambian."
+    ]
+  },
+  {
     "version": "1.19.1",
     "date": "2026-10-06",
     "notes": [

@@ -1,11 +1,10 @@
 import type { AnalyzedMovement, Incident, WalletAnalysis, WalletMovement } from "../types";
 
-/** Valor canónico de DESCRIPCIÓN para un retiro de cartera. */
+/** DESCRIPCIÓN de un retiro de cartera: el único concepto que se procesa. */
 export const EXPECTED_DESCRIPTION = "SALIDA POR PETICION DE RETIRO DE SALDO EN CARTERA";
 export const EXPECTED_TYPE = "SALIDA";
 
 export const INCIDENT_LABEL: Record<Incident, string> = {
-  description: "Descripción inesperada",
   type: "Tipo inesperado",
   duplicate: "Posible duplicado",
   invalid_amount: "Valor inválido",
@@ -13,10 +12,13 @@ export const INCIDENT_LABEL: Record<Incident, string> = {
 
 export const INCIDENTS = Object.keys(INCIDENT_LABEL) as Incident[];
 
-/** Solo se normalizan los espacios (repetidos, al inicio y al final): cualquier otro cambio es una diferencia real. */
 const collapseSpaces = (text: string) => text.replace(/\s+/g, " ").trim();
 
-export const isExpectedDescription = (text: string) => collapseSpaces(text) === EXPECTED_DESCRIPTION;
+/**
+ * Concepto completo, sin coincidencias parciales: solo se normalizan mayúsculas
+ * y espacios (repetidos, al inicio y al final).
+ */
+export const isExpectedDescription = (text: string) => collapseSpaces(text).toUpperCase() === EXPECTED_DESCRIPTION;
 export const isExpectedType = (text: string) => collapseSpaces(text) === EXPECTED_TYPE;
 
 /**
@@ -38,18 +40,20 @@ function amountProblem(m: WalletMovement): string | undefined {
 }
 
 /**
- * Valida cada movimiento y calcula valor pagado y 4x1000. Las filas con
+ * Primero filtra los retiros de saldo en cartera por DESCRIPCIÓN: el resto de
+ * movimientos del archivo se ignora (no es un error ni requiere revisión).
+ * Después valida cada retiro y calcula valor pagado y 4x1000. Las filas con
  * alguna incidencia requieren revisión y no se suman a los totales; un ID
  * repetido marca todas sus filas (no se elige cuál es la buena).
  */
-export function analyzeWallet(movements: WalletMovement[], opts: { checkType: boolean }): WalletAnalysis {
+export function analyzeWallet(allMovements: WalletMovement[], opts: { checkType: boolean }): WalletAnalysis {
+  const movements = allMovements.filter((m) => isExpectedDescription(m.description));
   const idCount = new Map<string, number>();
   for (const m of movements) if (m.id) idCount.set(m.id, (idCount.get(m.id) ?? 0) + 1);
 
   const analyzed: AnalyzedMovement[] = movements.map((m) => {
     const problem = amountProblem(m);
     const incidents: Incident[] = [];
-    if (!isExpectedDescription(m.description)) incidents.push("description");
     if (opts.checkType && !isExpectedType(m.type)) incidents.push("type");
     if (m.id && idCount.get(m.id)! > 1) incidents.push("duplicate");
     if (problem) incidents.push("invalid_amount");

@@ -11,7 +11,7 @@ import { StatementFileCard } from "../../bank-analysis/shared/components/Stateme
 import type { ImportState } from "../../bank-analysis/shared/useStatementImport";
 import { formatCop } from "../orders/services/format";
 import { WithdrawalsTable, type WithdrawalFilter } from "./components/WithdrawalsTable";
-import { analyzeWallet, EXPECTED_DESCRIPTION, EXPECTED_TYPE } from "./services/analysis";
+import { analyzeWallet } from "./services/analysis";
 import { exportWalletExcel } from "./services/excelExport";
 import { readWalletWorkbook } from "./services/workbookReader";
 import { WalletHistoryError, type AnalyzedMovement, type Incident, type ReadResult } from "./types";
@@ -73,6 +73,8 @@ export default function WalletHistoryPage() {
   const loaded = state.status === "done" ? state.analysis : undefined;
   const file = loaded?.kind === "ok" ? loaded.file : undefined;
   const analysis = useMemo(() => (file ? analyzeWallet(file.movements, { checkType: file.hasType }) : undefined), [file]);
+  /** El archivo puede no traer ningún retiro de saldo: los demás conceptos se ignoran. */
+  const hasWithdrawals = !!analysis && analysis.movements.length > 0;
 
   /** Filtra la tabla y la lleva a la vista (desde las alertas y las métricas). */
   const showOnly = (f: WithdrawalFilter) => {
@@ -112,7 +114,7 @@ export default function WalletHistoryPage() {
         title="Historial de cartera"
         description="Importa el historial de cartera exportado desde Dropi para resumir los retiros realizados."
         actions={
-          analysis && (
+          hasWithdrawals && (
             <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={() => void exportExcel()} loading={exporting}>
               Exportar Excel
             </Button>
@@ -162,6 +164,12 @@ export default function WalletHistoryPage() {
             </div>
           </Card>
 
+          {!hasWithdrawals && <Alert tone="info">No se encontraron retiros de saldo en cartera en este archivo.</Alert>}
+        </>
+      )}
+
+      {file && analysis && hasWithdrawals && (
+        <>
           <div className="stat-row">
             <Stat label="Retiros encontrados" value={formatInteger(analysis.totals.count)} onClick={() => showOnly("validated")} active={filter === "validated"} title="Ver solo los retiros validados" />
             <Stat label="Valor total retirado" value={formatCop(analysis.totals.amountCents)} />
@@ -173,7 +181,7 @@ export default function WalletHistoryPage() {
               tone={analysis.review.count > 0 ? "negative" : undefined}
               onClick={() => showOnly("review")}
               active={filter === "review"}
-              title="Ver solo los movimientos que requieren revisión"
+              title="Ver solo los retiros que requieren revisión"
             />
           </div>
           <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
@@ -206,7 +214,6 @@ function Alerts({
   filterButton: (f: WithdrawalFilter) => ReactNode;
 }) {
   const c = analysis.incidentCounts;
-  const description = flagged("description");
   const type = flagged("type");
   const duplicate = flagged("duplicate");
   const invalid = flagged("invalid_amount");
@@ -215,17 +222,7 @@ function Alerts({
     <>
       {analysis.review.count === 0 && (
         <Alert tone="success" title="Archivo validado">
-          Todos los movimientos tienen la descripción «{EXPECTED_DESCRIPTION}»{c.type === 0 ? ` y tipo ${EXPECTED_TYPE}` : ""}.
-        </Alert>
-      )}
-      {c.description > 0 && (
-        <Alert
-          tone="warning"
-          title={plural(c.description, "Se encontró 1 movimiento con una descripción diferente.", "Se encontraron # movimientos con una descripción diferente.")}
-          items={firstOf(description.map((m) => describe(m, `«${m.description || "(vacía)"}»`)))}
-        >
-          Se encontraron movimientos con una descripción diferente a la esperada («{EXPECTED_DESCRIPTION}»). Requieren revisión y no se suman a los totales.
-          {filterButton("description")}
+          {plural(analysis.totals.count, "El retiro de saldo en cartera encontrado quedó validado.", "Los # retiros de saldo en cartera encontrados quedaron validados.")}
         </Alert>
       )}
       {c.type > 0 && (

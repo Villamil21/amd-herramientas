@@ -104,22 +104,65 @@ describe("validaciones", () => {
     expect(a.totals.paidCents + a.totals.gmfCents).toBe(a.totals.amountCents);
   });
 
-  it("una descripción diferente marca la fila y no detiene el resto", () => {
+  it("los movimientos con otra descripción se ignoran: no son retiros ni requieren revisión", () => {
     const a = analyze([{ id: 1 }, { id: 2, description: "OTRO MOVIMIENTO" }, { id: 3 }]);
-    expect(a.movements.map((m) => m.incidents)).toEqual([[], ["description"], []]);
-    expect(a.incidentCounts.description).toBe(1);
+    expect(a.movements.map((m) => m.id)).toEqual(["1", "3"]);
+    expect(a.movements.every((m) => m.incidents.length === 0)).toBe(true);
     expect(a.totals.count).toBe(2);
-    expect(a.review).toEqual({ count: 1, amountCents: 116465900 });
+    expect(a.review).toEqual({ count: 0, amountCents: 0 });
   });
 
-  it("los espacios repetidos o sobrantes en la descripción no generan alerta; otros cambios sí", () => {
+  it("de un archivo con conceptos mixtos solo procesa los retiros de saldo", () => {
+    const many = (n: number, from: number, description: string): RowSpec[] => Array.from({ length: n }, (_, i) => ({ id: from + i, description, amount: 1000 + i }));
     const a = analyze([
-      { id: 1, description: "SALIDA POR PETICION   DE RETIRO DE SALDO EN CARTERA" },
-      { id: 2, description: `  ${EXPECTED_DESCRIPTION} ` },
-      { id: 3, description: "SALIDA POR PETICIÓN DE RETIRO DE SALDO EN CARTERA" },
-      { id: 4, description: "salida por peticion de retiro de saldo en cartera" },
+      ...many(50, 1000, "SALIDA DE COBRO DE DEVOLUCIÓN POR ENTREGA NO EFECTIVA: 4567890"),
+      ...many(10, 1, EXPECTED_DESCRIPTION),
+      ...many(25, 2000, "SALIDA POR COBRO DE FLETE INICIAL: 4567890"),
+      ...many(100, 3000, "ENTRADA POR GANANCIA EN LA ORDEN COMO DROPSHIPPER"),
     ]);
-    expect(a.movements.map((m) => m.incidents)).toEqual([[], [], ["description"], ["description"]]);
+    expect(a.movements).toHaveLength(10);
+    expect(a.totals.count).toBe(10);
+    expect(a.totals.amountCents).toBe((10 * 1000 + 45) * 100);
+    expect(a.totals.paidCents + a.totals.gmfCents).toBe(a.totals.amountCents);
+    expect(a.review.count).toBe(0);
+    expect(Object.values(a.incidentCounts)).toEqual([0, 0, 0]);
+  });
+
+  it("la descripción se compara completa, sin distinguir mayúsculas ni espacios de más", () => {
+    const a = analyze([
+      { id: 1, description: "SALIDA  POR  PETICION  DE  RETIRO  DE  SALDO  EN  CARTERA" },
+      { id: 2, description: `  ${EXPECTED_DESCRIPTION} ` },
+      { id: 3, description: "salida por peticion de retiro de saldo en cartera" },
+      { id: 4, description: "Salida por peticion de retiro de saldo en cartera" },
+    ]);
+    expect(a.movements.map((m) => m.id)).toEqual(["1", "2", "3", "4"]);
+    expect(a.review.count).toBe(0);
+  });
+
+  it("un concepto parecido no es un retiro de saldo", () => {
+    const a = analyze([
+      { id: 1, description: "SALIDA POR PETICION DE RETIRO" },
+      { id: 2, description: "SALIDA POR RETIRO DE SALDO" },
+      { id: 3, description: "SALIDA POR PETICION DE RETIRO DE SALDO EN CARTERA MANUAL" },
+      { id: 4, description: "SALIDA" },
+      { id: 5, description: "" },
+    ]);
+    expect(a.movements).toEqual([]);
+    expect(a.totals).toEqual({ count: 0, amountCents: 0, paidCents: 0, gmfCents: 0 });
+    expect(a.review.count).toBe(0);
+  });
+
+  it("los movimientos ignorados no cuentan como duplicados ni como montos inválidos", () => {
+    const a = analyze([{ id: 1 }, { id: 1, description: "SALIDA POR COBRO DE FLETE INICIAL: 1" }, { id: 2, description: "OTRO MOVIMIENTO", amount: "ABC" }, { id: 3, description: "OTRO MOVIMIENTO", type: "ENTRADA" }]);
+    expect(a.movements.map((m) => m.incidents)).toEqual([[]]);
+    expect(a.review.count).toBe(0);
+  });
+
+  it("un retiro de saldo con MONTO no numérico sí requiere revisión", () => {
+    const a = analyze([{ id: 1 }, { id: 2, amount: "ABC" }, { id: 3, description: "OTRO MOVIMIENTO", amount: "ABC" }]);
+    expect(a.movements.map((m) => m.incidents)).toEqual([[], ["invalid_amount"]]);
+    expect(a.review.count).toBe(1);
+    expect(a.totals.count).toBe(1);
   });
 
   it("un TIPO distinto de SALIDA se advierte", () => {
@@ -153,8 +196,8 @@ describe("validaciones", () => {
   });
 
   it("una fila con varias incidencias las conserva todas", () => {
-    const a = analyze([{ id: 7, type: "ENTRADA", description: "OTRO MOVIMIENTO", amount: "x" }, { id: 7 }]);
-    expect(a.movements[0].incidents).toEqual(["description", "type", "duplicate", "invalid_amount"]);
+    const a = analyze([{ id: 7, type: "ENTRADA", amount: "x" }, { id: 7 }]);
+    expect(a.movements[0].incidents).toEqual(["type", "duplicate", "invalid_amount"]);
   });
 
   it("sin columna TIPO no se valida el tipo", () => {
@@ -168,18 +211,20 @@ describe("validaciones", () => {
 
 describe("exportación", () => {
   it("Resumen con totales, Detalle e Incidencias solo si hay filas por revisar", () => {
-    const file = read(book(sheet("X", [{ id: 1 }, { id: 2, description: "OTRO MOVIMIENTO" }])));
+    const file = read(book(sheet("X", [{ id: 1 }, { id: 2, type: "ENTRADA" }, { id: 3, description: "SALIDA POR COBRO DE FLETE INICIAL: 4567890" }])));
     const sheets = buildWalletSheets(analyzeWallet(file.movements, { checkType: true }));
     expect(sheets.map((s) => s.name)).toEqual(["Resumen", "Detalle", "Incidencias"]);
     const [summary] = sheets;
     expect(summary.columns.map((c) => c.header)).toEqual(["Fecha", "Valor pagado", "4x1000", "Concepto retiro", "Estado"]);
     expect(summary.rows[0]).toEqual(["31/08/2026", 1160018.92, 4640.08, "Pago nomina - Diseñador", "Validado"]);
-    expect(summary.rows[1][4]).toBe("Descripción inesperada");
+    expect(summary.rows[1][4]).toBe("Tipo inesperado");
+    // El movimiento con otro concepto no llega a ninguna hoja.
+    expect(sheets[1].rows).toHaveLength(2);
     const labels = summary.rows.map((r) => r[0]);
     expect(labels).toContain("Total valor pagado");
     expect(labels).toContain("Total 4x1000");
     expect(summary.rows.find((r) => r[0] === "Total monto")![1]).toBe(1164659);
-    expect(sheets[2].rows).toEqual([["2", "31/08/2026", 1164659, "OTRO MOVIMIENTO", "Pago nomina - Diseñador", "Descripción inesperada"]]);
+    expect(sheets[2].rows).toEqual([["2", "31/08/2026", 1164659, EXPECTED_DESCRIPTION, "Pago nomina - Diseñador", "Tipo inesperado"]]);
 
     const clean = read(book(sheet("X", [{ id: 1 }])));
     expect(buildWalletSheets(analyzeWallet(clean.movements, { checkType: true })).map((s) => s.name)).toEqual(["Resumen", "Detalle"]);
