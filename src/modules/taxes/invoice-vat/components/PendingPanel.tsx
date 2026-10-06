@@ -88,7 +88,7 @@ export function PendingPanel({ actions, expanded, onExpandedChange, focusId, onR
   function inlineActions(a: PendingAction) {
     switch (a.target.kind) {
       case "supplier":
-        return <SupplierVatControl nit={a.target.supplier.nit} name={a.target.supplier.name} onSaved={onChanged} />;
+        return <SupplierVatControl nit={a.target.supplier.nit} name={a.target.supplier.name} supplier={a.target.supplier.registered} onSaved={onChanged} />;
       case "title":
         return <TitleClassifyButtons title={a.target.title} onSaved={onChanged} />;
       default: {

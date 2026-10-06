@@ -110,6 +110,8 @@ export interface BackupSummary {
   /** null: backup anterior a la clasificación de títulos de IVA de compras; al restaurarlo se conservan los actuales. */
   vatDocumentTitles: number | null;
   pucDocumentTitles: number | null;
+  /** null: backup anterior a los códigos PUC por proveedor; al restaurarlo se conservan los actuales. */
+  supplierPucCodes: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */
@@ -136,7 +138,8 @@ export interface Supplier {
   /** Solo dígitos, sin dígito de verificación. */
   nit: string;
   businessName: string;
-  vatType: VatType;
+  /** null: sin configurar (proveedor creado solo con NIT y razón social). IVA de compras lo pide cuando lo necesita. */
+  vatType: VatType | null;
   createdAt: string;
   updatedAt: string;
   /** Retención en la fuente (opcionales: los proveedores creados desde IVA no los tienen). */

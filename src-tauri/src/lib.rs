@@ -84,6 +84,8 @@ pub fn run() {
             commands::puc::save_puc_document_titles,
             commands::puc::update_puc_document_title,
             commands::puc::delete_puc_document_title,
+            commands::puc::list_supplier_puc_codes,
+            commands::puc::record_supplier_puc_code,
             commands::self_withholding::list_self_withholding_rates,
             commands::self_withholding::create_self_withholding_rate,
             commands::self_withholding::update_self_withholding_rates,

@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.19.1",
+    "date": "2026-10-06",
+    "notes": [
+      "Códigos PUC por factura: los códigos que confirmas quedan guardados con el proveedor de la factura. «Usados en este análisis» pasa a ser «Usados con este proveedor»: accesos rápidos solo con los códigos de ese proveedor, el más reciente primero, que se conservan al cerrar la app, actualizarla o analizar otra carpeta. Nunca se asignan solos: siguen pidiendo confirmación.",
+      "Si el emisor de la factura no está en Datos → Proveedores, la factura muestra «Proveedor no registrado» con su NIT y razón social y el botón «Crear proveedor», sin salir del análisis. Se crea con NIT y razón social; si el NIT ya existe se usa el proveedor existente.",
+      "Un proveedor ya puede existir sin Tipo IVA («Sin configurar»): no se inventa. IVA de compras lo muestra como pendiente y lo completa sobre el mismo proveedor cuando lo necesita.",
+      "Buscador de Código PUC: la cuenta de 4 dígitos y su grupo aparecen como encabezado de sus subcuentas y no se pueden elegir; solo se confirman códigos de 6 dígitos. También encuentra por el nombre del grupo (por ejemplo «disponible»).",
+      "El backup incluye los códigos PUC usados con cada proveedor."
+    ]
+  },
+  {
     "version": "1.19.0",
     "date": "2026-10-05",
     "notes": [

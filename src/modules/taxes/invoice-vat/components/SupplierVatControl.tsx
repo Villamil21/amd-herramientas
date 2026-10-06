@@ -7,7 +7,7 @@ interface Props {
   nit: string;
   /** Razón social de la factura (para un proveedor nuevo). */
   name: string;
-  /** Proveedor ya registrado: se cambia su Tipo IVA. Sin él, se crea. */
+  /** Proveedor ya registrado: se cambia (o se completa) su Tipo IVA. Sin él, se crea. */
   supplier?: Supplier;
   onSaved: () => Promise<void> | void;
 }
@@ -51,7 +51,7 @@ export function SupplierVatControl({ nit, name, supplier, onSaved }: Props) {
         ))}
       </Select>
       <Button size="sm" variant="primary" disabled={!choice || choice === supplier?.vatType} loading={saving} onClick={() => void save()}>
-        {supplier ? "Guardar" : "Configurar"}
+        {supplier?.vatType ? "Guardar" : "Configurar"}
       </Button>
     </span>
   );

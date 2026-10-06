@@ -6,6 +6,12 @@ import { VAT_TYPE_LABEL, type Supplier, type VatType } from "../../types/models"
 interface Props {
   open: boolean;
   supplier: Supplier | null;
+  /**
+   * Proveedor nuevo con los datos leídos de una factura: el NIT queda fijo (es
+   * el que la reconoce) y la razón social se puede corregir. Si el NIT ya está
+   * registrado no se crea otro: se usa el existente.
+   */
+  draft?: { nit: string; businessName: string };
   onClose: () => void;
   onSaved: () => void;
 }
@@ -15,22 +21,24 @@ export function normalizeNit(value: string): string {
   return (value.split("-")[0] ?? "").replace(/\D/g, "");
 }
 
-export function SupplierFormModal({ open, supplier, onClose, onSaved }: Props) {
+export function SupplierFormModal({ open, supplier, draft, onClose, onSaved }: Props) {
   const toast = useToast();
   const [nit, setNit] = useState("");
   const [name, setName] = useState("");
   const [vatType, setVatType] = useState<VatType | "">("");
-  const [errors, setErrors] = useState<{ nit?: string; name?: string; vatType?: string }>({});
+  const [errors, setErrors] = useState<{ nit?: string; name?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setNit(supplier?.nit ?? "");
-    setName(supplier?.businessName ?? "");
+    setNit(supplier?.nit ?? draft?.nit ?? "");
+    setName(supplier?.businessName ?? draft?.businessName ?? "");
     setVatType(supplier?.vatType ?? "");
     setErrors({});
     setError(null);
+    // Solo al abrir: después manda lo que escribe el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, supplier]);
 
   async function save() {
@@ -38,17 +46,18 @@ export function SupplierFormModal({ open, supplier, onClose, onSaved }: Props) {
     const cleanNit = normalizeNit(nit);
     if (!cleanNit) errs.nit = "Escribe el NIT (solo números, sin dígito de verificación).";
     if (!name.trim()) errs.name = "La razón social es obligatoria.";
-    if (!vatType) errs.vatType = "Selecciona Compras o Servicios.";
     setErrors(errs);
-    if (Object.keys(errs).length || !vatType) return;
+    if (Object.keys(errs).length) return;
 
     setSaving(true);
     setError(null);
-    const input = { nit: cleanNit, businessName: name.trim(), vatType };
+    // NIT y razón social bastan: el Tipo IVA puede quedar sin configurar, nunca se inventa.
+    const input = { nit: cleanNit, businessName: name.trim(), vatType: vatType || null };
     try {
+      const existing = draft && !supplier ? (await supplierService.list(cleanNit)).find((s) => s.nit === cleanNit) : undefined;
       if (supplier) await supplierService.update(supplier.id, input);
-      else await supplierService.create(input);
-      toast(supplier ? "Proveedor actualizado." : "Proveedor creado.");
+      else if (!existing) await supplierService.create(input);
+      toast(supplier ? "Proveedor actualizado." : existing ? `El NIT ${cleanNit} ya estaba registrado: se usa el proveedor existente.` : "Proveedor creado.");
       onSaved();
     } catch (e) {
       setError((e as Error).message);
@@ -84,14 +93,12 @@ export function SupplierFormModal({ open, supplier, onClose, onSaved }: Props) {
         {error && <Alert tone="danger">{error}</Alert>}
         <div className="form-grid">
           <Field label="NIT" required hint="Sin dígito de verificación. Es la clave para reconocer las facturas." error={errors.nit}>
-            {(id) => <Input id={id} value={nit} onChange={(e) => setNit(e.target.value)} invalid={!!errors.nit} placeholder="900319753" inputMode="numeric" autoFocus />}
+            {(id) => <Input id={id} value={nit} onChange={(e) => setNit(e.target.value)} invalid={!!errors.nit} placeholder="900319753" inputMode="numeric" autoFocus={!draft} readOnly={!!draft} />}
           </Field>
-          <Field label="Tipo IVA" required error={errors.vatType}>
+          <Field label="Tipo IVA" hint="Opcional. IVA de compras lo pide cuando lo necesita.">
             {(id) => (
-              <Select id={id} value={vatType} onChange={(e) => setVatType(e.target.value as VatType)} invalid={!!errors.vatType}>
-                <option value="" disabled>
-                  Selecciona…
-                </option>
+              <Select id={id} value={vatType} onChange={(e) => setVatType(e.target.value as VatType | "")}>
+                <option value="">Sin configurar</option>
                 {Object.entries(VAT_TYPE_LABEL).map(([k, label]) => (
                   <option key={k} value={k}>
                     {label}
@@ -102,7 +109,7 @@ export function SupplierFormModal({ open, supplier, onClose, onSaved }: Props) {
           </Field>
         </div>
         <Field label="Razón social" required error={errors.name}>
-          {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} invalid={!!errors.name} placeholder="PRICESMART COLOMBIA S.A.S." />}
+          {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} invalid={!!errors.name} placeholder="PRICESMART COLOMBIA S.A.S." autoFocus={!!draft} />}
         </Field>
         <button type="submit" hidden />
       </form>

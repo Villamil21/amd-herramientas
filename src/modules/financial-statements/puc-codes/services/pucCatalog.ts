@@ -24,6 +24,8 @@ interface Leaf extends PucCode {
   key: string;
   /** Denominación normalizada de su cuenta de 4 dígitos (contexto de búsqueda). */
   accountKey: string;
+  /** Denominación normalizada de su grupo de 2 dígitos. */
+  groupKey: string;
 }
 
 export interface PucIndex {
@@ -38,7 +40,7 @@ export function buildPucIndex(codes: PucCode[]): PucIndex {
   // Como texto, el orden es el del catálogo: «1» < «11» < «1105» < «110505» < «1110».
   const all = codes.filter((c) => levelOf(c.code)).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   const concepts = new Map(all.map((c) => [c.code, c.concept]));
-  const leaves = all.filter((c) => isSelectableCode(c.code)).map((c) => ({ ...c, key: normalizeKey(c.concept), accountKey: normalizeKey(concepts.get(c.code.slice(0, 4)) ?? "") }));
+  const leaves = all.filter((c) => isSelectableCode(c.code)).map((c) => ({ ...c, key: normalizeKey(c.concept), accountKey: normalizeKey(concepts.get(c.code.slice(0, 4)) ?? ""), groupKey: normalizeKey(concepts.get(c.code.slice(0, 2)) ?? "") }));
   return { all, concepts, leaves };
 }
 
@@ -72,9 +74,11 @@ export interface LeafSearch {
  *
  * - Solo dígitos: se trata como prefijo («1105» → 110505, 110510…; nunca la
  *   cuenta «1105 — CAJA»). Si ningún código empieza así, los que lo contienen.
- * - Texto: todas las palabras deben estar en el concepto de la subcuenta o en
- *   el de su cuenta («bancos» → las subcuentas de 1110 BANCOS). Primero las
- *   que coinciden por su propio concepto.
+ * - Texto: todas las palabras deben estar en el concepto de la subcuenta, en
+ *   el de su cuenta («bancos» → las subcuentas de 1110 BANCOS) o en el de su
+ *   grupo («disponible» → las del grupo 11). Primero las que coinciden por su
+ *   propio concepto, luego por la cuenta y al final por el grupo. La cuenta y
+ *   el grupo solo ayudan a encontrar: nunca son un resultado.
  */
 export function searchLeaves(index: PucIndex, query: string, limit = 40): LeafSearch {
   const q = normalizeKey(query);
@@ -94,11 +98,13 @@ export function searchLeaves(index: PucIndex, query: string, limit = 40): LeafSe
   const words = q.split(" ");
   const own: Leaf[] = [];
   const byAccount: Leaf[] = [];
+  const byGroup: Leaf[] = [];
   for (const l of index.leaves) {
     if (words.every((w) => l.key.includes(w) || l.code.startsWith(w))) own.push(l);
     else if (words.every((w) => l.key.includes(w) || l.accountKey.includes(w) || l.code.startsWith(w))) byAccount.push(l);
+    else if (words.every((w) => l.key.includes(w) || l.accountKey.includes(w) || l.groupKey.includes(w) || l.code.startsWith(w))) byGroup.push(l);
   }
-  const found = [...own, ...byAccount];
+  const found = [...own, ...byAccount, ...byGroup];
   return { results: found.slice(0, limit).map(plain), total: found.length };
 }
 

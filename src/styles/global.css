@@ -2769,6 +2769,16 @@ button.stat--link {
   background: var(--color-primary-softer);
 }
 
+/* Cuenta de 4 dígitos y grupo de los resultados que siguen: encabezado, no se puede elegir. */
+.puc-results li.puc-results__group {
+  padding: 8px 10px 2px;
+  cursor: default;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-muted);
+}
+
 .puc-results__code {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -2777,13 +2787,6 @@ button.stat--link {
 
 .puc-results__concept {
   font-weight: 600;
-}
-
-.puc-results__context {
-  margin-left: auto;
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-  text-align: right;
 }
 
 .puc-confirm {

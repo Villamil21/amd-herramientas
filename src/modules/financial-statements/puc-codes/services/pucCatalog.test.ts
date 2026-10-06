@@ -47,6 +47,22 @@ describe("searchLeaves: buscador del campo Código PUC", () => {
     expect(codes("5105").every((c) => c.startsWith("5105"))).toBe(true);
   });
 
+  it("clase, grupo y cuenta solo sirven de prefijo o de contexto: todo lo que se ofrece tiene 6 dígitos", () => {
+    for (const q of ["5", "51", "5105", "1", "11", "1105", "caja", "gastos de personal", "disponible", "otros"]) {
+      const found = searchLeaves(index, q, 5000);
+      expect(found.results.length, q).toBeGreaterThan(0);
+      expect(found.results.every((r) => isSelectableCode(r.code) && leafConcept(index, r.code) === r.concept), q).toBe(true);
+      expect(found.exact, q).toBeUndefined();
+    }
+    // «5105 — GASTOS DE PERSONAL» nunca es un resultado: solo sus subcuentas reales, todas las del catálogo.
+    expect(codes("5105")).toEqual(index.all.filter((c) => c.code.length === 6 && c.code.startsWith("5105")).map((c) => c.code));
+    expect(codes("5105")).not.toContain("5105");
+    // La cuenta aparece solo como encabezado de sus subcuentas.
+    expect(leafContext(index, codes("5105")[0])).toBe(`5105 ${index.concepts.get("5105")} · ${index.concepts.get("51")}`);
+    // «caja»: las subcuentas de 1105 CAJA, no la cuenta.
+    expect(codes("caja")).toEqual(expect.arrayContaining(["110505", "110510"]));
+  });
+
   it("un código de 6 dígitos existente se muestra directamente", () => {
     const found = searchLeaves(index, " 110505 ");
     expect(found.results).toEqual([{ code: "110505", concept: "CAJA GENERAL" }]);

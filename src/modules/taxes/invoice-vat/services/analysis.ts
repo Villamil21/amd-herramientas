@@ -195,7 +195,7 @@ function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier 
     problem("vat-mismatch", `IVA según detalle ${formatCop(f.detailVatCents)} · IVA según total factura ${formatCop(invoice.invoiceVatCents)} · Diferencia por validar ${formatCop(diff)}.`);
   }
 
-  const status: InvoiceRow["status"] = decision.excluded ? "excluded" : problems.length ? "review" : !category ? "pending-title" : !supplier ? "pending-supplier" : "processed";
+  const status: InvoiceRow["status"] = decision.excluded ? "excluded" : problems.length ? "review" : !category ? "pending-title" : !supplier?.vatType ? "pending-supplier" : "processed";
   return {
     fileName,
     status,
@@ -205,7 +205,7 @@ function parsedRow(fileName: string, invoice: ParsedInvoice, supplier: Supplier 
     invoiceNumber: invoice.invoiceNumber,
     supplierNit: invoice.supplierNit,
     supplierName: invoice.supplierName,
-    vatType: supplier?.vatType,
+    vatType: supplier?.vatType ?? undefined,
     pageCount: invoice.pageCount,
     lineCount: lines.length,
     ...f,
@@ -299,7 +299,7 @@ export function buildReport(results: FileResult[], suppliers: Supplier[], titles
   const parsed = reportRows.filter((r) => r.supplierNit);
   const active = parsed.filter((r) => r.status !== "excluded");
 
-  // Proveedores sin registrar: uno por NIT, sin importar cuántas facturas tenga.
+  // Proveedores sin registrar o registrados sin Tipo IVA: uno por NIT, sin importar cuántas facturas tenga.
   const pendingNames = new Map<string, string[]>();
   for (const r of active) {
     if (r.vatType) continue;
@@ -307,7 +307,7 @@ export function buildReport(results: FileResult[], suppliers: Supplier[], titles
     list.push(r.supplierName ?? "");
     pendingNames.set(r.supplierNit!, list);
   }
-  const pendingSuppliers: PendingSupplier[] = [...pendingNames.entries()].map(([nit, names]) => ({ nit, name: mostFrequent(names.filter(Boolean)), invoiceCount: names.length }));
+  const pendingSuppliers: PendingSupplier[] = [...pendingNames.entries()].map(([nit, names]) => ({ nit, name: mostFrequent(names.filter(Boolean)), invoiceCount: names.length, registered: byNit.get(nit) }));
 
   // Títulos sin clasificar: uno por título normalizado.
   const unknown = new Map<string, UnknownTitle>();

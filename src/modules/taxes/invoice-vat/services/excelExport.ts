@@ -64,7 +64,7 @@ export function buildInvoiceVatSheets(report: InvoiceReport, suppliers: Supplier
       { header: "Razón social", kind: "text" },
       { header: "Tipo IVA", kind: "text" },
     ],
-    rows: suppliers.filter((s) => nits.has(s.nit)).map((s) => [s.nit, s.businessName, VAT_TYPE_LABEL[s.vatType]]),
+    rows: suppliers.filter((s) => nits.has(s.nit)).map((s) => [s.nit, s.businessName, s.vatType ? VAT_TYPE_LABEL[s.vatType] : null]),
   };
 
   const incidents: ExportSheet = {

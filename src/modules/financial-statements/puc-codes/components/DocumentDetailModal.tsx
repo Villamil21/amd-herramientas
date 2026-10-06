@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, Eye, EyeOff, X, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Eye, EyeOff, UserPlus, X, XCircle } from "lucide-react";
 import { Alert, Badge, Button, ConfirmDialog, Modal } from "../../../../components/ui";
-import type { PucCode } from "../../../../types/models";
+import { SupplierFormModal } from "../../../../pages/suppliers/SupplierFormModal";
+import type { PucCode, Supplier } from "../../../../types/models";
 import { assignedLineCount, withDocumentCode, withLineCodes, withMode } from "../services/analysis";
 import { formatCop, formatIssueDate } from "../services/labels";
 import { PROBLEM_TITLE } from "../services/pending";
@@ -19,9 +20,18 @@ interface Props {
   openProducts: boolean;
   /** Título del documento que aún no está clasificado. */
   unknownTitle?: UnknownTitle;
-  /** Códigos ya usados en este análisis (accesos rápidos del buscador). */
-  suggestions: PucCode[];
-  onAssign: (fileName: string, assignment: DocAssignment) => void;
+  /**
+   * Proveedor de la factura en Datos → Proveedores (por NIT del emisor). null:
+   * no está registrado y hay que crearlo antes de asignar códigos. Sin definir:
+   * aún no se sabe (la lista de proveedores no ha cargado o la factura no trae NIT).
+   */
+  supplier?: Supplier | null;
+  /** Se creó el proveedor de esta factura: hay que volver a leer Proveedores. */
+  onSupplierCreated: () => Promise<void> | void;
+  /** Códigos ya usados con el proveedor de esta factura (accesos rápidos del buscador). Sin definir mientras no se conozcan. */
+  suggestions?: PucCode[];
+  /** `confirmedCode`: el código que el usuario acaba de confirmar en el buscador (queda asociado al proveedor). */
+  onAssign: (fileName: string, assignment: DocAssignment, confirmedCode?: string) => void;
   /** Se guardó la clasificación de un título. */
   onChanged: () => Promise<void> | void;
   onClose: () => void;
@@ -37,12 +47,13 @@ const assignable = (l: DocLine) => !l.issue;
  * («un solo código» o «por producto») y sus productos con Código y Concepto
  * PUC. Las asignaciones son del análisis: el PDF no se modifica.
  */
-export function DocumentDetailModal({ row, index, assignment = {}, openProducts, unknownTitle, suggestions, onAssign, onChanged, onClose, remainingPending, onNextPending }: Props) {
+export function DocumentDetailModal({ row, index, assignment = {}, openProducts, unknownTitle, supplier, onSupplierCreated, suggestions, onAssign, onChanged, onClose, remainingPending, onNextPending }: Props) {
   const [showProducts, setShowProducts] = useState(false);
   const [editingCode, setEditingCode] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
   const [pickerKey, setPickerKey] = useState(0);
   const [confirmSingle, setConfirmSingle] = useState(false);
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
   const assignRef = useRef<HTMLDivElement>(null);
   const productsRef = useRef<HTMLDivElement>(null);
   const fileName = row?.fileName;
@@ -52,6 +63,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
     setShowProducts(openProducts);
     setEditingCode(false);
     setConfirmSingle(false);
+    setCreatingSupplier(false);
   }, [fileName, openProducts]);
 
   // Al entrar a «por producto» queda apuntado el primer producto sin código.
@@ -68,7 +80,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
   }, [fileName, openProducts, showProducts]);
 
   if (!row) return null;
-  const assign = (next: DocAssignment) => onAssign(row.fileName, next);
+  const assign = (next: DocAssignment, confirmedCode?: string) => onAssign(row.fileName, next, confirmedCode);
   const failed = Boolean(row.failure);
   const excluded = row.excluded;
   const gross = row.grossTotalCents;
@@ -85,7 +97,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
   }
 
   function applyToSelected(code: string) {
-    assign(withLineCodes(assignment, selected, code));
+    assign(withLineCodes(assignment, selected, code), code);
     // Siguiente producto sin código: primero hacia abajo, luego desde el principio.
     const rest = missing.filter((l) => !selected.includes(l.index));
     const next = rest.find((l) => l.index > Math.max(...selected)) ?? rest[0];
@@ -189,7 +201,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
   const allSelected = lines.some(assignable) && lines.filter(assignable).every((l) => selected.includes(l.index));
 
   return (
-    <Modal open size="xl" title={row.fileName} onClose={onClose} footer={footer} locked={confirmSingle}>
+    <Modal open size="xl" title={row.fileName} onClose={onClose} footer={footer} locked={confirmSingle || creatingSupplier}>
       <div className="stack">
         <div className="row">
           <ClassificationBadge row={row} />
@@ -227,7 +239,29 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
               <Item label="Valor asignado" value={row.allocations.length ? formatCop(row.assignedCents) : "—"} wide />
             </div>
 
-            {!excluded && (
+            {!excluded && supplier === null && (
+              <div className="puc-assign puc-supplier-missing" ref={assignRef}>
+                <strong>Proveedor no registrado</strong>
+                <dl className="puc-confirm__data">
+                  <div>
+                    <dt>NIT</dt>
+                    <dd className="selectable">{row.issuerNit}</dd>
+                  </div>
+                  <div>
+                    <dt>Razón social</dt>
+                    <dd className="selectable">{row.issuerName || "No identificada en la factura"}</dd>
+                  </div>
+                </dl>
+                <span className="field__hint">Créalo para asignar el código PUC: los códigos que confirmes quedan guardados con este proveedor para sus próximas facturas.</span>
+                <div className="row">
+                  <Button variant="primary" size="sm" icon={<UserPlus size={14} />} onClick={() => setCreatingSupplier(true)}>
+                    Crear proveedor
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!excluded && supplier !== null && (
               <div className="stack stack--sm" ref={assignRef}>
                 <strong>¿Cómo deseas asignar el código PUC?</strong>
                 <div className="mode-choice" role="radiogroup" aria-label="¿Cómo deseas asignar el código PUC?">
@@ -270,7 +304,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
                         autoFocus
                         onCancel={editingCode ? () => setEditingCode(false) : undefined}
                         onConfirm={(code) => {
-                          assign(withDocumentCode(assignment, code));
+                          assign(withDocumentCode(assignment, code), code);
                           setEditingCode(false);
                         }}
                       />
@@ -411,6 +445,16 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
         )}
       </div>
 
+      <SupplierFormModal
+        open={creatingSupplier}
+        supplier={null}
+        draft={{ nit: row.issuerNit ?? "", businessName: row.issuerName ?? "" }}
+        onClose={() => setCreatingSupplier(false)}
+        onSaved={() => {
+          setCreatingSupplier(false);
+          void onSupplierCreated();
+        }}
+      />
       <ConfirmDialog
         open={confirmSingle}
         title="Aplicar un solo código a toda la factura"

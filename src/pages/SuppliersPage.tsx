@@ -92,7 +92,7 @@ export function SuppliersPage() {
                     <td className="selectable">{s.nit}</td>
                     <td className="table__primary">{s.businessName}</td>
                     <td>
-                      <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge>
+                      {s.vatType ? <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge> : <span className="muted">Sin configurar</span>}
                     </td>
                     <td>{s.personType ?? <span className="muted">—</span>}</td>
                     <td className="selectable">{s.fiscalRegime ?? <span className="muted">—</span>}</td>

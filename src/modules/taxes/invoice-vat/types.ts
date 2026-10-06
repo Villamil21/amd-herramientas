@@ -1,4 +1,4 @@
-import type { TitleCategory, VatType } from "../../../types/models";
+import type { Supplier, TitleCategory, VatType } from "../../../types/models";
 
 /** Tarifa en centésimas de punto: 19 % → 1900, 5 % → 500 (sin decimales binarios). */
 export type RateBp = number;
@@ -160,6 +160,8 @@ export interface PendingSupplier {
   nit: string;
   name: string;
   invoiceCount: number;
+  /** Ya está en Proveedores (por ejemplo, creado desde Códigos PUC) pero sin Tipo IVA: se completa, no se crea otro. */
+  registered?: Supplier;
 }
 
 /** Título de documento que aún no está clasificado como Factura electrónica o Nota crédito. */
@@ -172,7 +174,7 @@ export interface UnknownTitle {
 export interface NameMismatch {
   supplierId: number;
   nit: string;
-  vatType: VatType;
+  vatType: VatType | null;
   storedName: string;
   invoiceName: string;
   invoiceCount: number;

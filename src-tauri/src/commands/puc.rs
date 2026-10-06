@@ -1,6 +1,7 @@
 //! Estados Financieros → Códigos PUC por factura. El catálogo solo se lista
 //! (no hay comandos para modificarlo); la clasificación de títulos sí se
-//! guarda. Los PDF se leen con los comandos de `invoices`.
+//! guarda, igual que los códigos usados con cada proveedor. Los PDF se leen
+//! con los comandos de `invoices`.
 
 use tauri::State;
 
@@ -34,4 +35,19 @@ pub fn update_puc_document_title(db: State<'_, Db>, id: i64, category: String) -
 #[tauri::command]
 pub fn delete_puc_document_title(db: State<'_, Db>, id: i64) -> AppResult<()> {
     db.with(|c| puc::delete_title(c, id))
+}
+
+/// Códigos PUC confirmados antes para el proveedor, del más reciente al más antiguo.
+#[tauri::command]
+pub fn list_supplier_puc_codes(db: State<'_, Db>, supplier_id: i64) -> AppResult<Vec<String>> {
+    db.with(|c| puc::list_supplier_codes(c, supplier_id))
+}
+
+/// Guarda proveedor ↔ código al confirmar una asignación y devuelve la lista actualizada.
+#[tauri::command]
+pub fn record_supplier_puc_code(db: State<'_, Db>, supplier_id: i64, code: String) -> AppResult<Vec<String>> {
+    db.with(|c| {
+        puc::record_supplier_code(c, supplier_id, code.trim())?;
+        puc::list_supplier_codes(c, supplier_id)
+    })
 }

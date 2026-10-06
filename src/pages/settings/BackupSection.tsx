@@ -124,6 +124,7 @@ export function BackupSection() {
                 )}
                 {pending.vatDocumentTitles !== null && <li>{pending.vatDocumentTitles} títulos de IVA de compras (Factura electrónica / Nota crédito)</li>}
                 {pending.pucDocumentTitles !== null && <li>{pending.pucDocumentTitles} títulos de Códigos PUC por factura (Factura electrónica / Nota crédito)</li>}
+                {pending.supplierPucCodes !== null && <li>{pending.supplierPucCodes} códigos PUC usados con proveedores</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>

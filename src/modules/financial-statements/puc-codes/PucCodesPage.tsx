@@ -3,8 +3,9 @@ import { BookOpenText, FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } f
 import { Alert, Button, Card, ConfirmDialog, PageHeader, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
 import { pucService } from "../../../services/pucService";
+import { supplierService } from "../../../services/supplierService";
 import { errorMessage } from "../../../services/tauri";
-import type { DocumentTitleMapping, PucCode } from "../../../types/models";
+import type { DocumentTitleMapping, PucCode, Supplier } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
 import { Stat } from "../../bank-analysis/shared/components/Stat";
 import { DocumentDetailModal } from "./components/DocumentDetailModal";
@@ -27,11 +28,6 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.r
 
 const scrollToId = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
 
-const codesOf = (a: DocAssignment | undefined) => [a?.documentCode, ...Object.values(a?.lineCodes ?? {})].filter((c): c is string => Boolean(c));
-
-/** Accesos rápidos del buscador: los últimos códigos confirmados en este análisis. */
-const MAX_RECENT = 6;
-
 export default function PucCodesPage() {
   const toast = useToast();
   // Un análisis ya hecho en esta sesión se retoma al volver a la pantalla.
@@ -49,7 +45,10 @@ export default function PucCodesPage() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   /** Asignaciones del usuario por archivo. Se conservan mientras dure el análisis en pantalla. */
   const [assignments, setAssignments] = useState<Assignments>(restored?.assignments ?? {});
-  const [recent, setRecent] = useState<string[]>(restored?.recent ?? []);
+  /** Datos → Proveedores. null mientras carga. El emisor de cada factura se busca aquí por NIT. */
+  const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
+  /** Códigos confirmados con cada proveedor (id → códigos, el más reciente primero). Se guardan en SQLite. */
+  const [supplierCodes, setSupplierCodes] = useState<Record<number, string[]>>({});
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ fileName: string; products: boolean } | null>(null);
@@ -70,20 +69,29 @@ export default function PucCodesPage() {
     }
   }, [toast]);
 
+  const loadSuppliers = useCallback(async () => {
+    try {
+      setSuppliers(await supplierService.list());
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  }, [toast]);
+
   useEffect(() => {
     void loadTitles();
+    void loadSuppliers();
     pucService.listCodes().then(setCodes, (e) => toast(errorMessage(e), "error"));
     // Al salir de la pantalla se detiene un análisis en curso.
     return () => {
       cancelled.current = true;
     };
-  }, [loadTitles, toast]);
+  }, [loadTitles, loadSuppliers, toast]);
 
   const index = useMemo(() => buildPucIndex(codes), [codes]);
 
   useEffect(() => {
-    saveSession(folder && phase.status === "done" ? { folder, results: phase.results, assignments, recent } : null);
-  }, [folder, phase, assignments, recent]);
+    saveSession(folder && phase.status === "done" ? { folder, results: phase.results, assignments } : null);
+  }, [folder, phase, assignments]);
 
   const assignedDocs = Object.values(assignments).filter((a) => a.mode || a.excluded).length;
 
@@ -137,7 +145,22 @@ export default function PucCodesPage() {
   const selectedActionId = selected ? `doc:${selected.fileName}` : undefined;
   /** Con pendientes no se exporta: no hay forma de omitir esta validación. */
   const blocked = report ? exportBlock(report, actions) : null;
-  const suggestions = useMemo(() => recent.map((code) => ({ code, concept: leafConcept(index, code) ?? "" })).filter((s) => s.concept), [recent, index]);
+  const supplierByNit = useMemo(() => new Map((suppliers ?? []).map((s) => [s.nit, s])), [suppliers]);
+  /** Proveedor de la factura abierta. null: su NIT no está en Proveedores. undefined: aún no se sabe. */
+  const selectedSupplier = suppliers && selectedRow?.issuerNit ? (supplierByNit.get(selectedRow.issuerNit) ?? null) : undefined;
+  const selectedSupplierId = selectedSupplier?.id;
+  // Accesos rápidos del buscador: solo los códigos de 6 dígitos del proveedor de la factura abierta, con el concepto de la tabla PUC.
+  const suggestions = useMemo(
+    () => (selectedSupplierId !== undefined ? supplierCodes[selectedSupplierId] : undefined)?.map((code) => ({ code, concept: leafConcept(index, code) ?? "" })).filter((s) => s.concept),
+    [supplierCodes, selectedSupplierId, index],
+  );
+
+  const storeSupplierCodes = useCallback((supplierId: number, list: string[]) => setSupplierCodes((prev) => ({ ...prev, [supplierId]: list })), []);
+
+  useEffect(() => {
+    if (selectedSupplierId === undefined) return;
+    pucService.listSupplierCodes(selectedSupplierId).then((list) => storeSupplierCodes(selectedSupplierId, list), (e) => toast(errorMessage(e), "error"));
+  }, [selectedSupplierId, storeSupplierCodes, toast]);
 
   function runAction(a: PendingAction) {
     setFocusId(a.id);
@@ -176,10 +199,16 @@ export default function PucCodesPage() {
     if (resolving) setAdvance(true);
   }
 
-  function assign(fileName: string, next: DocAssignment) {
-    const before = new Set(codesOf(assignments[fileName]));
-    const added = [...new Set(codesOf(next))].filter((c) => !before.has(c));
-    if (added.length) setRecent((prev) => [...added, ...prev.filter((c) => !added.includes(c))].slice(0, MAX_RECENT));
+  function assign(fileName: string, next: DocAssignment, confirmedCode?: string) {
+    // Un código confirmado queda asociado al proveedor registrado de la factura (se localiza por NIT), sin botón aparte.
+    const nit = confirmedCode ? report?.rows.find((r) => r.fileName === fileName)?.issuerNit : undefined;
+    const supplier = nit ? supplierByNit.get(nit) : undefined;
+    if (supplier && confirmedCode) {
+      pucService.recordSupplierCode(supplier.id, confirmedCode).then(
+        (list) => storeSupplierCodes(supplier.id, list),
+        (e) => toast(`La asignación se aplicó, pero no fue posible guardar el código para este proveedor. ${errorMessage(e)}`, "error"),
+      );
+    }
     setAssignments((prev) => ({ ...prev, [fileName]: next }));
     setExportedPath(null);
     if (resolving) setAdvance(true);
@@ -332,6 +361,8 @@ export default function PucCodesPage() {
         openProducts={selected?.products ?? false}
         assignment={selected ? assignments[selected.fileName] : undefined}
         unknownTitle={selectedRow && !selectedRow.category ? report?.unknownTitles.find((t) => t.normalizedTitle === selectedRow.titleKey) : undefined}
+        supplier={selectedSupplier}
+        onSupplierCreated={loadSuppliers}
         suggestions={suggestions}
         onAssign={assign}
         onChanged={reloadAndAdvance}

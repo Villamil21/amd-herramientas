@@ -5,11 +5,13 @@
 //! - `puc_document_title_mappings`: título de documento → Factura electrónica
 //!   / Nota crédito. Misma forma que los títulos de IVA de compras, pero en su
 //!   propia tabla: una decisión en un módulo no cambia el otro.
+//! - `supplier_puc_codes`: códigos que el usuario ha confirmado para cada
+//!   proveedor registrado (por su id). Son accesos rápidos: nunca se asignan solos.
 
 use rusqlite::{params, Connection, Row};
 
 use crate::error::{AppError, AppResult};
-use crate::models::puc::PucCode;
+use crate::models::puc::{PucCode, SupplierPucCode};
 use crate::models::withholding::{DocumentTitleMapping, DocumentTitleMappingInput};
 use crate::services::time::now_iso;
 
@@ -80,6 +82,78 @@ pub fn insert_title_full(conn: &Connection, m: &DocumentTitleMapping) -> AppResu
         params![m.id, m.normalized_title, m.display_title, m.category, m.created_at, m.updated_at],
     )?;
     Ok(())
+}
+
+/// Códigos confirmados para un proveedor, del usado más recientemente al más antiguo.
+pub fn list_supplier_codes(conn: &Connection, supplier_id: i64) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT puc_code FROM supplier_puc_codes WHERE supplier_id = ?1 ORDER BY last_used_at DESC, id DESC")?;
+    let rows = stmt.query_map([supplier_id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// Asocia un código al proveedor. Si ya lo tenía no se duplica: se actualizan
+/// la fecha de último uso y el contador. Solo admite subcuentas de 6 dígitos del
+/// catálogo y proveedores registrados.
+pub fn record_supplier_code(conn: &Connection, supplier_id: i64, code: &str) -> AppResult<()> {
+    record_supplier_code_at(conn, supplier_id, code, &now_iso())
+}
+
+fn record_supplier_code_at(conn: &Connection, supplier_id: i64, code: &str, now: &str) -> AppResult<()> {
+    let known: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM puc_codes WHERE code = ?1 AND length(code) = 6)", [code], |r| r.get(0))?;
+    if !known {
+        return Err(AppError::user("No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos."));
+    }
+    let registered: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM suppliers WHERE id = ?1)", [supplier_id], |r| r.get(0))?;
+    if !registered {
+        return Err(AppError::user("El proveedor no existe o fue eliminado."));
+    }
+    conn.execute(
+        "INSERT INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at)
+         VALUES (?1, ?2, 1, ?3, ?3)
+         ON CONFLICT(supplier_id, puc_code) DO UPDATE SET
+            usage_count = usage_count + 1,
+            last_used_at = excluded.last_used_at",
+        params![supplier_id, code, now],
+    )?;
+    Ok(())
+}
+
+/// Un proveedor recién creado recibe los códigos que la versión anterior guardó
+/// solo por NIT (tabla de archivo de la migración 011): pasan a su registro y
+/// salen del archivo.
+pub fn adopt_codes_saved_by_nit(conn: &Connection, supplier_id: i64, nit: &str) -> AppResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at)
+         SELECT ?1, puc_code, usage_count, created_at, last_used_at FROM supplier_puc_codes_by_nit WHERE supplier_nit = ?2 ORDER BY id",
+        params![supplier_id, nit],
+    )?;
+    conn.execute("DELETE FROM supplier_puc_codes_by_nit WHERE supplier_nit = ?1", [nit])?;
+    Ok(())
+}
+
+/// Todas las asociaciones proveedor ↔ código, con el NIT del proveedor (backup).
+pub fn list_all_supplier_codes(conn: &Connection) -> AppResult<Vec<SupplierPucCode>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.nit, c.puc_code, c.usage_count, c.created_at, c.last_used_at
+         FROM supplier_puc_codes c JOIN suppliers s ON s.id = c.supplier_id ORDER BY c.id",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok(SupplierPucCode { supplier_nit: r.get(0)?, puc_code: r.get(1)?, usage_count: r.get(2)?, created_at: r.get(3)?, last_used_at: r.get(4)? }))?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// Restauración de backup: el proveedor se localiza por NIT. Se omite, sin
+/// fallar, una asociación repetida, de un proveedor que no está o cuyo código
+/// no sea una subcuenta del catálogo de esta versión. Devuelve si se insertó.
+pub fn insert_supplier_code_full(conn: &Connection, c: &SupplierPucCode) -> AppResult<bool> {
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at)
+         SELECT s.id, ?2, ?3, ?4, ?5 FROM suppliers s
+         WHERE s.nit = ?1 AND EXISTS (SELECT 1 FROM puc_codes WHERE code = ?2 AND length(code) = 6)",
+        params![c.supplier_nit, c.puc_code, c.usage_count.max(1), c.created_at, c.last_used_at],
+    )?;
+    Ok(n > 0)
 }
 
 #[cfg(test)]
@@ -171,5 +245,68 @@ mod tests {
         delete_title(&conn, saved.id).unwrap();
         assert_eq!(category(&conn, "documento xyz"), None);
         assert_eq!(vat_titles::list(&conn).unwrap().len(), vat_before);
+    }
+
+    fn supplier(conn: &Connection, nit: &str) -> i64 {
+        use crate::models::supplier::SupplierInput;
+        crate::database::suppliers::insert(conn, &SupplierInput { nit: nit.into(), business_name: format!("PROVEEDOR {nit}"), vat_type: None }).unwrap()
+    }
+
+    #[test]
+    fn supplier_codes_are_remembered_per_supplier_without_duplicates() {
+        let mut conn = db();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        let (a, b) = (supplier(&conn, "900319753"), supplier(&conn, "800123456"));
+        assert!(list_supplier_codes(&conn, a).unwrap().is_empty(), "un proveedor nuevo no trae códigos de otros");
+
+        record_supplier_code_at(&conn, a, "513595", "2026-10-01T10:00:00Z").unwrap();
+        record_supplier_code_at(&conn, a, "514010", "2026-10-01T10:05:00Z").unwrap();
+        record_supplier_code_at(&conn, b, "110505", "2026-10-01T10:06:00Z").unwrap();
+        assert_eq!(list_supplier_codes(&conn, a).unwrap(), ["514010", "513595"], "el más reciente primero");
+        assert_eq!(list_supplier_codes(&conn, b).unwrap(), ["110505"], "solo los del proveedor");
+
+        // Reutilizar un código no lo duplica: sube al principio y cuenta el uso.
+        record_supplier_code_at(&conn, a, "513595", "2026-10-02T09:00:00Z").unwrap();
+        assert_eq!(list_supplier_codes(&conn, a).unwrap(), ["513595", "514010"]);
+        let saved = list_all_supplier_codes(&conn).unwrap();
+        assert_eq!(saved.len(), 3);
+        let reused = saved.iter().find(|c| c.supplier_nit == "900319753" && c.puc_code == "513595").unwrap();
+        assert_eq!((reused.usage_count, reused.created_at.as_str(), reused.last_used_at.as_str()), (2, "2026-10-01T10:00:00Z", "2026-10-02T09:00:00Z"));
+
+        // Solo subcuentas de 6 dígitos que existan en la tabla: nunca una cuenta de 4 (5135, 1105) ni un grupo.
+        for bad in ["5135", "1105", "11", "999999", "", "51359A"] {
+            assert!(record_supplier_code(&conn, a, bad).unwrap_err().0.contains("código de 6 dígitos"), "{bad}");
+        }
+        assert!(conn.execute("INSERT INTO supplier_puc_codes (supplier_id, puc_code, created_at, last_used_at) VALUES (?1, '5135', 'x', 'x')", [a]).is_err());
+        // Solo contra un proveedor registrado: sin él no se guarda nada.
+        assert!(record_supplier_code(&conn, 99_999, "513595").is_err());
+        assert_eq!(list_all_supplier_codes(&conn).unwrap().len(), 3);
+
+        // Segundo arranque o actualización: se conservan.
+        assert!(run_pending(&mut conn).unwrap().is_empty());
+        assert_eq!(list_supplier_codes(&conn, a).unwrap(), ["513595", "514010"]);
+
+        // Cambiar el NIT o la razón social no pierde el historial; eliminar el proveedor sí lo quita.
+        conn.execute("UPDATE suppliers SET nit = '900319754', business_name = 'Otro Nombre' WHERE id = ?1", [a]).unwrap();
+        assert_eq!(list_supplier_codes(&conn, a).unwrap().len(), 2);
+        crate::database::suppliers::delete(&conn, a).unwrap();
+        assert_eq!(list_all_supplier_codes(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migration_011_keeps_existing_data() {
+        use crate::database::migrations::{ensure_migrations_table, MIGRATIONS};
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_migrations_table(&conn).unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 10) {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute("INSERT INTO schema_migrations VALUES (?1, ?2, 'x')", params![m.version, m.name]).unwrap();
+        }
+        conn.execute("INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at) VALUES ('900319753', 'PRICESMART', 'purchase', 'c', 'u')", []).unwrap();
+        let titles = list_titles(&conn).unwrap().len();
+        assert_eq!(run_pending(&mut conn).unwrap()[0], "011_supplier_puc_codes");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM suppliers", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!((list_codes(&conn).unwrap().len(), list_titles(&conn).unwrap().len()), (2517, titles));
+        assert!(list_all_supplier_codes(&conn).unwrap().is_empty());
     }
 }

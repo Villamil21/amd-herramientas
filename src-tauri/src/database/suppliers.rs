@@ -4,6 +4,7 @@ use rusqlite::{params, Connection, ErrorCode, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::models::supplier::{Supplier, SupplierInput};
+use crate::database::puc;
 use crate::models::withholding::{SupplierWithholdingRule, WithholdingProfileInput};
 use crate::services::time::now_iso;
 
@@ -67,7 +68,9 @@ pub fn insert(conn: &Connection, s: &SupplierInput) -> AppResult<i64> {
         params![s.nit, s.business_name, s.vat_type, now],
     )
     .map_err(|e| duplicate_nit(e, &s.nit))?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    puc::adopt_codes_saved_by_nit(conn, id, &s.nit)?;
+    Ok(id)
 }
 
 /// Inserta un proveedor completo (restauración de backup), con sus reglas de retención.
@@ -170,13 +173,13 @@ mod tests {
     fn crud_and_unique_nit() {
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
-        let input = SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: "purchase".into() };
+        let input = SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: Some("purchase".into()) };
         let id = insert(&conn, &input).unwrap();
         assert!(insert(&conn, &input).unwrap_err().0.contains("900319753"));
-        update(&conn, id, &SupplierInput { vat_type: "service".into(), ..input.clone() }).unwrap();
+        update(&conn, id, &SupplierInput { vat_type: Some("service".into()), ..input.clone() }).unwrap();
         let all = list(&conn, Some("9003")).unwrap();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].vat_type, "service");
+        assert_eq!(all[0].vat_type.as_deref(), Some("service"));
         delete(&conn, id).unwrap();
         assert!(list(&conn, None).unwrap().is_empty());
     }
@@ -187,7 +190,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         run_pending(&mut conn).unwrap();
-        let input = SupplierInput { nit: "901398069".into(), business_name: "MONO COLOMBIA S.A.S.".into(), vat_type: "service".into() };
+        let input = SupplierInput { nit: "901398069".into(), business_name: "MONO COLOMBIA S.A.S.".into(), vat_type: Some("service".into()) };
         let rule = |rate_id, is_default| SupplierWithholdingRuleInput { rate_id, base_mode: "invoice_subtotal".into(), is_default };
         let profile = WithholdingProfileInput { person_type: Some("PJ".into()), rules: vec![rule(6, true), rule(13, false)] };
         let id = insert_with_profile(&mut conn, &input, &profile, Some("R-99-PN")).unwrap();
@@ -226,15 +229,78 @@ mod tests {
         .unwrap();
         run_pending(&mut conn).unwrap();
         let s = &list(&conn, None).unwrap()[0];
-        assert_eq!((s.nit.as_str(), s.vat_type.as_str(), s.created_at.as_str(), s.updated_at.as_str()), ("900319753", "purchase", "c", "u"));
+        assert_eq!((s.nit.as_str(), s.vat_type.as_deref(), s.created_at.as_str(), s.updated_at.as_str()), ("900319753", Some("purchase"), "c", "u"));
         assert!(s.person_type.is_none() && s.fiscal_regime.is_none() && s.withholding_rules.is_empty());
+    }
+
+    #[test]
+    fn minimal_supplier_has_no_vat_type_until_configured() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        // Creado desde Códigos PUC por factura: solo NIT y razón social.
+        let minimal = SupplierInput { nit: "900999999".into(), business_name: "PROVEEDOR NUEVO SAS".into(), vat_type: None };
+        let id = insert(&conn, &minimal).unwrap();
+        let s = &list(&conn, None).unwrap()[0];
+        assert_eq!((s.nit.as_str(), s.business_name.as_str(), s.vat_type.as_deref(), s.person_type.as_deref()), ("900999999", "PROVEEDOR NUEVO SAS", None, None));
+        assert!(insert(&conn, &minimal).unwrap_err().0.contains("900999999"), "no se duplica por NIT");
+        // IVA de compras lo completa después sobre el mismo registro.
+        update(&conn, id, &SupplierInput { vat_type: Some("service".into()), ..minimal }).unwrap();
+        let all = list(&conn, None).unwrap();
+        assert_eq!((all.len(), all[0].id, all[0].vat_type.as_deref()), (1, id, Some("service")));
+    }
+
+    /// La 012 reconstruye `suppliers`: con las llaves foráneas activas (como en la app) no se pierde nada.
+    #[test]
+    fn migration_012_rebuild_keeps_suppliers_rules_and_codes() {
+        use crate::database::migrations::{ensure_migrations_table, MIGRATIONS};
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        ensure_migrations_table(&conn).unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 11) {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute("INSERT INTO schema_migrations VALUES (?1, ?2, 'x')", params![m.version, m.name]).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO suppliers (id, nit, business_name, vat_type, created_at, updated_at, person_type, fiscal_regime, fiscal_checked_at)
+                VALUES (7, '900319753', 'PRICESMART', 'purchase', 'c', 'u', 'PJ', 'O-15', 'f'), (9, '901398069', 'MONO', 'service', 'c2', 'u2', NULL, NULL, NULL);
+             INSERT INTO supplier_withholding_rules (id, supplier_id, rate_id, base_mode, is_default, created_at, updated_at)
+                VALUES (3, 7, 6, 'invoice_subtotal', 1, 'x', 'x'), (4, 7, 13, 'manual', 0, 'x', 'x');
+             INSERT INTO supplier_puc_codes (supplier_nit, puc_code, usage_count, created_at, last_used_at)
+                VALUES ('900319753', '513595', 4, 'a', 'b'), ('800123456', '110505', 1, 'a', 'b');",
+        )
+        .unwrap();
+
+        assert_eq!(run_pending(&mut conn).unwrap(), ["012_suppliers_minimal_and_puc_by_supplier"]);
+        assert_eq!(conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0)).unwrap(), 1, "las llaves foráneas vuelven a quedar activas");
+
+        let all = list(&conn, None).unwrap();
+        assert_eq!(all.len(), 2);
+        let mono = &all[0];
+        assert_eq!((mono.id, mono.nit.as_str(), mono.vat_type.as_deref(), mono.created_at.as_str(), mono.updated_at.as_str()), (9, "901398069", Some("service"), "c2", "u2"));
+        let price = &all[1];
+        assert_eq!((price.id, price.vat_type.as_deref(), price.person_type.as_deref(), price.fiscal_regime.as_deref(), price.fiscal_checked_at.as_deref()), (7, Some("purchase"), Some("PJ"), Some("O-15"), Some("f")));
+        assert_eq!(price.withholding_rules.iter().map(|r| (r.id, r.rate_id, r.is_default)).collect::<Vec<_>>(), vec![(3, 6, true), (4, 13, false)], "las reglas de retención siguen en su proveedor");
+
+        // Los códigos PUC pasan al proveedor real; los de un NIT sin proveedor esperan a que se cree.
+        assert_eq!(puc::list_supplier_codes(&conn, 7).unwrap(), ["513595"]);
+        assert_eq!(puc::list_all_supplier_codes(&conn).unwrap()[0].usage_count, 4);
+        let new_id = insert(&conn, &SupplierInput { nit: "800123456".into(), business_name: "NUEVO".into(), vat_type: None }).unwrap();
+        assert!(new_id > 9, "los id no se reutilizan");
+        assert_eq!(puc::list_supplier_codes(&conn, new_id).unwrap(), ["110505"]);
+
+        // Siguen vigentes el NIT único, las categorías válidas y el borrado en cascada.
+        assert!(conn.execute("INSERT INTO suppliers (nit, business_name, created_at, updated_at) VALUES ('900319753', 'X', 'c', 'u')", []).is_err());
+        assert!(conn.execute("INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at) VALUES ('5', 'X', 'otro', 'c', 'u')", []).is_err());
+        delete(&conn, 7).unwrap();
+        assert_eq!(count_rules_using_rate(&conn, 6).unwrap(), 0);
+        assert!(puc::list_supplier_codes(&conn, 7).unwrap().is_empty());
     }
 
     #[test]
     fn rejects_unknown_vat_type_in_sql() {
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
-        let bad = SupplierInput { nit: "1".into(), business_name: "A".into(), vat_type: "otro".into() };
+        let bad = SupplierInput { nit: "1".into(), business_name: "A".into(), vat_type: Some("otro".into()) };
         assert!(insert(&conn, &bad).is_err());
     }
 }

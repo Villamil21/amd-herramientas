@@ -21,7 +21,8 @@ use crate::models::self_withholding::{
     normalize_ciiu, SalesDocumentTypeMapping, SalesDocumentTypeMappingInput, SelfWithholdingRate, SelfWithholdingRateInput,
 };
 use crate::models::signer::{CertificateSigner, CertificateSignerInput};
-use crate::models::supplier::{Supplier, SupplierInput};
+use crate::models::puc::SupplierPucCode;
+use crate::models::supplier::{normalize_nit, Supplier, SupplierInput};
 use crate::models::withholding::{
     validate_uvt, DocumentTitleMapping, DocumentTitleMappingInput, SupplierWithholdingRuleInput, UvtValue, WithholdingProfileInput,
     WithholdingRate, WithholdingRateInput,
@@ -109,6 +110,9 @@ pub struct BackupFile {
     /// El catálogo PUC no va en el backup: es una tabla fija de la app.
     #[serde(default)]
     pub puc_document_titles: Option<Vec<DocumentTitleMapping>>,
+    /// Códigos PUC usados con cada proveedor (identificado por su NIT). `None` en backups anteriores: se conservan los actuales.
+    #[serde(default)]
+    pub supplier_puc_codes: Option<Vec<SupplierPucCode>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -139,6 +143,8 @@ pub struct BackupSummary {
     pub vat_document_titles: Option<usize>,
     /// `None` si el backup es anterior a Códigos PUC por factura.
     pub puc_document_titles: Option<usize>,
+    /// `None` si el backup es anterior a los códigos PUC por proveedor.
+    pub supplier_puc_codes: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -203,6 +209,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         sales_document_types: Some(self_withholding::list_types(conn)?),
         vat_document_titles: Some(vat_titles::list(conn)?),
         puc_document_titles: Some(puc::list_titles(conn)?),
+        supplier_puc_codes: Some(puc::list_all_supplier_codes(conn)?),
     })
 }
 
@@ -429,6 +436,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         sales_document_types: file.sales_document_types.as_ref().map(Vec::len),
         vat_document_titles: file.vat_document_titles.as_ref().map(Vec::len),
         puc_document_titles: file.puc_document_titles.as_ref().map(Vec::len),
+        supplier_puc_codes: file.supplier_puc_codes.as_ref().map(Vec::len),
     }
 }
 
@@ -569,8 +577,12 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        // Un backup anterior a los códigos PUC por proveedor reemplaza los proveedores:
+        // los códigos actuales se guardan por NIT para devolverlos a los que sigan existiendo.
+        let kept_puc_codes = if file.suppliers.is_some() && file.supplier_puc_codes.is_none() { Some(puc::list_all_supplier_codes(&tx)?) } else { None };
         if let Some(list) = &file.suppliers {
             tx.execute("DELETE FROM supplier_withholding_rules", [])?;
+            tx.execute("DELETE FROM supplier_puc_codes", [])?;
             tx.execute("DELETE FROM suppliers", [])?;
             for s in list {
                 let v = supplier_input(s).validated()?;
@@ -683,6 +695,15 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         updated_at: m.updated_at.clone(),
                     },
                 )?;
+            }
+        }
+        if let Some(list) = file.supplier_puc_codes.as_ref().or(kept_puc_codes.as_ref()) {
+            tx.execute("DELETE FROM supplier_puc_codes", [])?;
+            for c in list {
+                let supplier_nit = normalize_nit(&c.supplier_nit);
+                if !supplier_nit.is_empty() {
+                    puc::insert_supplier_code_full(&tx, &SupplierPucCode { supplier_nit, ..c.clone() })?;
+                }
             }
         }
         if let Some(list) = &file.identity_document_types {
@@ -827,7 +848,7 @@ mod tests {
         )
         .unwrap();
 
-        suppliers::insert(&conn, &SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: "purchase".into() }).unwrap();
+        suppliers::insert(&conn, &SupplierInput { nit: "900319753".into(), business_name: "PRICESMART COLOMBIA S.A.S.".into(), vat_type: Some("purchase".into()) }).unwrap();
         let rule = |status: &str, category: &str| DropiStatusMappingInput {
             normalized_status: status.into(),
             display_status: status.into(),
@@ -864,6 +885,13 @@ mod tests {
         let vat_title = |category: &str| DocumentTitleMappingInput { normalized_title: "documento nuevo xyz".into(), display_title: "DOCUMENTO NUEVO XYZ".into(), category: category.into() };
         vat_titles::save(&mut conn, &[vat_title("credit_note")]).unwrap();
         puc::save_titles(&mut conn, &[vat_title("credit_note")]).unwrap();
+        let supplier_id = |conn: &Connection, nit: &str| suppliers::list(conn, None).unwrap().into_iter().find(|s| s.nit == nit).unwrap().id;
+        // Proveedor creado desde Códigos PUC: sin Tipo IVA ni datos de retención.
+        suppliers::insert(&conn, &SupplierInput { nit: "900999999".into(), business_name: "PROVEEDOR NUEVO SAS".into(), vat_type: None }).unwrap();
+        puc::record_supplier_code(&conn, supplier_id(&conn, "900319753"), "513595").unwrap();
+        puc::record_supplier_code(&conn, supplier_id(&conn, "900319753"), "513595").unwrap();
+        puc::record_supplier_code(&conn, supplier_id(&conn, "900999999"), "110505").unwrap();
+        let supplier_codes = puc::list_all_supplier_codes(&conn).unwrap();
 
         let passport = identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "Pasaporte".into(), is_numeric: false }).unwrap();
 
@@ -873,13 +901,15 @@ mod tests {
         assert!(!String::from_utf8_lossy(&json).contains(&*sig_dir.to_string_lossy()), "sin rutas absolutas");
         let parsed = parse(&json).unwrap();
 
-        suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: "service".into() }).unwrap();
+        suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: Some("service".into()) }).unwrap();
         dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
         withholding::save_uvt(&conn, 2026, 1).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         identity_documents::delete(&conn, passport).unwrap();
         vat_titles::save(&mut conn, &[vat_title("invoice")]).unwrap();
         puc::save_titles(&mut conn, &[vat_title("invoice")]).unwrap();
+        puc::record_supplier_code(&conn, supplier_id(&conn, "900319753"), "514010").unwrap();
+        puc::record_supplier_code(&conn, supplier_id(&conn, "1"), "514010").unwrap();
         self_withholding::update_rates(&mut conn, &[crate::models::self_withholding::SelfWithholdingRateUpdate { id: id_6201, rate_bp: 0 }]).unwrap();
         let x = self_withholding::list_types(&conn).unwrap().into_iter().find(|t| t.normalized_label == "documento x").unwrap();
         self_withholding::delete_type(&conn, x.id).unwrap();
@@ -899,6 +929,19 @@ mod tests {
         let puc_xyz = puc::list_titles(&conn).unwrap().into_iter().find(|t| t.normalized_title == "documento nuevo xyz").unwrap();
         assert_eq!(puc_xyz.category, "credit_note", "la clasificación de títulos de Códigos PUC se restaura");
         assert_eq!(puc::list_codes(&conn).unwrap().len(), 2517, "el catálogo PUC no depende del backup");
+        assert_eq!(puc::list_all_supplier_codes(&conn).unwrap(), supplier_codes, "los códigos PUC por proveedor se restauran con su uso");
+        assert_eq!(puc::list_supplier_codes(&conn, supplier_id(&conn, "900319753")).unwrap(), ["513595"]);
+        let minimal = suppliers::list(&conn, None).unwrap().into_iter().find(|s| s.nit == "900999999").unwrap();
+        assert_eq!((minimal.vat_type, minimal.person_type), (None, None), "un proveedor sin Tipo IVA se restaura sin inventarlo");
+
+        // Backup de una versión anterior (con proveedores, sin códigos PUC): los códigos actuales siguen en su proveedor.
+        puc::record_supplier_code(&conn, supplier_id(&conn, "900319753"), "514010").unwrap();
+        let older = BackupFile { supplier_puc_codes: None, ..parsed.clone() };
+        restore(&mut conn, &dir, &sig_dir, &older).unwrap();
+        let mut kept = puc::list_supplier_codes(&conn, supplier_id(&conn, "900319753")).unwrap();
+        kept.sort();
+        assert_eq!(kept, ["513595", "514010"]);
+        assert_eq!(puc::list_supplier_codes(&conn, supplier_id(&conn, "900999999")).unwrap(), ["110505"]);
         let restored_rules: Vec<(String, String)> =
             dropi::list(&conn).unwrap().into_iter().map(|m| (m.normalized_status, m.category)).collect();
         assert_eq!(
@@ -907,8 +950,7 @@ mod tests {
             "las reglas de Dropi se reemplazan por las del backup"
         );
         let restored_suppliers = suppliers::list(&conn, None).unwrap();
-        assert_eq!(restored_suppliers.len(), 1, "los proveedores se reemplazan");
-        assert_eq!((restored_suppliers[0].nit.as_str(), restored_suppliers[0].vat_type.as_str()), ("900319753", "purchase"));
+        assert_eq!(restored_suppliers.iter().map(|s| (s.nit.as_str(), s.vat_type.as_deref())).collect::<Vec<_>>(), [("900319753", Some("purchase")), ("900999999", None)], "los proveedores se reemplazan");
         let restored_signers = signers::list(&conn, None).unwrap();
         assert_eq!(restored_signers.len(), 1);
         assert_eq!(restored_signers[0].personal_document, "CC 1.192.729.629");
@@ -940,7 +982,8 @@ mod tests {
     fn old_backup_without_suppliers_keeps_current_ones() {
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
-        suppliers::insert(&conn, &SupplierInput { nit: "900".into(), business_name: "A".into(), vat_type: "purchase".into() }).unwrap();
+        let a = suppliers::insert(&conn, &SupplierInput { nit: "900".into(), business_name: "A".into(), vat_type: Some("purchase".into()) }).unwrap();
+        puc::record_supplier_code(&conn, a, "513595").unwrap();
         dropi::save_many(
             &mut conn,
             &[DropiStatusMappingInput { normalized_status: "PENDIENTE".into(), display_status: "PENDIENTE".into(), category: "in_process".into() }],
@@ -959,6 +1002,7 @@ mod tests {
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
         assert_eq!(vat_titles::list(&conn).unwrap().len(), 6, "sin títulos de IVA en el backup se conservan los actuales");
         assert_eq!(puc::list_titles(&conn).unwrap().len(), 6, "sin títulos de Códigos PUC en el backup se conservan los actuales");
+        assert_eq!(puc::list_supplier_codes(&conn, a).unwrap(), ["513595"], "sin códigos PUC por proveedor en el backup se conservan los actuales");
         assert_eq!(identity_documents::list(&conn).unwrap().len(), 2, "sin tipos de documento en el backup se conservan los actuales");
         assert_eq!(self_withholding::list_rates(&conn).unwrap().len(), 501, "sin Tabla de Autorretenciones en el backup se conserva la actual");
         assert_eq!(self_withholding::list_types(&conn).unwrap().len(), 2);

@@ -189,7 +189,7 @@ export function InvoiceDetailModal({ row, openProducts, decision = {}, supplier,
 
         {parsed && pending && (
           <ul className="pending-list attention-block attention-block--danger">
-            {!row.vatType && item("supplier", "Proveedor sin Tipo IVA", `${row.supplierName || `NIT ${row.supplierNit}`}: indica si es Compras o Servicios.`, <SupplierVatControl nit={row.supplierNit!} name={row.supplierName ?? ""} onSaved={onChanged} />)}
+            {!row.vatType && item("supplier", "Proveedor sin Tipo IVA", `${row.supplierName || `NIT ${row.supplierNit}`}: indica si es Compras o Servicios.`, <SupplierVatControl nit={row.supplierNit!} name={row.supplierName ?? ""} supplier={supplier} onSaved={onChanged} />)}
             {unknownTitle &&
               item("title", "Nuevo tipo de documento", <>Se encontró «{unknownTitle.displayTitle}». ¿Dónde deseas clasificarlo?</>, <TitleClassifyButtons title={unknownTitle} onSaved={onChanged} />)}
             {row.problems.map((p, i) => item(`${p.code}-${i}`, PROBLEM_TITLE[p.code], p.text, problemActions(p.code)))}

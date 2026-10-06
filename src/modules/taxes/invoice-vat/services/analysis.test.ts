@@ -20,7 +20,7 @@ function invoice(nit: string, number: string, products: ProductLine[], extra: Pa
 }
 
 const file = (fileName: string, inv: ParsedInvoice): FileResult => ({ fileName, kind: "parsed", invoice: inv });
-const supplier = (id: number, nit: string, vatType: VatType, businessName = `PROV ${nit}`): Supplier => ({ id, nit, businessName, vatType, createdAt: "", updatedAt: "" });
+const supplier = (id: number, nit: string, vatType: VatType | null, businessName = `PROV ${nit}`): Supplier => ({ id, nit, businessName, vatType, createdAt: "", updatedAt: "" });
 
 /** Los títulos iniciales de la migración 009 (normalizados como en SQLite). */
 const TITLES: TitleRule[] = [
@@ -48,6 +48,20 @@ describe("buildReport: proveedores y renglones de Facturas", () => {
     expect(done.rows.every((r) => r.status === "processed" && r.vatType === "purchase")).toBe(true);
     expect(done.summary.invoices.purchases19).toEqual({ baseCents: 50_000, vatCents: 9_500 });
     expect(done.stats).toMatchObject({ pending: 0, validated: 5 });
+  });
+
+  it("un proveedor registrado sin Tipo IVA (creado desde Códigos PUC) queda pendiente y no suma hasta configurarlo", () => {
+    const files = [file("a.pdf", invoice("111", "A-1", [line(1900, 10_000, 1_900)]))];
+    const minimal = supplier(7, "111", null);
+    const pending = buildReport(files, [minimal], TITLES);
+    // Se completa el proveedor existente: no se pide crear otro con el mismo NIT.
+    expect(pending.pendingSuppliers).toEqual([{ nit: "111", name: "PROV 111", invoiceCount: 1, registered: minimal }]);
+    expect(pending.rows[0]).toMatchObject({ status: "pending-supplier", vatType: undefined });
+    expect(pending.summary.invoices).toMatchObject({ documentCount: 0, services19: { baseCents: 0, vatCents: 0 }, purchases19: { baseCents: 0, vatCents: 0 } });
+
+    const done = buildReport(files, [supplier(7, "111", "service")], TITLES);
+    expect(done.pendingSuppliers).toEqual([]);
+    expect(done.summary.invoices.services19).toEqual({ baseCents: 10_000, vatCents: 1_900 });
   });
 
   it("separa Compras y Servicios al 19 % y suma juntas las bases al 0 %", () => {
