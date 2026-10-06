@@ -109,6 +109,7 @@ export interface BackupSummary {
   salesDocumentTypes: number | null;
   /** null: backup anterior a la clasificación de títulos de IVA de compras; al restaurarlo se conservan los actuales. */
   vatDocumentTitles: number | null;
+  pucDocumentTitles: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */
@@ -224,6 +225,13 @@ export interface DocumentTitleMapping {
 }
 
 export type DocumentTitleMappingInput = Pick<DocumentTitleMapping, "normalizedTitle" | "displayTitle" | "category">;
+
+/** Código del catálogo PUC (tabla maestra de solo lectura). */
+export interface PucCode {
+  /** 1 dígito (clase), 2 (grupo), 4 (cuenta) o 6 (subcuenta: el único nivel asignable). */
+  code: string;
+  concept: string;
+}
 
 /** Clasificación guardada de un estado de Dropi (global al módulo Dropi). */
 export interface DropiStatusMapping {

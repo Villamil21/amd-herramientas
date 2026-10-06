@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.19.0",
+    "date": "2026-10-05",
+    "notes": [
+      "Nuevo módulo «Estados Financieros» con su primera herramienta, «Códigos PUC por factura»: selecciona una carpeta de facturas en PDF, asigna el código PUC de cada una y obtén el valor consolidado por código.",
+      "Cada factura pregunta cómo asignar el código: «Un solo código para toda la factura» (el valor es el Total Bruto Factura del PDF, no la suma de los productos) o «Elegir código por producto» (el valor de cada línea es su Precio unitario de venta). Se puede cambiar de modalidad; si ya había códigos por producto, se pide confirmación antes de reemplazarlos.",
+      "El campo Código PUC busca por código, parte del código o concepto, muestra el concepto exacto de la tabla y siempre pide confirmación. Solo ofrece códigos de 6 dígitos: al escribir una cuenta de 4 dígitos (por ejemplo 1105) muestra sus subcuentas. Un código que no existe indica «Código PUC no encontrado» y no se puede confirmar.",
+      "En el modo por producto se pueden marcar varios productos y asignarles el mismo código en un solo paso; los códigos ya usados en el análisis quedan como accesos rápidos.",
+      "Factura electrónica suma y Nota crédito resta. Un título de documento desconocido se pregunta una sola vez y la decisión queda guardada (también en el backup); se cambia en «Tipos de documento».",
+      "Estado siempre visible: «Análisis incompleto — X pendientes» con qué falta y en qué factura, y «Revisar siguiente pendiente» para recorrerlos. «Exportar Excel» solo se habilita con 0 pendientes («Todo clasificado»).",
+      "Una factura repetida en la carpeta (mismo CUFE / CUDE, o mismo NIT y número) no se suma dos veces. Los archivos que no se pueden leer se excluyen para que no bloqueen.",
+      "Resumen por código PUC (Facturas, Notas crédito y Total neto) y vista por documento. El Excel trae las hojas «Detalle» y «Resumen PUC».",
+      "Nueva sección Datos → «Tabla de Códigos PUC»: el catálogo de cuentas (2.517 códigos) organizado por clase, grupo, cuenta y subcuenta, con buscador. Es de solo consulta y también se abre desde la herramienta con «Ver tabla PUC».",
+      "Los códigos asignados se conservan mientras la app esté abierta, aunque se salga de la pantalla; al cerrar la app o analizar otra carpeta se empieza de nuevo."
+    ]
+  },
+  {
     "version": "1.18.1",
     "date": "2026-10-05",
     "notes": [

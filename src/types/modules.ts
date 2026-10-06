@@ -25,7 +25,7 @@ export interface ModuleDef {
   description: string;
   icon: LucideIcon;
   /** Color del marcador en la pantalla Herramientas (refuerzo semántico). */
-  accent?: "blue" | "teal" | "violet" | "amber" | "rose" | "orange";
+  accent?: "blue" | "teal" | "violet" | "amber" | "rose" | "orange" | "green";
   /** "logo": logo + nombre (ej. selección de banco). "name": la misma tarjeta, solo con el nombre. */
   submoduleCards?: "logo" | "name";
   submodules: SubmoduleDef[];

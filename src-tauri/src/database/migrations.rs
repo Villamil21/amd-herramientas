@@ -30,6 +30,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 7, name: "income_certificates", sql: include_str!("../../migrations/007_income_certificates.sql") },
     Migration { version: 8, name: "self_withholding", sql: include_str!("../../migrations/008_self_withholding.sql") },
     Migration { version: 9, name: "vat_document_titles", sql: include_str!("../../migrations/009_vat_document_titles.sql") },
+    Migration { version: 10, name: "puc", sql: include_str!("../../migrations/010_puc.sql") },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

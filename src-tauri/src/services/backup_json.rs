@@ -11,7 +11,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, dropi, identity_documents, self_withholding, signers, suppliers, vat_titles, withholding};
+use crate::database::{companies, concepts, dropi, identity_documents, puc, self_withholding, signers, suppliers, vat_titles, withholding};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
@@ -105,6 +105,10 @@ pub struct BackupFile {
     /// IVA de compras: títulos clasificados como Factura electrónica / Nota crédito. `None` en backups anteriores: se conservan los actuales.
     #[serde(default)]
     pub vat_document_titles: Option<Vec<DocumentTitleMapping>>,
+    /// Códigos PUC por factura: títulos clasificados como Factura electrónica / Nota crédito. `None` en backups anteriores: se conservan los actuales.
+    /// El catálogo PUC no va en el backup: es una tabla fija de la app.
+    #[serde(default)]
+    pub puc_document_titles: Option<Vec<DocumentTitleMapping>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -133,6 +137,8 @@ pub struct BackupSummary {
     pub sales_document_types: Option<usize>,
     /// `None` si el backup es anterior a la clasificación de títulos de IVA de compras.
     pub vat_document_titles: Option<usize>,
+    /// `None` si el backup es anterior a Códigos PUC por factura.
+    pub puc_document_titles: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -196,6 +202,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         self_withholding_rates: Some(self_withholding::list_rates(conn)?),
         sales_document_types: Some(self_withholding::list_types(conn)?),
         vat_document_titles: Some(vat_titles::list(conn)?),
+        puc_document_titles: Some(puc::list_titles(conn)?),
     })
 }
 
@@ -322,6 +329,15 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
             return Err(AppError::user(format!("El backup tiene dos clasificaciones de IVA para el título «{}».", v.display_title)));
         }
     }
+    let mut puc_titles_seen = std::collections::HashSet::new();
+    for m in file.puc_document_titles.iter().flatten() {
+        let v = title_input(m)
+            .validated()
+            .map_err(|e| AppError::user(format!("Título de Códigos PUC «{}» del backup: {}", m.display_title, e.0)))?;
+        if !puc_titles_seen.insert(v.normalized_title.clone()) {
+            return Err(AppError::user(format!("El backup tiene dos clasificaciones de Códigos PUC para el título «{}».", v.display_title)));
+        }
+    }
     let mut statuses = std::collections::HashSet::new();
     for m in file.dropi_status_mappings.iter().flatten() {
         let v = dropi_input(m)
@@ -412,6 +428,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         self_withholding_rates: file.self_withholding_rates.as_ref().map(Vec::len),
         sales_document_types: file.sales_document_types.as_ref().map(Vec::len),
         vat_document_titles: file.vat_document_titles.as_ref().map(Vec::len),
+        puc_document_titles: file.puc_document_titles.as_ref().map(Vec::len),
     }
 }
 
@@ -651,6 +668,23 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
+        if let Some(list) = &file.puc_document_titles {
+            tx.execute("DELETE FROM puc_document_title_mappings", [])?;
+            for m in list {
+                let v = title_input(m).validated()?;
+                puc::insert_title_full(
+                    &tx,
+                    &DocumentTitleMapping {
+                        id: m.id,
+                        normalized_title: v.normalized_title,
+                        display_title: v.display_title,
+                        category: v.category,
+                        created_at: m.created_at.clone(),
+                        updated_at: m.updated_at.clone(),
+                    },
+                )?;
+            }
+        }
         if let Some(list) = &file.identity_document_types {
             tx.execute("DELETE FROM identity_document_types", [])?;
             for t in list {
@@ -829,6 +863,7 @@ mod tests {
 
         let vat_title = |category: &str| DocumentTitleMappingInput { normalized_title: "documento nuevo xyz".into(), display_title: "DOCUMENTO NUEVO XYZ".into(), category: category.into() };
         vat_titles::save(&mut conn, &[vat_title("credit_note")]).unwrap();
+        puc::save_titles(&mut conn, &[vat_title("credit_note")]).unwrap();
 
         let passport = identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "Pasaporte".into(), is_numeric: false }).unwrap();
 
@@ -844,6 +879,7 @@ mod tests {
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         identity_documents::delete(&conn, passport).unwrap();
         vat_titles::save(&mut conn, &[vat_title("invoice")]).unwrap();
+        puc::save_titles(&mut conn, &[vat_title("invoice")]).unwrap();
         self_withholding::update_rates(&mut conn, &[crate::models::self_withholding::SelfWithholdingRateUpdate { id: id_6201, rate_bp: 0 }]).unwrap();
         let x = self_withholding::list_types(&conn).unwrap().into_iter().find(|t| t.normalized_label == "documento x").unwrap();
         self_withholding::delete_type(&conn, x.id).unwrap();
@@ -860,6 +896,9 @@ mod tests {
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 3);
         let xyz = vat_titles::list(&conn).unwrap().into_iter().find(|t| t.normalized_title == "documento nuevo xyz").unwrap();
         assert_eq!(xyz.category, "credit_note", "la clasificación de títulos de IVA se restaura");
+        let puc_xyz = puc::list_titles(&conn).unwrap().into_iter().find(|t| t.normalized_title == "documento nuevo xyz").unwrap();
+        assert_eq!(puc_xyz.category, "credit_note", "la clasificación de títulos de Códigos PUC se restaura");
+        assert_eq!(puc::list_codes(&conn).unwrap().len(), 2517, "el catálogo PUC no depende del backup");
         let restored_rules: Vec<(String, String)> =
             dropi::list(&conn).unwrap().into_iter().map(|m| (m.normalized_status, m.category)).collect();
         assert_eq!(
@@ -919,6 +958,7 @@ mod tests {
         assert_eq!(withholding::list_uvt(&conn).unwrap().len(), 1);
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
         assert_eq!(vat_titles::list(&conn).unwrap().len(), 6, "sin títulos de IVA en el backup se conservan los actuales");
+        assert_eq!(puc::list_titles(&conn).unwrap().len(), 6, "sin títulos de Códigos PUC en el backup se conservan los actuales");
         assert_eq!(identity_documents::list(&conn).unwrap().len(), 2, "sin tipos de documento en el backup se conservan los actuales");
         assert_eq!(self_withholding::list_rates(&conn).unwrap().len(), 501, "sin Tabla de Autorretenciones en el backup se conserva la actual");
         assert_eq!(self_withholding::list_types(&conn).unwrap().len(), 2);

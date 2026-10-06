@@ -46,5 +46,6 @@ export const paths = {
   selfWithholdingTable: "/tabla-autorretenciones",
   /** Tabla de Autorretenciones filtrada por un código. */
   selfWithholdingCode: (code: string) => `/tabla-autorretenciones/${code}`,
+  pucTable: "/tabla-puc",
   settings: "/configuracion",
 };

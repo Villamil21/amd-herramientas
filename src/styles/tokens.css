@@ -60,6 +60,9 @@
   --accent-orange: #f97316;
   --accent-orange-ink: #c2410c;
   --accent-orange-soft: #ffedd5;
+  --accent-green: #10b981;
+  --accent-green-ink: #047857;
+  --accent-green-soft: #d1fae5;
 
   /* Estados (base = iconos y marcadores; -ink = texto) */
   --color-danger: #dc2626;
