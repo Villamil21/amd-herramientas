@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.20.0",
+    "date": "2026-10-06",
+    "notes": [
+      "Extractos bancarios → BBVA: nuevo banco. Importa el «Extracto de Cuenta» en PDF, lee todas las páginas y agrupa los movimientos por Concepto exacto, separando Cargos (egresos) y Abonos (ingresos); un mismo concepto con cargos y abonos queda en dos grupos.",
+      "Muestra movimientos encontrados, conceptos diferentes, grupos y totales de abonos y cargos, neto y el Saldo final del extracto, junto con la cuenta, el periodo y el nombre del cliente.",
+      "Valida el resultado contra el «Resumen de movimientos» (neto y cantidad de movimientos), contra saldo cierre mes anterior + abonos − cargos = saldo final y contra la secuencia de saldos fila por fila. Si algo no coincide indica «Requiere revisión» con página, fila, concepto, valor interpretado, saldo esperado y saldo encontrado; los movimientos nunca se alteran.",
+      "Al abrir un grupo se ven sus movimientos con número, Fecha operación, Fecha valor, Cargo, Abono y Saldo. «Exportar Excel» genera las hojas Resumen y Movimientos."
+    ]
+  },
+  {
     "version": "1.19.2",
     "date": "2026-10-06",
     "notes": [

@@ -52,5 +52,13 @@ export const bankAnalysisModule: ModuleDef = {
       logo: "Bancoomeva.png",
       component: lazy(() => import("./bancoomeva/BancoomevaStatementPage")),
     },
+    {
+      id: "bbva",
+      name: "BBVA",
+      description: "Análisis de extractos bancarios.",
+      icon: Landmark,
+      logo: "BBVA.png",
+      component: lazy(() => import("./bbva/BbvaStatementPage")),
+    },
   ]),
 };
