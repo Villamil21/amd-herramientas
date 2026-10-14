@@ -112,6 +112,8 @@ export interface BackupSummary {
   pucDocumentTitles: number | null;
   /** null: backup anterior a los códigos PUC por proveedor; al restaurarlo se conservan los actuales. */
   supplierPucCodes: number | null;
+  /** null: backup anterior al SMMLV por año; al restaurarlo se conservan los valores actuales. */
+  minimumWages: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */
@@ -194,6 +196,13 @@ export interface WithholdingRate {
 }
 
 export type WithholdingRateInput = Pick<WithholdingRate, "retentionType" | "name" | "baseUvtCenti" | "rateBp">;
+
+/** SMMLV de un año (Datos → SMMLV por año). Pesos enteros. */
+export interface MinimumWage {
+  year: number;
+  valuePesos: number;
+  updatedAt: string;
+}
 
 export interface UvtValue {
   year: number;

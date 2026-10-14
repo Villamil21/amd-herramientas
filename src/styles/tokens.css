@@ -63,6 +63,9 @@
   --accent-green: #10b981;
   --accent-green-ink: #047857;
   --accent-green-soft: #d1fae5;
+  --accent-indigo: #6366f1;
+  --accent-indigo-ink: #4338ca;
+  --accent-indigo-soft: #e0e7ff;
 
   /* Estados (base = iconos y marcadores; -ink = texto) */
   --color-danger: #dc2626;

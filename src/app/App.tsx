@@ -21,6 +21,7 @@ import { SuppliersPage } from "../pages/SuppliersPage";
 import { WithholdingTablePage } from "../pages/WithholdingTablePage";
 import { SelfWithholdingTablePage } from "../pages/SelfWithholdingTablePage";
 import { PucTablePage } from "../pages/PucTablePage";
+import { MinimumWagesPage } from "../pages/MinimumWagesPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 
 const tools: Crumb = { label: "Herramientas", onClick: () => navigate(paths.tools) };
@@ -74,6 +75,8 @@ function resolve(segments: string[]) {
       return { active: "self-withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Autorretenciones" }], page: <SelfWithholdingTablePage initialSearch={moduleId ?? ""} /> };
     case "tabla-puc":
       return { active: "puc-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Códigos PUC" }], page: <PucTablePage /> };
+    case "smmlv":
+      return { active: "minimum-wages", crumbs: [{ label: "Datos" }, { label: "SMMLV por año" }], page: <MinimumWagesPage /> };
     case "configuracion":
       return { active: "settings", crumbs: [{ label: "Sistema" }, { label: "Configuración" }], page: <SettingsPage /> };
   }

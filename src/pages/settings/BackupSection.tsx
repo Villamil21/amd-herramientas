@@ -125,6 +125,7 @@ export function BackupSection() {
                 {pending.vatDocumentTitles !== null && <li>{pending.vatDocumentTitles} títulos de IVA de compras (Factura electrónica / Nota crédito)</li>}
                 {pending.pucDocumentTitles !== null && <li>{pending.pucDocumentTitles} títulos de Códigos PUC por factura (Factura electrónica / Nota crédito)</li>}
                 {pending.supplierPucCodes !== null && <li>{pending.supplierPucCodes} códigos PUC usados con proveedores</li>}
+                {pending.minimumWages !== null && <li>{pending.minimumWages} valores de SMMLV por año</li>}
                 <li>{pending.settings} ajustes de configuración</li>
               </ul>
               <span>
@@ -141,6 +142,7 @@ export function BackupSection() {
                 {pending.withholdingRates === null && " Este backup no incluye la tabla de retenciones: se conservan la tabla, los valores UVT y los títulos actuales."}
                 {pending.identityDocumentTypes === null && " Este backup no incluye tipos de documento: se conservan los actuales."}
                 {pending.selfWithholdingRates === null && " Este backup no incluye la Tabla de Autorretenciones: se conservan la tabla y los tipos de documento de ventas actuales."}
+                {pending.minimumWages === null && " Este backup no incluye el SMMLV por año: se conservan los valores actuales."}
               </span>
             </div>
           )

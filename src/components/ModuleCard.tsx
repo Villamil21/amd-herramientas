@@ -4,7 +4,7 @@ interface Props {
   title: string;
   description: string;
   icon: LucideIcon;
-  accent?: "blue" | "teal" | "violet" | "amber" | "rose" | "orange" | "green";
+  accent?: "blue" | "teal" | "violet" | "amber" | "rose" | "orange" | "green" | "indigo";
   onOpen: () => void;
 }
 

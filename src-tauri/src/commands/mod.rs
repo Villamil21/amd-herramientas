@@ -9,6 +9,7 @@ pub mod dropi;
 pub mod files;
 pub mod identity_documents;
 pub mod invoices;
+pub mod minimum_wages;
 pub mod puc;
 pub mod self_withholding;
 pub mod statements;

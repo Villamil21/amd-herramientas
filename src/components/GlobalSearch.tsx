@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { BadgePercent, BookOpenText, Building2, Database, Percent, Search, Settings, Store, UserRound } from "lucide-react";
+import { BadgePercent, BookOpenText, Building2, CalendarRange, Database, Percent, Search, Settings, Store, UserRound } from "lucide-react";
 import { isAvailable, MODULES } from "../app/modules";
 import { navigate, paths } from "../app/router";
 import { useShortcut } from "../hooks/useShortcut";
@@ -36,6 +36,7 @@ function staticResults(): Result[] {
     { key: "withholding-table", label: "Tabla de retenciones", hint: "Datos · UVT y tarifas", icon: Percent, path: paths.withholdingTable },
     { key: "self-withholding-table", label: "Tabla de Autorretenciones", hint: "Datos · CIIU y tarifas", icon: BadgePercent, path: paths.selfWithholdingTable },
     { key: "puc-table", label: "Tabla de Códigos PUC", hint: "Datos · Catálogo de cuentas", icon: BookOpenText, path: paths.pucTable },
+    { key: "minimum-wages", label: "SMMLV por año", hint: "Datos · Salario mínimo", icon: CalendarRange, path: paths.minimumWages },
     { key: "settings", label: "Configuración", hint: "Sistema", icon: Settings, path: paths.settings },
   );
   return out;

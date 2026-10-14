@@ -270,7 +270,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(run_pending(&mut conn).unwrap(), ["012_suppliers_minimal_and_puc_by_supplier"]);
+        // Se aplica la 012 (y las posteriores, que solo agregan).
+        assert_eq!(run_pending(&mut conn).unwrap()[0], "012_suppliers_minimal_and_puc_by_supplier");
         assert_eq!(conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0)).unwrap(), 1, "las llaves foráneas vuelven a quedar activas");
 
         let all = list(&conn, None).unwrap();

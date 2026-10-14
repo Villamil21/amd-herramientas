@@ -2,7 +2,7 @@
 //! PNG), proveedores (con su configuración de retención), clasificación de
 //! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota,
 //! tipos de documento de identidad, Tabla de Autorretenciones, tipos de
-//! documento de Ventas y configuración.
+//! documento de Ventas, SMMLV por año y configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,12 +11,13 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::database::{companies, concepts, dropi, identity_documents, puc, self_withholding, signers, suppliers, vat_titles, withholding};
+use crate::database::{companies, concepts, dropi, identity_documents, minimum_wages, puc, self_withholding, signers, suppliers, vat_titles, withholding};
 use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput};
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
 use crate::models::identity_document::{IdentityDocumentType, IdentityDocumentTypeInput};
+use crate::models::minimum_wage::{validate_minimum_wage, MinimumWage};
 use crate::models::self_withholding::{
     normalize_ciiu, SalesDocumentTypeMapping, SalesDocumentTypeMappingInput, SelfWithholdingRate, SelfWithholdingRateInput,
 };
@@ -113,6 +114,9 @@ pub struct BackupFile {
     /// Códigos PUC usados con cada proveedor (identificado por su NIT). `None` en backups anteriores: se conservan los actuales.
     #[serde(default)]
     pub supplier_puc_codes: Option<Vec<SupplierPucCode>>,
+    /// SMMLV por año. `None` en backups anteriores: se conservan los valores actuales.
+    #[serde(default)]
+    pub minimum_wages: Option<Vec<MinimumWage>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -145,6 +149,8 @@ pub struct BackupSummary {
     pub puc_document_titles: Option<usize>,
     /// `None` si el backup es anterior a los códigos PUC por proveedor.
     pub supplier_puc_codes: Option<usize>,
+    /// `None` si el backup es anterior al SMMLV por año.
+    pub minimum_wages: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -210,6 +216,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         vat_document_titles: Some(vat_titles::list(conn)?),
         puc_document_titles: Some(puc::list_titles(conn)?),
         supplier_puc_codes: Some(puc::list_all_supplier_codes(conn)?),
+        minimum_wages: Some(minimum_wages::list(conn)?),
     })
 }
 
@@ -316,6 +323,13 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
         validate_uvt(u.year, u.value_pesos).map_err(|e| AppError::user(format!("UVT {} del backup: {}", u.year, e.0)))?;
         if !years.insert(u.year) {
             return Err(AppError::user(format!("El backup tiene dos valores UVT para {}.", u.year)));
+        }
+    }
+    let mut wage_years = std::collections::HashSet::new();
+    for w in file.minimum_wages.iter().flatten() {
+        validate_minimum_wage(w.year, w.value_pesos).map_err(|e| AppError::user(format!("SMMLV {} del backup: {}", w.year, e.0)))?;
+        if !wage_years.insert(w.year) {
+            return Err(AppError::user(format!("El backup tiene dos valores de SMMLV para {}.", w.year)));
         }
     }
     let mut titles = std::collections::HashSet::new();
@@ -437,6 +451,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         vat_document_titles: file.vat_document_titles.as_ref().map(Vec::len),
         puc_document_titles: file.puc_document_titles.as_ref().map(Vec::len),
         supplier_puc_codes: file.supplier_puc_codes.as_ref().map(Vec::len),
+        minimum_wages: file.minimum_wages.as_ref().map(Vec::len),
     }
 }
 
@@ -644,6 +659,12 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
             tx.execute("DELETE FROM uvt_values", [])?;
             for u in list {
                 withholding::insert_uvt_full(&tx, u)?;
+            }
+        }
+        if let Some(list) = &file.minimum_wages {
+            tx.execute("DELETE FROM minimum_wages", [])?;
+            for w in list {
+                minimum_wages::insert_full(&tx, w)?;
             }
         }
         if let Some(list) = &file.document_title_mappings {
@@ -867,6 +888,7 @@ mod tests {
         )
         .unwrap();
         withholding::save_uvt(&conn, 2026, 50000).unwrap();
+        minimum_wages::create(&conn, 2027, 1_900_000).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 300, rate_bp: 450 }]).unwrap();
         withholding::save_titles(
             &mut conn,
@@ -904,6 +926,8 @@ mod tests {
         suppliers::insert(&conn, &SupplierInput { nit: "1".into(), business_name: "Otro".into(), vat_type: Some("service".into()) }).unwrap();
         dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
         withholding::save_uvt(&conn, 2026, 1).unwrap();
+        minimum_wages::update(&conn, 2026, 1).unwrap();
+        minimum_wages::create(&conn, 2028, 2_000_000).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         identity_documents::delete(&conn, passport).unwrap();
         vat_titles::save(&mut conn, &[vat_title("invoice")]).unwrap();
@@ -921,6 +945,8 @@ mod tests {
         let s = suppliers::list(&conn, None).unwrap().into_iter().find(|s| s.nit == "900319753").unwrap();
         assert_eq!((s.person_type.as_deref(), s.withholding_rules.len()), (Some("PJ"), 1), "la configuración de retención se restaura");
         assert_eq!(withholding::list_uvt(&conn).unwrap()[0].value_pesos, 50000);
+        let wages: Vec<(i64, i64)> = minimum_wages::list(&conn).unwrap().into_iter().map(|w| (w.year, w.value_pesos)).collect();
+        assert_eq!(wages, [(2026, 1_750_905), (2027, 1_900_000)], "el SMMLV por año se reemplaza por el del backup");
         let r6 = withholding::list_rates(&conn).unwrap().into_iter().find(|r| r.id == 6).unwrap();
         assert_eq!((r6.base_uvt_centi, r6.rate_bp), (300, 450));
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 3);
@@ -992,6 +1018,7 @@ mod tests {
         let old = br#"{"format":"amd-herramientas-backup","formatVersion":1,"appVersion":"1.0.0","exportedAt":"x","companies":[],"concepts":[]}"#;
         let parsed = parse(old).unwrap();
         assert!(parsed.suppliers.is_none());
+        minimum_wages::create(&conn, 2027, 1_900_000).unwrap();
         let dir = std::env::temp_dir().join(format!("amd-json-old-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         restore(&mut conn, &dir, &dir, &parsed).unwrap();
@@ -999,6 +1026,7 @@ mod tests {
         assert_eq!(dropi::list(&conn).unwrap().len(), 1, "sin estados de Dropi en el backup se conservan los actuales");
         assert_eq!(withholding::list_rates(&conn).unwrap().len(), 15, "sin tabla de retenciones en el backup se conserva la actual");
         assert_eq!(withholding::list_uvt(&conn).unwrap().len(), 1);
+        assert_eq!(minimum_wages::list(&conn).unwrap().len(), 2, "sin SMMLV en el backup se conservan los valores actuales");
         assert_eq!(withholding::list_titles(&conn).unwrap().len(), 2);
         assert_eq!(vat_titles::list(&conn).unwrap().len(), 6, "sin títulos de IVA en el backup se conservan los actuales");
         assert_eq!(puc::list_titles(&conn).unwrap().len(), 6, "sin títulos de Códigos PUC en el backup se conservan los actuales");

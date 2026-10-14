@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.21.0",
+    "date": "2026-10-14",
+    "notes": [
+      "Nuevo módulo Calculadoras con dos calculadoras: «Calculadora de aportes para Dependientes» y «Calculadora de aportes para Independientes». Los valores se recalculan al escribir o cambiar un porcentaje; nada se guarda.",
+      "Dependientes: escribe el salario o IBC y elige Salud (0 %, 4 %, 12,5 %), Pensión (0 %, 16 %), ARL (Ninguno a Riesgo V), CCF (0 %, 4 %), SENA (0 %, 2 %) e ICBF (0 %, 3 %). Muestra cada aporte y el Total aporte.",
+      "Independientes: escribe los ingresos mensuales o el valor mensual del contrato y elige el año. El IBC es el mayor entre el 40 % de los ingresos y el SMMLV de ese año; se muestra cuál se usó. Aportes de Salud (0 %, 12,5 %), Pensión (0 %, 16 %), ARL y CCF (0 %, 0,6 %, 2 %, 4 %).",
+      "Cada aporte se aproxima al múltiplo de $ 100 superior, como en la PILA. «Limpiar» borra el valor y deja los porcentajes en 0 %.",
+      "Nuevo Datos → SMMLV por año: arranca con 2026 = $ 1.750.905; permite agregar años y editar su valor (sin repetir años). Se guarda en la base de datos local y en el backup; nunca se consulta Internet. Si el año elegido no tiene SMMLV, la calculadora lo indica y ofrece «Configurar SMMLV»."
+    ]
+  },
+  {
     "version": "1.20.0",
     "date": "2026-10-06",
     "notes": [
