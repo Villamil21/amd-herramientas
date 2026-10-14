@@ -26,26 +26,29 @@ export function ContributionsTable({ lines, selection, onSelect, result }: Props
           </tr>
         </thead>
         <tbody>
-          {lines.map((line) => (
-            <tr key={line.id}>
-              <td className="table__primary">{line.label}</td>
-              <td>
-                <Select aria-label={`Porcentaje de ${line.label}`} className="calc-table__select" value={selection[line.id]} onChange={(e) => onSelect(line.id, e.target.value)}>
-                  {line.options.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </td>
-              <td className="num">{money(result?.lines.find((l) => l.id === line.id)?.valuePesos)}</td>
-            </tr>
-          ))}
+          {lines.map((line) => {
+            const value = result?.lines.find((l) => l.id === line.id)?.valuePesos;
+            return (
+              <tr key={line.id}>
+                <td className="table__primary">{line.label}</td>
+                <td>
+                  <Select aria-label={`Porcentaje de ${line.label}`} className="calc-table__select" value={selection[line.id]} onChange={(e) => onSelect(line.id, e.target.value)}>
+                    {line.options.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </td>
+                <td className={`num calc-table__value${value ? " is-filled" : ""}`}>{money(value)}</td>
+              </tr>
+            );
+          })}
         </tbody>
         <tfoot>
           <tr>
             <td colSpan={2}>Total aporte</td>
-            <td className="num">{money(result?.totalPesos)}</td>
+            <td className={`num${result?.totalPesos ? " is-filled" : ""}`}>{money(result?.totalPesos)}</td>
           </tr>
         </tfoot>
       </table>

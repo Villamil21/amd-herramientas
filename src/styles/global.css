@@ -2957,11 +2957,18 @@ button.stat--link {
 
 .calc {
   max-width: 820px;
+  overflow: hidden;
 }
 
+/* Cabecera con el tinte del módulo (índigo), como las tarjetas de Herramientas. */
 .calc__inputs {
   padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-indigo-soft) 85%, transparent), color-mix(in srgb, var(--accent-indigo-soft) 25%, transparent) 70%);
+}
+
+.calc__inputs .field__label {
+  color: var(--accent-indigo-ink);
 }
 
 .calc__inputs--split {
@@ -2974,6 +2981,8 @@ button.stat--link {
   font-size: var(--text-lg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  color: var(--accent-indigo-ink);
+  background: var(--color-surface, #fff);
 }
 
 .calc__alert {
@@ -2982,7 +2991,7 @@ button.stat--link {
 
 .calc__ibc {
   margin: 0;
-  padding: var(--space-3) var(--space-6);
+  padding: var(--space-3) var(--space-6) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -3003,10 +3012,18 @@ button.stat--link {
   margin: 0;
 }
 
+.calc__ibc > .calc__ibc-total {
+  align-items: center;
+  margin-top: var(--space-2, 8px);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--accent-indigo-soft);
+}
+
 .calc__ibc-total dt {
   display: flex;
   flex-direction: column;
-  color: var(--color-text);
+  color: var(--accent-indigo-ink);
   font-weight: 600;
 }
 
@@ -3016,24 +3033,46 @@ button.stat--link {
 }
 
 .calc__ibc-total dd {
-  font-size: var(--text-lg);
+  font-size: var(--text-xl);
   font-weight: 700;
-  color: var(--color-text);
+  color: var(--accent-indigo-ink);
+}
+
+.calc-table td {
+  padding-top: 9px;
+  padding-bottom: 9px;
 }
 
 .calc-table__select {
   width: 220px;
 }
 
+.calc-table__value {
+  color: var(--color-muted);
+}
+
+.calc-table__value.is-filled {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
 .calc-table tfoot td {
   font-weight: 700;
-  border-top: 2px solid var(--color-border);
+  color: var(--accent-indigo-ink);
+  border-top: 1px solid color-mix(in srgb, var(--accent-indigo) 30%, transparent);
   border-bottom: 0;
-  background: var(--color-surface-alt);
+  background: color-mix(in srgb, var(--accent-indigo-soft) 75%, transparent);
+  padding-top: 14px;
+  padding-bottom: 14px;
 }
 
 .calc-table tfoot td.num {
-  font-size: var(--text-lg);
+  font-size: var(--text-xl);
+  color: color-mix(in srgb, var(--accent-indigo-ink) 55%, transparent);
+}
+
+.calc-table tfoot td.num.is-filled {
+  color: var(--accent-indigo-ink);
 }
 
 .calc__note {

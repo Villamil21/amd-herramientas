@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.21.1",
+    "date": "2026-10-14",
+    "notes": [
+      "Calculadoras: las dos calculadoras de aportes tienen ahora más color. La zona del salario o los ingresos lleva el tono índigo del módulo, los aportes calculados se destacan frente a los que están en $ 0 y el Total aporte va resaltado.",
+      "En la calculadora para Independientes el IBC se muestra destacado, con la indicación de si se usó el 40 % de los ingresos o el SMMLV. Los cálculos no cambian."
+    ]
+  },
+  {
     "version": "1.21.0",
     "date": "2026-10-14",
     "notes": [
