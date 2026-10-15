@@ -39,6 +39,7 @@ export function PucField({ index, value, onChange, suggestions, title = "Cuenta 
             <strong>{value}</strong> — {concept ?? <span className="amount--negative">no existe en la tabla</span>}
           </span>
           {index.custom.has(value) && <Badge>Personalizado</Badge>}
+          {index.inactive.has(value) && <Badge tone="warning">Inactivo</Badge>}
           {!disabled && <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={13} />} aria-label="Cambiar cuenta PUC" title="Cambiar cuenta PUC" onClick={() => setOpen(true)} />}
         </span>
       ) : (

@@ -34,7 +34,9 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
   const confirmRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [focusConfirm, setFocusConfirm] = useState(false);
-  const [rejected, setRejected] = useState(false);
+  const [rejected, setRejected] = useState<"level" | "inactive" | false>(false);
+  // Un código inactivo no se ofrece en nuevas selecciones, ni como acceso rápido.
+  const quick = useMemo(() => suggestions?.filter((s) => !index.inactive.has(s.code)), [suggestions, index]);
 
   const search = useMemo(() => searchLeaves(index, query), [index, query]);
   // Un código de 6 dígitos existente se muestra directamente para confirmar.
@@ -55,7 +57,8 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
 
   /** Última barrera: solo se confirma una subcuenta de 6 dígitos que exista en la tabla, nunca un nivel superior. */
   function confirm(code: string) {
-    if (leafConcept(index, code) === undefined) return setRejected(true);
+    if (leafConcept(index, code) === undefined) return setRejected("level");
+    if (index.inactive.has(code)) return setRejected("inactive");
     onConfirm(code);
   }
 
@@ -138,7 +141,9 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
           </div>
           {rejected && (
             <div className="field__error" role="alert">
-              No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos o un código personalizado.
+              {rejected === "inactive"
+                ? "Este código PUC está inactivo. Reactívalo en Datos → Tabla de Códigos PUC para usarlo."
+                : "No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos o un código personalizado."}
             </div>
           )}
         </div>
@@ -202,11 +207,11 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
           </>
         )
       ) : (
-        suggestions && (
+        quick && (
           <div className="puc-suggestions">
             <span className="field__hint">Usados con este proveedor:</span>
-            {suggestions.length === 0 && <span className="field__hint">Aún no hay códigos guardados para este proveedor.</span>}
-            {suggestions.map((s) => (
+            {quick.length === 0 && <span className="field__hint">Aún no hay códigos guardados para este proveedor.</span>}
+            {quick.map((s) => (
               <button key={s.code} type="button" className="puc-chip" title={`${s.code} — ${s.concept}`} onClick={() => pick(s)}>
                 <strong>{s.code}</strong> — {s.concept}
               </button>

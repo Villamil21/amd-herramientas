@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.25.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Datos → Tabla de Códigos PUC administrable: cada fila tiene Editar, Clasificar en EEFF, Desactivar / Reactivar y, en los códigos personalizados, Eliminar.",
+      "Editar el concepto no cambia los movimientos ya enviados (conservan el concepto con el que se enviaron) ni la clasificación. En una cuenta oficial solo cambia el concepto y se puede volver a la denominación oficial; su número nunca cambia.",
+      "El número de un código personalizado solo se puede cambiar si no tiene movimientos ni referencias y el nuevo número está libre. Un personalizado sin uso se puede eliminar con confirmación; las cuentas oficiales nunca se eliminan.",
+      "Un código con movimientos o referencias (compras, extractos, nómina, ventas, saldos iniciales, ajustes, conceptos y cuentas bancarias, cuentas configuradas, proveedores o códigos personalizados que dependen de él) no se puede eliminar: «Ver referencias» muestra el detalle y se ofrece Desactivar.",
+      "Un código inactivo no aparece en nuevas selecciones, pero conserva sus movimientos, su clasificación y el historial, y se puede reactivar. Cada cambio en la tabla queda en el historial.",
+      "Nuevas columnas «En uso» y «Clasificación EEFF», y filtros por tipo (oficial / personalizado), estado (activo / inactivo), clasificación EEFF y todas las clases."
+    ]
+  },
+  {
     "version": "1.24.1",
     "date": "2026-10-15",
     "notes": [

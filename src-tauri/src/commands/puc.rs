@@ -1,13 +1,13 @@
 //! Tabla de Códigos PUC y Estados Financieros → Clasificación contable de
-//! compras. El catálogo oficial solo se lista; los códigos personalizados se
-//! crean aquí. La clasificación de títulos se guarda, igual que los códigos
+//! compras. El catálogo oficial nunca se borra; los códigos personalizados se
+//! crean, editan y (sin uso) eliminan aquí. La clasificación de títulos se guarda, igual que los códigos
 //! usados con cada proveedor. Los PDF se leen con los comandos de `invoices`.
 
 use tauri::State;
 
 use crate::database::{puc, Db};
 use crate::error::AppResult;
-use crate::models::puc::{CustomPucCodeInput, PucCode};
+use crate::models::puc::{CustomPucCodeInput, PucCode, PucCodeUpdateInput, PucUsage};
 use crate::models::withholding::{validate_title_category, DocumentTitleMapping, DocumentTitleMappingInput};
 
 /// Catálogo oficial + códigos personalizados.
@@ -20,6 +20,36 @@ pub fn list_puc_codes(db: State<'_, Db>) -> AppResult<Vec<PucCode>> {
 #[tauri::command]
 pub fn create_custom_puc_code(db: State<'_, Db>, input: CustomPucCodeInput) -> AppResult<PucCode> {
     db.with(|c| puc::create_custom_code(c, &input))
+}
+
+/// Códigos con alguna referencia (columna «En uso»).
+#[tauri::command]
+pub fn list_puc_usage(db: State<'_, Db>) -> AppResult<Vec<PucUsage>> {
+    db.with(|c| puc::list_usage(c))
+}
+
+/// Referencias de un código («Ver referencias»).
+#[tauri::command]
+pub fn get_puc_code_usage(db: State<'_, Db>, code: String) -> AppResult<PucUsage> {
+    db.with(|c| puc::code_usage(c, code.trim()))
+}
+
+/// Edita concepto (y, en un personalizado sin uso, el número y el padre).
+#[tauri::command]
+pub fn update_puc_code(db: State<'_, Db>, input: PucCodeUpdateInput) -> AppResult<PucCode> {
+    db.with(|c| puc::update_code(c, &input))
+}
+
+/// Desactiva o reactiva un código asignable.
+#[tauri::command]
+pub fn set_puc_code_active(db: State<'_, Db>, code: String, active: bool) -> AppResult<PucCode> {
+    db.with(|c| puc::set_code_active(c, &code, active))
+}
+
+/// Elimina un código personalizado sin referencias.
+#[tauri::command]
+pub fn delete_custom_puc_code(db: State<'_, Db>, code: String) -> AppResult<()> {
+    db.with(|c| puc::delete_custom_code(c, &code))
 }
 
 #[tauri::command]

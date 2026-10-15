@@ -8,7 +8,8 @@ import { normalizeKey } from "../../../../utils/text";
  * Niveles: clase (1 dígito) → grupo (2) → cuenta (4) → subcuenta (6). Se
  * asignan la subcuenta oficial de 6 dígitos y los códigos personalizados
  * (creados en la app, globales, de 4 a 12 dígitos, ej. 11050501 o 7305); los
- * demás niveles organizan y dan contexto.
+ * demás niveles organizan y dan contexto. Un código inactivo sigue en el
+ * índice (lo histórico lo muestra) pero no se ofrece en nuevas búsquedas.
  */
 
 export type PucLevel = "class" | "group" | "account" | "leaf";
@@ -35,10 +36,12 @@ export interface PucIndex {
   all: PucCode[];
   /** Código (cualquier nivel) → concepto. */
   concepts: Map<string, string>;
-  /** Códigos asignables: subcuentas oficiales de 6 dígitos y personalizados. */
+  /** Códigos asignables y activos: subcuentas oficiales de 6 dígitos y personalizados. */
   leaves: Leaf[];
   /** Códigos personalizados (creados en la app). */
   custom: Set<string>;
+  /** Códigos inactivos: no aparecen en nuevas selecciones. */
+  inactive: Set<string>;
 }
 
 export function buildPucIndex(codes: PucCode[]): PucIndex {
@@ -46,13 +49,14 @@ export function buildPucIndex(codes: PucCode[]): PucIndex {
   const all = codes.filter((c) => c.custom || levelOf(c.code)).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   const concepts = new Map(all.map((c) => [c.code, c.concept]));
   const custom = new Set(all.filter((c) => c.custom).map((c) => c.code));
+  const inactive = new Set(all.filter((c) => c.active === false).map((c) => c.code));
   const leaves = all
-    .filter((c) => c.custom || isSelectableCode(c.code))
+    .filter((c) => (c.custom || isSelectableCode(c.code)) && !inactive.has(c.code))
     .map((c) => ({ ...c, key: normalizeKey(c.concept), accountKey: normalizeKey(concepts.get(c.code.slice(0, 4)) ?? ""), groupKey: normalizeKey(concepts.get(c.code.slice(0, 2)) ?? "") }));
-  return { all, concepts, leaves, custom };
+  return { all, concepts, leaves, custom, inactive };
 }
 
-/** El código se puede asignar a un movimiento (subcuenta oficial de 6 dígitos o personalizado). */
+/** El código se puede asignar a un movimiento (subcuenta oficial de 6 dígitos o personalizado), aunque esté inactivo. */
 export const isAssignable = (index: PucIndex, code: string | undefined): code is string => Boolean(code && (index.custom.has(code) || (isSelectableCode(code) && index.concepts.has(code))));
 
 /** Concepto de un código asignable; undefined si no existe o no se puede asignar. */
@@ -111,6 +115,7 @@ export function searchLeaves(index: PucIndex, query: string, limit = 40): LeafSe
   if (/^\d+$/.test(q)) {
     let found = index.leaves.filter((l) => l.code.startsWith(q));
     // Un nivel del catálogo sin subcuentas explícitas (solo trae un rango): no hay nada que ofrecer.
+    if (found.length === 0 && index.inactive.has(q)) return { results: [], total: 0, note: `${q} — ${index.concepts.get(q)} está inactivo. Reactívalo en Datos → Tabla de Códigos PUC para usarlo.` };
     const parent = found.length === 0 && q.length < 6 ? index.concepts.get(q) : undefined;
     if (parent) return { results: [], total: 0, note: `${q} — ${parent} no tiene subcuentas de 6 dígitos en el catálogo.` };
     if (found.length === 0 && q.length < 6) found = index.leaves.filter((l) => l.code.includes(q));
@@ -140,6 +145,8 @@ export interface PucRow {
   concept?: string;
   /** Código creado en la app. */
   custom?: boolean;
+  /** Inactivo. */
+  inactive?: boolean;
 }
 
 /** Prefijos que son ancestros de un código: «110505» → «1», «11», «1105». */
@@ -148,21 +155,25 @@ const ancestors = (code: string) => [1, 2, 4].filter((n) => n < code.length).map
 /**
  * Filas del catálogo con su jerarquía, en el orden del PUC.
  *
- * - `classCode`: solo esa clase (primer dígito). Se ignora al buscar.
+ * - `classCode`: solo esa clase (primer dígito); vacío = todas. Se ignora al buscar.
  * - `query`: por código (prefijo) o concepto. Se muestran las coincidencias,
  *   sus niveles superiores (contexto) y todo lo que cuelga de una coincidencia.
+ * - `filter`: solo los códigos que lo cumplen (tipo, estado, clasificación…),
+ *   con sus niveles superiores como contexto.
  *
  * Un nivel que falta en la fuente (ej. un grupo sin fila propia) se agrega
  * como encabezado sin concepto para que sus cuentas no queden sueltas.
  */
-export function catalogRows(index: PucIndex, options: { classCode?: string; query?: string } = {}): PucRow[] {
+export function catalogRows(index: PucIndex, options: { classCode?: string; query?: string; filter?: (c: PucCode) => boolean } = {}): PucRow[] {
   const q = normalizeKey(options.query ?? "");
+  const filter = options.filter;
   let visible: Set<string> | undefined;
 
-  if (q) {
+  if (q || filter) {
     const digits = /^\d+$/.test(q);
     const words = q.split(" ");
-    const matched = index.all.filter((c) => (digits ? c.code.startsWith(q) : words.every((w) => normalizeKey(c.concept).includes(w)))).map((c) => c.code);
+    const byQuery = (c: PucCode) => !q || (digits ? c.code.startsWith(q) : words.every((w) => normalizeKey(c.concept).includes(w)));
+    const matched = index.all.filter((c) => byQuery(c) && (!filter || filter(c))).map((c) => c.code);
     visible = new Set<string>();
     for (const code of matched) {
       visible.add(code);
@@ -171,21 +182,22 @@ export function catalogRows(index: PucIndex, options: { classCode?: string; quer
       if (code.length > 6) visible.add(code.slice(0, 6));
     }
     // Lo que cuelga de un nivel que coincide también se muestra.
-    const parents = matched.filter((c) => c.length < 6);
-    if (parents.length) for (const c of index.all) if (parents.some((p) => c.code.startsWith(p))) visible.add(c.code);
+    const parents = q ? matched.filter((c) => c.length < 6) : [];
+    if (parents.length) for (const c of index.all) if (parents.some((p) => c.code.startsWith(p)) && (!filter || filter(c))) visible.add(c.code);
   }
 
   const rows: PucRow[] = [];
   const emitted = new Set<string>();
   for (const c of index.all) {
-    if (visible ? !visible.has(c.code) : options.classCode !== undefined && c.code[0] !== options.classCode) continue;
+    const otherClass = Boolean(options.classCode) && c.code[0] !== options.classCode;
+    if (visible ? !visible.has(c.code) || (!q && otherClass) : otherClass) continue;
     for (const a of ancestors(c.code)) {
       if (emitted.has(a)) continue;
       emitted.add(a);
       if (!index.concepts.has(a)) rows.push({ level: levelOf(a)!, code: a });
     }
     emitted.add(c.code);
-    rows.push({ level: levelOf(c.code) ?? "leaf", code: c.code, concept: c.concept, custom: c.custom || undefined });
+    rows.push({ level: levelOf(c.code) ?? "leaf", code: c.code, concept: c.concept, custom: c.custom || undefined, inactive: c.active === false || undefined });
   }
   return rows;
 }

@@ -144,3 +144,31 @@ describe("catalogRows: Tabla de Códigos PUC", () => {
     expect(new Set(all.map((r) => r.code)).size).toBe(all.length);
   });
 });
+
+describe("códigos inactivos y filtros de la tabla", () => {
+  const withAdmin = buildPucIndex([
+    ...loadSeededCatalog().map((c) => (c.code === "110510" ? { ...c, active: false } : c)),
+    { code: "11050501", concept: "Cuenta temporal", custom: true, parentCode: "110505", active: true },
+    { code: "11050502", concept: "Cuenta usada", custom: true, parentCode: "110505", active: false },
+  ]);
+
+  it("un inactivo no se ofrece en nuevas búsquedas, pero lo histórico lo sigue leyendo", () => {
+    expect(withAdmin.inactive).toEqual(new Set(["110510", "11050502"]));
+    const found = searchLeaves(withAdmin, "1105", 50).results.map((r) => r.code);
+    expect(found).toEqual(["110505", "11050501", "110515"]);
+    expect(searchLeaves(withAdmin, "110510").note).toContain("está inactivo");
+    expect(leafConcept(withAdmin, "11050502")).toBe("Cuenta usada");
+  });
+
+  it("filtra por tipo y estado con sus niveles superiores como contexto", () => {
+    const custom = catalogRows(withAdmin, { classCode: "", filter: (c) => Boolean(c.custom) });
+    expect(custom.map((r) => r.code)).toEqual(["1", "11", "1105", "110505", "11050501", "11050502"]);
+    expect(custom.find((r) => r.code === "11050502")?.inactive).toBe(true);
+    // 110505 solo aparece como contexto (padre del personalizado inactivo).
+    const inactive = catalogRows(withAdmin, { classCode: "", filter: (c) => c.active === false }).filter((r) => r.level === "leaf");
+    expect(inactive.map((r) => [r.code, Boolean(r.inactive)])).toEqual([["110505", false], ["11050502", true], ["110510", true]]);
+    // Con filtro y clase, solo esa clase; al buscar, todo el catálogo.
+    expect(catalogRows(withAdmin, { classCode: "5", filter: (c) => Boolean(c.custom) })).toEqual([]);
+    expect(catalogRows(withAdmin, { classCode: "5", query: "temporal", filter: (c) => Boolean(c.custom) }).map((r) => r.code)).toContain("11050501");
+  });
+});

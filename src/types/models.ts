@@ -257,6 +257,28 @@ export interface PucCode {
   custom?: boolean;
   /** Padre confirmado por el usuario (solo personalizados). */
   parentCode?: string;
+  /** false: inactivo, no se ofrece en nuevas selecciones (lo histórico lo conserva). */
+  active?: boolean;
+  /** Denominación del catálogo cuando el usuario cambió la de una cuenta oficial. */
+  officialConcept?: string;
+}
+
+/** Referencias de un código PUC por clase (ej. 3 movimientos de compras). */
+export interface PucUsage {
+  code: string;
+  total: number;
+  items: { kind: string; count: number }[];
+}
+
+/** Edición de una fila de la Tabla de Códigos PUC. */
+export interface PucCodeUpdate {
+  code: string;
+  /** Solo personalizados sin uso. */
+  newCode?: string;
+  /** Oficial: vacío = volver a la denominación del catálogo. */
+  concept: string;
+  /** Solo personalizados. */
+  parentCode?: string;
 }
 
 /** Clasificación guardada de un estado de Dropi (global al módulo Dropi). */

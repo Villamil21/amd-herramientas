@@ -2748,6 +2748,44 @@ button.stat--link {
   padding-left: calc(var(--space-4) + var(--space-5));
 }
 
+/* Tabla de Códigos PUC administrable (Datos). */
+.puc-table--admin .puc-row__usage,
+.puc-table--admin .puc-row__fs {
+  font-size: var(--text-sm);
+}
+
+.puc-table--admin .actions {
+  text-align: left;
+}
+
+.puc-row__actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.puc-row__delete {
+  color: var(--color-danger-ink);
+}
+
+.puc-row__delete.is-muted {
+  color: var(--color-muted);
+}
+
+.puc-row.is-inactive td:nth-child(-n + 2) {
+  color: var(--color-muted);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-primary-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .puc-row__missing {
   font-weight: 400;
   font-size: var(--text-sm);

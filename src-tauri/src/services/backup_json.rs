@@ -236,6 +236,8 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
 /// dependencias: se restauran en este orden y se vacían en el inverso.
 const FS_TABLES: &[&str] = &[
     "puc_custom_codes",
+    "puc_official_overrides",
+    "puc_code_events",
     "fs_lines",
     "fs_sections",
     "fs_puc_mappings",
