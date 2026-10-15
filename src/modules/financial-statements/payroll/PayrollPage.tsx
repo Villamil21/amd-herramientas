@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Settings2 } from "lucide-react";
+import { Pencil, Settings2 } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
 import { Alert, Badge, Button, Card, PageHeader, useToast } from "../../../components/ui";
 import { saveExcelSheets } from "../../bank-analysis/shared/excelExportService";
@@ -20,8 +20,22 @@ import { PucSettingsModal, type PucSettingItem } from "../shared/components/PucS
 import { SendToFs } from "../shared/components/SendToFs";
 import { formatExactCents, lastDayOfMonth, periodLabel, slashToIso } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { allPayrollKeys, areaFor, computeMonth, employeeKey, employeeMovements, findAbsences, KIND_LABEL, MORA_KEY, openEmployment, parseIdentification, requiredKeys, wagesFor, type EmployeeMonth } from "./calc";
-import { AreaChangeModal, EmployeeFormModal, JustifyAbsenceModal, LiquidationModal, RehireModal } from "./PayrollModals";
+import {
+  allPayrollKeys,
+  areaFor,
+  computeMonth,
+  employeeKey,
+  employeeMovements,
+  findAbsences,
+  KIND_LABEL,
+  MORA_KEY,
+  openEmployment,
+  parseIdentification,
+  requiredKeys,
+  wagesFor,
+  type EmployeeMonth,
+} from "./calc";
+import { AreaChangeModal, EmployeeEditModal, EmployeeFormModal, JustifyAbsenceModal, LiquidationModal, RehireModal } from "./PayrollModals";
 
 const LABELS = { pick: "Seleccionar planilla PDF", pickAnother: "Seleccionar otra planilla", analyzing: "Analizando planilla…" };
 
@@ -68,6 +82,7 @@ export default function PayrollPage() {
   const [liquidate, setLiquidate] = useState<{ employee: Employee; lastPeriod: string } | null>(null);
   const [justify, setJustify] = useState<Employee | null>(null);
   const [areaChange, setAreaChange] = useState<Employee | null>(null);
+  const [editing, setEditing] = useState<Employee | null>(null);
 
   useEffect(() => {
     minimumWageService.list().then(setWages, (e) => toast(errorMessage(e), "error"));
@@ -145,6 +160,8 @@ export default function PayrollPage() {
     absences.length > 0 && `${absences.length} posibles retiros sin liquidación`,
     missingKeys.length > 0 && "Faltan cuentas PUC de nómina",
   ].filter(Boolean) as string[];
+  // Solo faltan cuentas PUC: es una clasificación pendiente; lo demás requiere revisión.
+  const blockedStatus = blocking.length === 1 && missingKeys.length > 0 ? "Pendiente de clasificación" : "Requiere revisión";
 
   function buildBatch(): BatchInput | null {
     if (!summary || companyId === null || !paymentDate) return null;
@@ -213,6 +230,16 @@ export default function PayrollPage() {
 
       {summary && (
         <>
+          <SendToFs
+            blocked={blocking[0] ?? null}
+            blockedStatus={blockedStatus}
+            reasons={blocking}
+            build={buildBatch}
+            onExport={exportExcel}
+            exporting={exportingSheets}
+            duplicateTitle="Esta planilla ya fue enviada."
+            onSent={() => void reloadPayroll()}
+          />
           <Card>
             <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
               <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} hint={state.status === "done" && state.analysis.employerNit ? `NIT del aportante en la planilla: ${state.analysis.employerNit}` : undefined} />
@@ -248,6 +275,9 @@ export default function PayrollPage() {
                 <Button size="sm" onClick={() => setJustify(a.employee)}>
                   No se retiró / justificar ausencia
                 </Button>
+                <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(a.employee)}>
+                  Editar empleado
+                </Button>
               </div>
             </Alert>
           ))}
@@ -268,18 +298,42 @@ export default function PayrollPage() {
                   <tr>
                     <th>Empleado</th>
                     <th>Área</th>
-                    <th style={{ textAlign: "right" }}>Días</th>
-                    <th style={{ textAlign: "right" }}>Sueldo base</th>
-                    <th style={{ textAlign: "right" }}>Sueldo del mes</th>
-                    <th style={{ textAlign: "right" }}>Auxilio</th>
-                    <th style={{ textAlign: "right" }}>Pensión</th>
-                    <th style={{ textAlign: "right" }}>EPS</th>
-                    <th style={{ textAlign: "right" }}>ARL</th>
-                    <th style={{ textAlign: "right" }}>CCF</th>
-                    <th style={{ textAlign: "right" }}>Prima</th>
-                    <th style={{ textAlign: "right" }}>Cesantías</th>
-                    <th style={{ textAlign: "right" }}>Intereses</th>
-                    <th style={{ textAlign: "right" }}>Vacaciones</th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Días
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Sueldo base
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Sueldo del mes
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Auxilio
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Pensión
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      EPS
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      ARL
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      CCF
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Prima
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Cesantías
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Intereses
+                    </th>
+                    <th className="nowrap" style={{ textAlign: "right" }}>
+                      Vacaciones
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -287,6 +341,17 @@ export default function PayrollPage() {
                     <tr key={`${m.docType}${m.docNumber}`} className={!m.employee || !m.employmentId ? "row-attention--blocking" : undefined}>
                       <td>
                         <span className="table__primary">{m.employee?.name ?? m.source.name}</span>
+                        {m.employee && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            iconOnly
+                            icon={<Pencil size={13} />}
+                            aria-label={`Editar empleado ${m.employee.name}`}
+                            title="Editar empleado"
+                            onClick={() => setEditing(m.employee!)}
+                          />
+                        )}
                         <div className="table__secondary">
                           {m.docType} {m.docNumber}
                           {m.employee && m.employmentId && m.employee.employments.length > 1 && ` · Vinculación #${m.employee.employments.find((j) => j.id === m.employmentId)?.number}`}
@@ -312,11 +377,18 @@ export default function PayrollPage() {
                         )}
                       </td>
                       <td style={{ textAlign: "right" }}>{formatInteger(m.calc.days)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(m.calc.baseSalaryCents)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(m.calc.salaryCents)}</td>
-                      <td style={{ textAlign: "right" }}>{m.calc.transportApplies ? formatExactCents(m.calc.transportCents) : "No aplica"}</td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(m.calc.baseSalaryCents)}
+                      </td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(m.calc.salaryCents)}
+                      </td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {m.calc.transportApplies ? formatExactCents(m.calc.transportCents) : "No aplica"}
+                      </td>
+                      {/* Toda columna monetaria: «$ 1.750.905,00» en una sola línea (la tabla se desplaza horizontalmente). */}
                       {[m.social.pension, m.social.health, m.social.arl, m.social.ccf, m.calc.primaCents, m.calc.cesantiasCents, m.calc.interesesCents, m.calc.vacacionesCents].map((v, i) => (
-                        <td key={i} style={{ textAlign: "right" }}>
+                        <td key={i} className="nowrap" style={{ textAlign: "right" }}>
                           {formatExactCents(v)}
                         </td>
                       ))}
@@ -327,11 +399,6 @@ export default function PayrollPage() {
             </div>
           </Card>
           {lateInterestCents > 0 && <Alert tone="info">Intereses de mora de la planilla: {formatExactCents(lateInterestCents)} (cuenta global, sin área).</Alert>}
-
-          <Card title="Estados Financieros">
-            <SendToFs blocked={blocking[0] ?? null} build={buildBatch} onExport={exportExcel} exporting={exportingSheets} duplicateTitle="Esta planilla ya fue enviada." onSent={() => void reloadPayroll()} />
-            {blocking.length > 1 && <div className="field__hint" style={{ marginTop: 8 }}>Pendientes: {blocking.join(" · ")}.</div>}
-          </Card>
         </>
       )}
 
@@ -348,10 +415,50 @@ export default function PayrollPage() {
           }}
         />
       )}
-      <RehireModal employee={rehire} onClose={() => setRehire(null)} onSaved={async () => { setRehire(null); await reloadPayroll(); }} />
-      <LiquidationModal employee={liquidate?.employee ?? null} lastPeriod={liquidate?.lastPeriod ?? period} onClose={() => setLiquidate(null)} onSaved={async () => { setLiquidate(null); await reloadPayroll(); }} />
-      <JustifyAbsenceModal employee={justify} period={period} onClose={() => setJustify(null)} onSaved={async () => { setJustify(null); await reloadPayroll(); }} />
-      <AreaChangeModal employee={areaChange} period={period} onClose={() => setAreaChange(null)} onSaved={async () => { setAreaChange(null); await reloadPayroll(); }} />
+      <RehireModal
+        employee={rehire}
+        onClose={() => setRehire(null)}
+        onSaved={async () => {
+          setRehire(null);
+          await reloadPayroll();
+        }}
+      />
+      <LiquidationModal
+        employee={liquidate?.employee ?? null}
+        lastPeriod={liquidate?.lastPeriod ?? period}
+        onClose={() => setLiquidate(null)}
+        onSaved={async () => {
+          setLiquidate(null);
+          await reloadPayroll();
+        }}
+      />
+      <JustifyAbsenceModal
+        employee={justify}
+        period={period}
+        onClose={() => setJustify(null)}
+        onSaved={async () => {
+          setJustify(null);
+          await reloadPayroll();
+        }}
+      />
+      <EmployeeEditModal
+        employee={editing}
+        period={period}
+        onClose={() => setEditing(null)}
+        onSaved={async () => {
+          setEditing(null);
+          await reloadPayroll();
+        }}
+      />
+      <AreaChangeModal
+        employee={areaChange}
+        period={period}
+        onClose={() => setAreaChange(null)}
+        onSaved={async () => {
+          setAreaChange(null);
+          await reloadPayroll();
+        }}
+      />
       <PucSettingsModal
         open={settingsOpen}
         title="Cuentas PUC de nómina"

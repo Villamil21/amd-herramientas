@@ -6,7 +6,20 @@ import { fileService } from "../../../services/fileService";
 import { fsService } from "../../../services/fsService";
 import { signerService } from "../../../services/signerService";
 import { errorMessage } from "../../../services/tauri";
-import { PERIOD_STATUS_LABEL, PRESENTATION_LABEL, type Adjustment, type BankBalance, type BatchSummary, type Employee, type Movement, type PayrollRow, type Period, type PeriodKey, type Presentation } from "../../../types/fs";
+import {
+  PERIOD_STATUS_LABEL,
+  PRESENTATION_LABEL,
+  type Adjustment,
+  type BankAccountLifecycle,
+  type BankBalance,
+  type BatchSummary,
+  type Employee,
+  type Movement,
+  type PayrollRow,
+  type Period,
+  type PeriodKey,
+  type Presentation,
+} from "../../../types/fs";
 import type { CertificateSigner } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
 import { areaFor } from "../payroll/calc";
@@ -32,6 +45,7 @@ interface Ledger {
   periods: Period[];
   taxReturns: TaxReturn[];
   vatPeriodicity: VatPeriodicity | null;
+  bankLifecycles: BankAccountLifecycle[];
 }
 
 const REVIEW_CHANGED = "Los valores cambiaron después de la última validación (movimientos, catálogo, mapeos o datos de la empresa).";
@@ -71,7 +85,7 @@ export default function GeneratorPage() {
   const loadLedger = useCallback(async () => {
     if (companyId === null) return setLedger(null);
     try {
-      const [movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, taxSettings] = await Promise.all([
+      const [movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, taxSettings, bankLifecycles] = await Promise.all([
         fsService.movements(companyId),
         fsService.bankBalances(companyId),
         fsService.batches(companyId),
@@ -81,8 +95,9 @@ export default function GeneratorPage() {
         fsService.periods(companyId),
         taxService.list(companyId),
         taxService.settings(companyId),
+        fsService.bankLifecycles(companyId),
       ]);
-      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, vatPeriodicity: taxSettings.vatPeriodicity });
+      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, vatPeriodicity: taxSettings.vatPeriodicity, bankLifecycles });
     } catch (e) {
       toast(errorMessage(e), "error");
     }
@@ -110,7 +125,18 @@ export default function GeneratorPage() {
   const statements = useMemo(() => {
     if (!ledger || !data.catalog || !company || !rangeOk || !presentation) return null;
     const tax = { returns: ledger.taxReturns, puc: data.settingsMap, vatPeriodicity: ledger.vatPeriodicity };
-    const input = { company, catalog: data.catalog, mappings: data.mappings, movements: ledger.movements, bankBalances: ledger.balances, pucConcepts: data.index.concepts, start, end, tax };
+    const input = {
+      company,
+      catalog: data.catalog,
+      mappings: data.mappings,
+      movements: ledger.movements,
+      bankBalances: ledger.balances,
+      bankLifecycles: ledger.bankLifecycles,
+      pucConcepts: data.index.concepts,
+      start,
+      end,
+      tax,
+    };
     return { current: buildStatements({ ...input, presentation }), other: buildStatements({ ...input, presentation: presentation === "bank" ? "otc" : "bank" }) };
   }, [ledger, data.catalog, data.mappings, data.index, data.settingsMap, company, start, end, rangeOk, presentation]);
 
@@ -131,7 +157,7 @@ export default function GeneratorPage() {
       const e = ledger.employees.find((x) => x.id === r.employeeId);
       return !e || !areaFor(e, r.period);
     }).length;
-    const cov = coverage(start, end, ledger.movements, ledger.balances, ledger.batches);
+    const cov = coverage(start, end, ledger.movements, ledger.balances, ledger.batches, ledger.bankLifecycles);
     return { coverage: cov, tax: taxCoverage(cov.months, ledger.taxReturns, ledger.vatPeriodicity, end), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
   }, [ledger, start, end, rangeOk]);
 
@@ -399,8 +425,18 @@ export default function GeneratorPage() {
             </Card>
           )}
 
-          <Card title="Fuentes del periodo y cobertura mensual" description="✓ con información · — sin información · 1/2 cuentas con extracto. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos.">
-            <CoverageTable months={review.coverage.months} rows={review.coverage.rows} companyName={company?.razonSocial ?? ""} tax={review.tax} />
+          <Card
+            title="Fuentes del periodo y cobertura mensual"
+            description="✓ con información · — sin información · 1/2 cuentas con extracto · N/A cuenta aún no abierta o ya cerrada. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos."
+          >
+            <CoverageTable
+              months={review.coverage.months}
+              rows={review.coverage.rows}
+              companyName={company?.razonSocial ?? ""}
+              tax={review.tax}
+              companyId={companyId}
+              onLifecycleChanged={loadLedger}
+            />
           </Card>
 
           <Card

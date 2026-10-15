@@ -1,5 +1,4 @@
-import { FileSpreadsheet } from "lucide-react";
-import { Button, PageHeader } from "../../../components/ui";
+import { PageHeader } from "../../../components/ui";
 import { SignedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
 import type { GroupLabels } from "../shared/components/groupLabels";
 import { GroupsTable } from "../shared/components/GroupsTable";
@@ -33,18 +32,7 @@ export default function DaviviendaStatementPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Extractos bancarios"
-        title="Davivienda"
-        description="Importa un extracto bancario en PDF para analizar sus movimientos."
-        actions={
-          state.status === "done" && (
-            <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={() => void exportExcel()} loading={exporting}>
-              Exportar Excel
-            </Button>
-          )
-        }
-      />
+      <PageHeader eyebrow="Extractos bancarios" title="Davivienda" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
         state={state}
@@ -56,12 +44,11 @@ export default function DaviviendaStatementPage() {
       />
 
       {state.status === "done" && (
-        <>
+        <SignedBankAccounting statement={state.analysis.statement} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting}>
           <ValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} validatedMessage={VALIDATED} />
           <SummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.currentBalanceCents} />
           <GroupsTable groups={state.analysis.groups} labels={LABELS} />
-          <SignedBankAccounting statement={state.analysis.statement} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting} />
-        </>
+        </SignedBankAccounting>
       )}
     </>
   );

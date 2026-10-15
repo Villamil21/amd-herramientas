@@ -7,7 +7,7 @@ import { errorMessage } from "../../../services/tauri";
 import { formatInteger } from "../../../utils/format";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
-import { formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
+import { formatAccountingCents, formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { ImportModal, PaymentModal, ReturnDetailModal, StatusBadge } from "./components";
 import { parseTaxReturn, TAX_FORM_LABEL, TaxReturnError } from "./parser/taxReturnParser";
@@ -180,9 +180,17 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                     <tr>
                       <th>Periodo</th>
                       <th>Formulario</th>
-                      <th style={{ textAlign: "right" }}>Saldo a pagar</th>
-                      <th style={{ textAlign: "right" }}>Saldo a favor</th>
-                      {taxType === "income" && <th style={{ textAlign: "right" }}>Resultado fiscal</th>}
+                      <th className="nowrap" style={{ textAlign: "right" }}>
+                        Saldo a pagar
+                      </th>
+                      <th className="nowrap" style={{ textAlign: "right" }}>
+                        Saldo a favor
+                      </th>
+                      {taxType === "income" && (
+                        <th className="nowrap" style={{ textAlign: "right" }}>
+                          Resultado fiscal
+                        </th>
+                      )}
                       <th>Fecha de pago</th>
                       <th>Estado</th>
                       <th />
@@ -205,7 +213,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                           <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(r.favorCents)}</td>
                           {taxType === "income" && (
                             <td style={{ textAlign: "right" }} className={(r.incomeLossCents ?? 0) > 0 ? "nowrap amount--negative" : "nowrap"}>
-                              {formatExactCents((r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0))}
+                              {formatAccountingCents((r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0))}
                             </td>
                           )}
                           <td className="nowrap">{r.paymentDate ? formatIsoDate(r.paymentDate) : "—"}</td>
@@ -260,7 +268,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                         <tr key={n}>
                           <td>{e.label}</td>
                           <td className="mono">{e.pucCode ?? <Badge tone="danger">Sin configurar</Badge>}</td>
-                          <td style={{ textAlign: "right" }} className={e.cents < 0 ? "amount--negative" : undefined}>
+                          <td style={{ textAlign: "right" }} className={e.cents < 0 ? "nowrap amount--negative" : "nowrap"}>
                             {formatExactCents(e.cents)}
                           </td>
                         </tr>

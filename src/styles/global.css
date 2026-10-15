@@ -2330,6 +2330,37 @@ button.stat--link {
   border-color: var(--color-primary-border);
 }
 
+/* Zona única de acciones de Estados Financieros: estado a la izquierda, botones a la derecha. */
+.fs-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.fs-action-bar__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.fs-action-bar__detail {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
+.fs-action-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
 .pending-panel {
   border-width: 1px 1px 1px 4px;
   overflow: hidden;
@@ -3336,6 +3367,41 @@ button.stat--link {
   font-weight: 600;
 }
 
+/* «No aplica»: la cuenta aún no estaba abierta o ya estaba cerrada ese mes (no se espera extracto). */
+.fs-coverage__cell.is-na {
+  width: auto;
+  min-width: 26px;
+  padding: 0 4px;
+  border-style: dashed;
+  background: var(--color-surface-alt);
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.fs-coverage__lifecycle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.fs-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.fs-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 /* Mes final sin saldo bancario: el ESF de esa cuenta queda pendiente (aunque haya extracto). */
 .fs-coverage__cell.is-balance-pending {
   border: 1.5px dashed var(--color-danger);
@@ -3372,7 +3438,10 @@ button.stat--link {
   padding-right: var(--space-3);
 }
 
-.fs-coverage-detail .nowrap {
+/* Cifras monetarias (y otras que no deben partirse): «$ 1.750.905,00» siempre en una línea. */
+.nowrap,
+.table td.nowrap,
+.table th.nowrap {
   white-space: nowrap;
 }
 

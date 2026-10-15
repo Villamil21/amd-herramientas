@@ -1,25 +1,21 @@
 import { navigate, paths } from "../../../../app/router";
-import { Alert, Badge, Button, Card } from "../../../../components/ui";
+import { Alert, Button, Card } from "../../../../components/ui";
 import { formatInteger } from "../../../../utils/format";
 import { type DocCompany, PROBLEM_TEXT } from "../services/accounting";
 
 interface Props {
   docs: DocCompany[];
   pendingActions: number;
-  /** Motivo que bloquea el envío; null = listo. */
-  blocked: string | null;
-  /** Importación del último envío de esta pantalla. */
-  sentBatch: number | null;
   onDecide: (fileName: string, decision: "ignore" | "process") => void;
   onOpen: (fileName: string) => void;
 }
 
 /**
  * Estado del envío a Estados Financieros: empresa por NIT del adquiriente,
- * alertas NIT / nombre y bloqueo por pendientes. Los botones de exportar y
- * enviar están en el encabezado de la página.
+ * alertas NIT / nombre y bloqueo por pendientes. El estado y los botones de
+ * exportar y enviar están en la zona de acciones, al inicio de los resultados.
  */
-export function PurchasesFsCard({ docs, pendingActions, blocked, sentBatch, onDecide, onOpen }: Props) {
+export function PurchasesFsCard({ docs, pendingActions, onDecide, onOpen }: Props) {
   const problems = docs.filter((d) => d.problem);
   const sendable = docs.filter((d) => !d.problem && d.decision !== "ignore");
   const company = sendable[0]?.company;
@@ -71,10 +67,11 @@ export function PurchasesFsCard({ docs, pendingActions, blocked, sentBatch, onDe
             </table>
           </div>
         )}
-        {docs.some((d) => d.decision === "ignore") && <span className="field__hint">{formatInteger(docs.filter((d) => d.decision === "ignore").length)} facturas ignoradas por diferencia de nombre: no se envían (la decisión queda registrada).</span>}
-        <div className="row">
-          {blocked ? <Badge tone="warning">{blocked}</Badge> : sentBatch ? <Badge tone="success">Enviado · importación #{sentBatch}</Badge> : <Badge tone="success">Listo para Estados Financieros</Badge>}
-        </div>
+        {docs.some((d) => d.decision === "ignore") && (
+          <span className="field__hint">
+            {formatInteger(docs.filter((d) => d.decision === "ignore").length)} facturas ignoradas por diferencia de nombre: no se envían (la decisión queda registrada).
+          </span>
+        )}
       </div>
     </Card>
   );

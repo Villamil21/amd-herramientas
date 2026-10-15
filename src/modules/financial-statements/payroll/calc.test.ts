@@ -15,6 +15,7 @@ const employee = (id: number, doc: string, extra: Partial<Employee> = {}): Emplo
   employments: [{ id: id * 10, number: 1, hireDate: "2026-01-01", endDate: null }],
   liquidations: [],
   justifications: [],
+  events: [],
   ...extra,
 });
 

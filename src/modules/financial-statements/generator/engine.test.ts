@@ -331,6 +331,33 @@ describe("obligaciones tributarias en el ESF", () => {
     expect(run({ tax, mappings, end: "2026-08-31" }).esf.currentLiabilities).toBe(0);
   });
 
+  describe("prueba obligatoria — Retefuente corriente / no corriente según el año", () => {
+    const ret = (id: number, year: number, period: number, paymentDate: string | null) => {
+      const month = String(period).padStart(2, "0");
+      return { ...retefuente, id, year, period, periodStart: `${year}-${month}-01`, periodEnd: `${year}-${month}-28`, formNumber: String(id), payableCents: 100_000_000, paymentDate };
+    };
+    const runWith = (returns: TaxReturn[]) => run({ tax: { ...tax, returns }, mappings, end: "2026-08-31" });
+
+    it("caso 1: diciembre 2025 pendiente al 31/08/2026 → pasivo no corriente (el PUC no cambia)", () => {
+      const s = runWith([ret(10, 2025, 12, null)]);
+      expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([0, 100_000_000]);
+      const line = s.sections.liability_noncurrent.lines.find((l) => l.cents !== 0)!;
+      expect(line.contributions.map((c) => c.pucCode)).toEqual(["236540"]);
+      expect(line.automatic).toContain("no corriente");
+      expect(line.automatic).toContain("236540");
+    });
+
+    it("caso 2: julio 2026 pendiente → pasivo corriente", () => {
+      const s = runWith([ret(11, 2026, 7, null)]);
+      expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([100_000_000, 0]);
+    });
+
+    it("caso 3: Retefuente 2025 pagada el 15/01/2026 → no aparece como CxP", () => {
+      const s = runWith([ret(12, 2025, 12, "2026-01-15")]);
+      expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([0, 0]);
+    });
+  });
+
   it("sin la cuenta PUC configurada no se envía y bloquea la lista de verificación", () => {
     const s = run({ tax: { ...tax, puc: new Map() }, mappings, end: "2026-09-30" });
     expect(s.esf.currentLiabilities).toBe(0);

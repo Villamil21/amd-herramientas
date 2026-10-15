@@ -1,5 +1,4 @@
-import { FileSpreadsheet } from "lucide-react";
-import { Button, PageHeader } from "../../../components/ui";
+import { PageHeader } from "../../../components/ui";
 import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
 import { DebitCreditSummaryCards } from "../shared/components/DebitCreditSummaryCards";
 import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
@@ -21,18 +20,7 @@ export default function BancoomevaStatementPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Extractos bancarios"
-        title="Bancoomeva"
-        description="Importa un extracto bancario en PDF para analizar sus movimientos."
-        actions={
-          state.status === "done" && (
-            <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={() => void exportExcel()} loading={exporting}>
-              Exportar Excel
-            </Button>
-          )
-        }
-      />
+      <PageHeader eyebrow="Extractos bancarios" title="Bancoomeva" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
         state={state}
@@ -44,12 +32,19 @@ export default function BancoomevaStatementPage() {
       />
 
       {state.status === "done" && (
-        <>
+        <TypedBankAccounting
+          statement={state.analysis.statement}
+          closingBalanceCents={state.analysis.statement.totals.closingBalanceCents}
+          openingBalanceCents={state.analysis.statement.totals.openingBalanceCents}
+          groups={state.analysis.groups}
+          fileName={state.fileName}
+          onExport={exportExcel}
+          exporting={exporting}
+        >
           <BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
           <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
           <BancoomevaGroupsTable groups={state.analysis.groups} />
-          <TypedBankAccounting statement={state.analysis.statement} closingBalanceCents={state.analysis.statement.totals.closingBalanceCents} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting} />
-        </>
+        </TypedBankAccounting>
       )}
     </>
   );

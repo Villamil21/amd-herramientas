@@ -145,6 +145,14 @@ export default function TpsvSalesPage() {
       {book.error && <Alert tone="danger">{book.error}</Alert>}
       {book.result && (
         <>
+          <SendToFs
+            blocked={blocked}
+            blockedStatus={missingKeys.length && blocked?.startsWith("Faltan cuentas") ? "Pendiente de clasificación" : "Requiere revisión"}
+            build={build}
+            onExport={exportExcel}
+            exporting={exporting}
+            duplicateTitle="Algunas operaciones ya fueron enviadas."
+          />
           {issues.length > 0 && <Alert tone="danger" title="Filas con datos ilegibles" items={issues.slice(0, 8).map((r) => `Hoja ${r.sheet}, fila ${r.rowNumber}: ${r.issue}`)} />}
           {repeated.length > 0 && <Alert tone="warning">{formatInteger(repeated.length)} filas repetidas en el archivo (mismo N° Registro, Fecha, Código Tipo y Monto): no se suman dos veces.</Alert>}
           {other.length > 0 && <Alert tone="info">{formatInteger(other.length)} filas con otro Código Tipo (ni 2 ni 3): no se envían.</Alert>}
@@ -161,7 +169,7 @@ export default function TpsvSalesPage() {
             <Stat label="Resultado propio" value={formatExactCents(sells - buys)} tone={sells - buys < 0 ? "negative" : "positive"} />
             <Stat label="Operaciones" value={formatInteger(valid.length)} />
           </div>
-          <Card flush title="Por mes (columna Fecha)">
+          <Card flush title="Por mes (columna Fecha)" description="En el Generador, la presentación Banco u OTC decide cómo se muestran estas operaciones; el resultado es el mismo en ambas.">
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -178,17 +186,20 @@ export default function TpsvSalesPage() {
                     <tr key={m}>
                       <td>{periodLabel(m)}</td>
                       <td style={{ textAlign: "right" }}>{formatInteger(v.count)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(v.buys)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(v.sells)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(v.sells - v.buys)}</td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(v.buys)}
+                      </td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(v.sells)}
+                      </td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(v.sells - v.buys)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </Card>
-          <Card title="Estados Financieros" description="En el Generador, la presentación Banco u OTC decide cómo se muestran estas operaciones; el resultado es el mismo en ambas.">
-            <SendToFs blocked={blocked} build={build} onExport={exportExcel} exporting={exporting} duplicateTitle="Algunas operaciones ya fueron enviadas." />
           </Card>
         </>
       )}

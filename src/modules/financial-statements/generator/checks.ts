@@ -1,4 +1,4 @@
-import { SOURCE_LABEL, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
+import { SOURCE_LABEL, type BankAccountLifecycle, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
 import { employeeKey, findAbsences, type Absence } from "../payroll/calc";
 import { monthsBetween, periodLabel } from "../shared/money";
 import { periodsPerYear } from "../tax-obligations/services/effects";
@@ -35,7 +35,14 @@ export interface CoverageRow {
  * Qué meses del rango tienen información de cada fuente, sin suponer que se
  * importó en orden (enero, febrero, abril y junio cargados → faltan marzo, mayo, julio y agosto).
  */
-export function coverage(start: string, end: string, movements: Movement[], balances: BankBalance[], batches: BatchSummary[]): { months: string[]; rows: CoverageRow[] } {
+export function coverage(
+  start: string,
+  end: string,
+  movements: Movement[],
+  balances: BankBalance[],
+  batches: BatchSummary[],
+  lifecycles: BankAccountLifecycle[] = [],
+): { months: string[]; rows: CoverageRow[] } {
   const months = monthsBetween(start, end);
   const batchById = new Map(batches.map((b) => [b.id, b]));
   const rows: CoverageRow[] = COVERAGE_SOURCES.map((source) => {
@@ -52,10 +59,12 @@ export function coverage(start: string, end: string, movements: Movement[], bala
     };
     if (source === "bank") {
       // Una sola marca global sería engañosa: el mes está completo solo si TODAS las cuentas lo tienen.
-      const bank = bankCoverage(months, movements, balances, batches);
+      const bank = bankCoverage(months, movements, balances, batches, lifecycles);
       for (const m of months) {
         const c = bank.cells[m];
-        cells[m] = { loaded: c.total > 0 && c.loaded === c.total, batches: c.batches, records: c.loaded };
+        // Un mes en que ninguna cuenta estaba abierta («No aplica») no falta.
+        const loaded = c.total > 0 ? c.loaded === c.total : bank.banks.length > 0 && c.notApplicable > 0;
+        cells[m] = { loaded, batches: c.batches, records: c.loaded };
       }
       // Sin saldo del mes final la fuente bancaria tampoco está completa.
       const last = months[months.length - 1];
@@ -92,6 +101,8 @@ export interface BankCell {
   batches: BatchSummary[];
   /** Algún extracto de ese mes fue reemplazado (el historial sigue visible en el detalle). */
   hasReplaced: boolean;
+  /** Cuentas para las que el mes «No aplica» (antes de su apertura o después de su cierre): no se esperan. */
+  notApplicable: number;
 }
 
 export interface BankAccountCoverage {
@@ -104,6 +115,8 @@ export interface BankAccountCoverage {
   lastMonth: string | null;
   /** Falta el saldo del mes final del rango: el ESF de esta cuenta queda pendiente. */
   finalBalanceMissing: boolean;
+  /** Apertura / cierre confirmados por el usuario (si hay). */
+  lifecycle: BankAccountLifecycle | null;
 }
 
 export interface BankCoverageGroup {
@@ -149,7 +162,19 @@ export function bankStatements(movements: Movement[], balances: BankBalance[], b
 }
 
 function emptyCell(): BankCell {
-  return { loaded: 0, total: 0, statements: [], batches: [], hasReplaced: false };
+  return { loaded: 0, total: 0, statements: [], batches: [], hasReplaced: false, notApplicable: 0 };
+}
+
+/**
+ * ¿La cuenta estaba abierta ese mes? Antes de la apertura confirmada o después
+ * del cierre confirmado el mes «No aplica». Sin apertura conocida se espera
+ * desde el inicio del rango; sin cierre, se sigue esperando.
+ */
+export function accountApplies(lifecycle: Pick<BankAccountLifecycle, "openedPeriod" | "closedPeriod"> | null | undefined, month: string): boolean {
+  if (!lifecycle) return true;
+  if (lifecycle.openedPeriod && month < lifecycle.openedPeriod) return false;
+  if (lifecycle.closedPeriod && month > lifecycle.closedPeriod) return false;
+  return true;
 }
 
 function mergeCells(months: string[], parts: Record<string, BankCell>[]): Record<string, BankCell> {
@@ -163,6 +188,7 @@ function mergeCells(months: string[], parts: Record<string, BankCell>[]): Record
         cell.statements.push(...c.statements);
         cell.batches.push(...c.batches);
         cell.hasReplaced ||= c.hasReplaced;
+        cell.notApplicable += c.notApplicable;
       }
       return [m, cell];
     }),
@@ -172,17 +198,21 @@ function mergeCells(months: string[], parts: Record<string, BankCell>[]): Record
 /**
  * Cobertura de extractos por banco y por cuenta (empresa + banco + número de
  * cuenta + periodo). Solo aparecen las cuentas que la empresa ha enviado alguna
- * vez; cada una se espera en todos los meses del rango y solo cuenta el
- * extracto activo (uno reemplazado o anulado se ve en el detalle, no marca el mes).
+ * vez; cada una se espera en los meses del rango en que estuvo abierta (sin
+ * apertura o cierre confirmados, en todos) y solo cuenta el extracto activo (uno
+ * reemplazado o anulado se ve en el detalle, no marca el mes).
  */
-export function bankCoverage(months: string[], movements: Movement[], balances: BankBalance[], batches: BatchSummary[]): BankCoverage {
+export function bankCoverage(months: string[], movements: Movement[], balances: BankBalance[], batches: BatchSummary[], lifecycles: BankAccountLifecycle[] = []): BankCoverage {
   const statements = bankStatements(movements, balances, batches);
+  const lifecycleByKey = new Map(lifecycles.map((l) => [accountKey(l.bank, l.accountNumber), l]));
   const accounts = new Map<string, BankAccountCoverage>();
   for (const s of statements) {
     const key = accountKey(s.bank, s.accountNumber);
     let account = accounts.get(key);
     if (!account) {
-      account = { key, bank: s.bank, accountNumber: s.accountNumber, cells: Object.fromEntries(months.map((m) => [m, { ...emptyCell(), total: 1 }])), missing: [], lastMonth: null, finalBalanceMissing: false };
+      const lifecycle = lifecycleByKey.get(key) ?? null;
+      const cells = Object.fromEntries(months.map((m) => [m, accountApplies(lifecycle, m) ? { ...emptyCell(), total: 1 } : { ...emptyCell(), notApplicable: 1 }]));
+      account = { key, bank: s.bank, accountNumber: s.accountNumber, cells, missing: [], lastMonth: null, finalBalanceMissing: false, lifecycle };
       accounts.set(key, account);
     }
     const active = s.batch.status === "active";
@@ -193,7 +223,12 @@ export function bankCoverage(months: string[], movements: Movement[], balances: 
     for (const m of s.months) {
       const cell = account.cells[m];
       if (!cell) continue;
-      if (active) cell.loaded = 1;
+      if (active) {
+        cell.loaded = 1;
+        // Un extracto activo en un mes «No aplica» igual se muestra como cargado.
+        cell.total = 1;
+        cell.notApplicable = 0;
+      }
       if (s.batch.status === "replaced") cell.hasReplaced = true;
       cell.statements.push(s);
       cell.batches.push(s.batch);
@@ -203,9 +238,13 @@ export function bankCoverage(months: string[], movements: Movement[], balances: 
   const live = [...accounts.values()].filter((a) => statements.some((s) => accountKey(s.bank, s.accountNumber) === a.key && s.batch.status !== "voided"));
   const finalMonth = months[months.length - 1];
   for (const a of live) {
-    a.missing = months.filter((m) => a.cells[m].loaded === 0);
+    a.missing = months.filter((m) => a.cells[m].total > 0 && a.cells[m].loaded === 0);
     // El mes final da el saldo del ESF: sin un saldo activo de ese mes la cuenta queda pendiente (aunque el extracto exista sin saldo).
-    a.finalBalanceMissing = finalMonth !== undefined && !balances.some((b) => b.active && accountKey(b.bank, b.accountNumber) === a.key && b.balanceDate.slice(0, 7) === finalMonth);
+    // Una cuenta cerrada (o aún no abierta) ese mes no tiene saldo pendiente: es 0.
+    a.finalBalanceMissing =
+      finalMonth !== undefined &&
+      accountApplies(a.lifecycle, finalMonth) &&
+      !balances.some((b) => b.active && accountKey(b.bank, b.accountNumber) === a.key && b.balanceDate.slice(0, 7) === finalMonth);
   }
   const byBank = new Map<string, BankAccountCoverage[]>();
   for (const a of live) byBank.set(a.bank, [...(byBank.get(a.bank) ?? []), a]);

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { BankBalance, BatchSummary, Movement } from "../../../types/fs";
+import type { BankAccountLifecycle, BankBalance, BatchSummary, Movement } from "../../../types/fs";
 import type { TaxReturn } from "../tax-obligations/types";
 import { activeDuplicates, bankCoverage, coverage, maskAccount, taxCoverage } from "./checks";
+import { bankBalanceStatus } from "./engine";
 
 const mv = (id: number, date: string, batchId: number, extra: Partial<Movement> = {}) =>
   ({ id, companyId: 1, batchId, accountingDate: date, source: "purchases", documentId: `d${id}`, status: "active", amountCents: 1, pucCode: "513595" }) as Movement & typeof extra;
@@ -96,6 +97,60 @@ describe("cobertura de extractos por banco y cuenta", () => {
 
   it("enmascara la cuenta con sus últimos cuatro dígitos", () => {
     expect([maskAccount("001-300-7491"), maskAccount("")]).toEqual(["••••7491", "Sin número de cuenta"]);
+  });
+});
+
+describe("cuentas abiertas o cerradas durante el año", () => {
+  const year = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
+  const life = (openedPeriod: string | null, closedPeriod: string | null): BankAccountLifecycle => ({
+    companyId: 1,
+    bank: "Bancolombia",
+    accountNumber: "1234",
+    openedPeriod,
+    closedPeriod,
+    status: closedPeriod ? "closed" : "active",
+    updatedAt: "",
+    events: [],
+  });
+  const sent = (months: string[]) => months.map((m, i) => bankBatch(i + 1, "Bancolombia", "1234", m));
+  const own = (b: BankBalance): BankBalance => ({ ...b, bank: "Bancolombia", accountNumber: "1234" });
+
+  it("prueba 22 — cierre confirmado en junio: julio a septiembre «No aplica» y no bloquean", () => {
+    const batches = sent(year.slice(0, 6));
+    const balances = [own(balance(6, "2026-06-28", 0))];
+    const c = bankCoverage(year, [], balances, batches, [life(null, "2026-06")]);
+    const a = c.banks[0].accounts[0];
+    expect(a.missing).toEqual([]);
+    expect(year.slice(6).map((m) => [a.cells[m].total, a.cells[m].notApplicable])).toEqual([
+      [0, 1],
+      [0, 1],
+      [0, 1],
+    ]);
+    expect([c.missingCount, c.finalBalanceMissing]).toEqual([0, 0]);
+    expect(coverage("2026-01-01", "2026-09-30", [], balances, batches, [life(null, "2026-06")]).rows.find((r) => r.source === "bank")!.missing).toEqual([]);
+    // ESF de septiembre: la cuenta cerrada no deja el saldo pendiente.
+    const status = bankBalanceStatus(balances, "2026-09-30", [life(null, "2026-06")]);
+    expect(status[0]).toMatchObject({ balance: null, closedPeriod: "2026-06" });
+  });
+
+  it("prueba 23 — saldo 0 sin cierre («sigue activa»): abril y mayo siguen siendo requeridos", () => {
+    const months = year.slice(0, 5);
+    const c = bankCoverage(months, [], [], sent(months.slice(0, 3)), []);
+    expect(c.banks[0].accounts[0].missing).toEqual(["2026-04", "2026-05"]);
+    expect(bankBalanceStatus([own(balance(3, "2026-03-28", 0))], "2026-05-31", [])[0].closedPeriod).toBeUndefined();
+  });
+
+  it("prueba 24 — apertura confirmada en abril: enero a marzo «No aplica»", () => {
+    const months = year.slice(0, 4);
+    const c = bankCoverage(months, [], [], sent(["2026-04"]), [life("2026-04", null)]);
+    const a = c.banks[0].accounts[0];
+    expect(a.missing).toEqual([]);
+    expect(months.map((m) => (a.cells[m].notApplicable ? "N/A" : a.cells[m].loaded ? "✓" : "—"))).toEqual(["N/A", "N/A", "N/A", "✓"]);
+  });
+
+  it("sin apertura confirmada se usa la regla general (todos los meses del rango)", () => {
+    const c = bankCoverage(year.slice(0, 4), [], [], sent(["2026-04"]), []);
+    expect(c.banks[0].accounts[0].missing).toEqual(["2026-01", "2026-02", "2026-03"]);
   });
 });
 

@@ -135,6 +135,13 @@ export default function OpeningBalancesPage() {
 
       {companyId !== null && isIsoDate(date) && (
         <>
+          {/* Sin Excel propio: solo los botones de envío. Enviar de nuevo la misma fecha reemplaza el envío anterior. */}
+          <SendToFs
+            blocked={blocked}
+            blockedStatus={unclassified.length && !invalid.length && !duplicated.length ? "Pendiente de clasificación" : "Requiere revisión"}
+            build={build}
+            duplicateTitle="Los saldos iniciales de esta fecha ya fueron enviados."
+          />
           {unclassified.length > 0 && (
             <Alert tone="warning" title="Códigos PUC sin clasificar">
               Clasifícalos (línea del ESF / EERR) o márcalos «No afecta Estados Financieros» para poder enviar.
@@ -202,9 +209,6 @@ export default function OpeningBalancesPage() {
                 </tbody>
               </table>
             </div>
-          </Card>
-          <Card title="Estados Financieros" description="Enviar de nuevo los saldos de la misma fecha reemplaza el envío anterior (queda como «Reemplazado»).">
-            <SendToFs blocked={blocked} build={build} duplicateTitle="Los saldos iniciales de esta fecha ya fueron enviados." />
           </Card>
         </>
       )}

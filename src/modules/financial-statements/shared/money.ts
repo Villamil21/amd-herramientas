@@ -29,6 +29,9 @@ export function formatExactCents(cents: number): string {
   return `${negative ? "-" : ""}$ ${group(String(Math.floor(abs / 100)))},${String(abs % 100).padStart(2, "0")}`;
 }
 
+/** Formato contable de la app: negativos entre paréntesis, «($ 48.605.000,00)». */
+export const formatAccountingCents = (cents: number) => (cents < 0 ? `(${formatExactCents(-cents)})` : formatExactCents(cents));
+
 /** Impuesto de renta estimado (solo en la app): 35 % del resultado positivo, redondeado al millar. */
 export function estimatedIncomeTax(resultCents: number): number {
   return resultCents <= 0 ? 0 : roundThousands(resultCents * 0.35);

@@ -56,7 +56,6 @@ export default function PucCodesPage() {
   const [supplierCodes, setSupplierCodes] = useState<Record<number, string[]>>({});
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
-  const [sentBatch, setSentBatch] = useState<number | null>(null);
   const [selected, setSelected] = useState<{ fileName: string; products: boolean } | null>(null);
   const [filter, setFilter] = useState<DocumentFilter>("all");
   const [pendingExpanded, setPendingExpanded] = useState(false);
@@ -104,7 +103,6 @@ export default function PucCodesPage() {
 
   function resetLot() {
     setExportedPath(null);
-    setSentBatch(null);
     setAssignments({});
     setSelected(null);
     setResolving(false);
@@ -264,18 +262,6 @@ export default function PucCodesPage() {
             <Button icon={<Tags size={15} />} onClick={() => setTitlesOpen(true)}>
               Tipos de documento
             </Button>
-            {report && folder && (
-              <SendToFs
-                showStatus={false}
-                blocked={sendBlocked}
-                build={() => buildPurchasesBatch(companyDocs, suppliers ?? [], folder.folderName)}
-                onExport={exportExcel}
-                exporting={exporting}
-                exportBlocked={blocked ? `${blocked} Resuélvelos para exportar.` : null}
-                onSent={setSentBatch}
-                duplicateTitle="Algunas facturas ya fueron enviadas."
-              />
-            )}
           </>
         }
       />
@@ -339,7 +325,18 @@ export default function PucCodesPage() {
 
       {report && (
         <>
-          <LotStatusIndicator pending={actions.length} />
+          {folder && (
+            <SendToFs
+              blocked={sendBlocked}
+              blockedStatus={actions.length > 0 ? "Pendiente de clasificación" : "Requiere revisión"}
+              reasons={sendBlocked ? [actions.length > 0 ? `Análisis incompleto — ${sendBlocked}` : sendBlocked] : undefined}
+              build={() => buildPurchasesBatch(companyDocs, suppliers ?? [], folder.folderName)}
+              onExport={exportExcel}
+              exporting={exporting}
+              exportBlocked={blocked ? `${blocked} Resuélvelos para exportar.` : null}
+              duplicateTitle="Algunas facturas ya fueron enviadas."
+            />
+          )}
           <PendingPanel
             actions={actions}
             expanded={pendingExpanded}
@@ -374,8 +371,6 @@ export default function PucCodesPage() {
             <PurchasesFsCard
               docs={companyDocs}
               pendingActions={actions.length}
-              blocked={sendBlocked}
-              sentBatch={sentBatch}
               onDecide={(fileName, decision) => assign(fileName, { ...assignments[fileName], companyDecision: decision })}
               onOpen={(fileName) => setSelected({ fileName, products: false })}
             />

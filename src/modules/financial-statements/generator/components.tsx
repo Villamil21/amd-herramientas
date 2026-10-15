@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
+import { CalendarRange, Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
 import { Alert, Badge, Button, Field, Input, Loader, Modal, Select, Textarea, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
@@ -15,6 +15,7 @@ import { periodName, taxStatus } from "../tax-obligations/services/effects";
 import { PERIODICITY_LABEL, type TaxReturn, type VatPeriodicity } from "../tax-obligations/types";
 import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow, type TaxCoverage } from "./checks";
 import type { LineValue, StatementRow } from "./engine";
+import { BankLifecycleModal, lifecycleText } from "../bank/BankLifecycleModal";
 
 /** Estado en la app: valores al millar (como en el PDF) y, al abrir una línea, el exacto y su origen por PUC. */
 export function StatementView({ title, rows, lines }: { title: string; rows: StatementRow[]; lines: Map<number, LineValue> }) {
@@ -98,8 +99,23 @@ type CoverageSelection =
  * Fuentes del periodo y cobertura mensual: ✓ cargado / — falta. Clic en un mes: sus importaciones.
  * Los extractos se despliegan por banco y, si un banco tiene varias cuentas, por cuenta.
  */
-export function CoverageTable({ months, rows, companyName, tax }: { months: string[]; rows: CoverageRow[]; companyName: string; tax?: TaxCoverage }) {
+export function CoverageTable({
+  months,
+  rows,
+  companyName,
+  tax,
+  companyId,
+  onLifecycleChanged,
+}: {
+  months: string[];
+  rows: CoverageRow[];
+  companyName: string;
+  tax?: TaxCoverage;
+  companyId?: number | null;
+  onLifecycleChanged?: () => void | Promise<unknown>;
+}) {
   const [selected, setSelected] = useState<CoverageSelection | null>(null);
+  const [editing, setEditing] = useState<BankAccountCoverage | null>(null);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const toggle = (key: string) =>
     setOpen((prev) => {
@@ -127,18 +143,36 @@ export function CoverageTable({ months, rows, companyName, tax }: { months: stri
     months.map((m) => {
       const c = cells[m];
       const pendingHere = balancePending && m === finalMonth;
-      const state = c.total > 0 && c.loaded === c.total ? "is-loaded" : c.loaded > 0 ? "is-partial" : "";
-      const label = state === "is-loaded" ? "cargado" : state === "is-partial" ? `${c.loaded} de ${c.total} cuentas` : "falta";
+      const state = c.total > 0 && c.loaded === c.total ? "is-loaded" : c.loaded > 0 ? "is-partial" : c.total === 0 && c.notApplicable > 0 ? "is-na" : "";
+      const label = state === "is-loaded" ? "cargado" : state === "is-partial" ? `${c.loaded} de ${c.total} cuentas` : state === "is-na" ? "no aplica" : "falta";
       return (
         <td key={m} style={{ textAlign: "center" }}>
           <button
             type="button"
             className={`fs-coverage__cell ${state}${c.hasReplaced ? " has-replaced" : ""}${pendingHere ? " is-balance-pending" : ""}`}
             onClick={() => setSelected({ kind: "bank", title, cell: c, month: m })}
-            title={pendingHere ? `Saldo del ESF de ${monthText(m)} pendiente` : c.hasReplaced ? "Incluye un extracto reemplazado" : undefined}
+            title={
+              pendingHere
+                ? `Saldo del ESF de ${monthText(m)} pendiente`
+                : state === "is-na"
+                  ? "No aplica: la cuenta aún no estaba abierta o ya estaba cerrada"
+                  : c.hasReplaced
+                    ? "Incluye un extracto reemplazado"
+                    : undefined
+            }
             aria-label={`${title} ${periodLabel(m)}: ${label}${c.hasReplaced ? ", con reemplazo" : ""}${pendingHere ? ", saldo final pendiente" : ""}`}
           >
-            {state === "is-loaded" ? <Check size={14} /> : state === "is-partial" ? <span className="fs-coverage__count">{c.loaded}/{c.total}</span> : <Minus size={14} />}
+            {state === "is-loaded" ? (
+              <Check size={14} />
+            ) : state === "is-partial" ? (
+              <span className="fs-coverage__count">
+                {c.loaded}/{c.total}
+              </span>
+            ) : state === "is-na" ? (
+              "N/A"
+            ) : (
+              <Minus size={14} />
+            )}
           </button>
         </td>
       );
@@ -151,6 +185,16 @@ export function CoverageTable({ months, rows, companyName, tax }: { months: stri
         {a.lastMonth ? ` · Último: ${shortMonth(a.lastMonth)}` : ""}
       </div>
       {a.finalBalanceMissing && finalMonth && <div className="fs-coverage__pending">Saldo del ESF de {monthText(finalMonth)} pendiente</div>}
+      {(lifecycleText(a.lifecycle) || (companyId != null && onLifecycleChanged)) && (
+        <div className="fs-coverage__lifecycle row" style={{ gap: 6 }}>
+          {lifecycleText(a.lifecycle) && <span>{lifecycleText(a.lifecycle)}</span>}
+          {companyId != null && onLifecycleChanged && (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditing(a)} title="Registrar o corregir la apertura y el cierre de esta cuenta">
+              <CalendarRange size={13} /> Apertura / cierre
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 
@@ -343,6 +387,18 @@ export function CoverageTable({ months, rows, companyName, tax }: { months: stri
         {selected?.kind === "bank" && <BankStatementTable cell={selected.cell} />}
         {selected?.kind === "tax" && <TaxReturnsTable returns={selected.returns} vatPeriodicity={tax?.vatPeriodicity ?? null} path={selected.taxPath} />}
       </Modal>
+      {companyId != null && onLifecycleChanged && (
+        <BankLifecycleModal
+          open={editing !== null}
+          companyId={companyId}
+          bank={editing?.bank ?? ""}
+          accountNumber={editing?.accountNumber ?? ""}
+          title={editing ? `${editing.bank} ${maskAccount(editing.accountNumber)}` : ""}
+          lifecycle={editing?.lifecycle ?? null}
+          onClose={() => setEditing(null)}
+          onSaved={onLifecycleChanged}
+        />
+      )}
     </>
   );
 }

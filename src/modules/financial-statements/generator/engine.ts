@@ -1,5 +1,17 @@
 import type { Company } from "../../../types/models";
-import { EERR_SECTIONS, ESF_SECTIONS, SECTION_LABEL, type BankBalance, type FsCatalog, type FsLine, type FsPucMapping, type FsSectionKey, type Movement, type Presentation } from "../../../types/fs";
+import {
+  EERR_SECTIONS,
+  ESF_SECTIONS,
+  SECTION_LABEL,
+  type BankAccountLifecycle,
+  type BankBalance,
+  type FsCatalog,
+  type FsLine,
+  type FsPucMapping,
+  type FsSectionKey,
+  type Movement,
+  type Presentation,
+} from "../../../types/fs";
 import { estimatedIncomeTax, monthsBetween, roundThousands } from "../shared/money";
 import { taxEffects, type TaxEffects, type TaxInput } from "../tax-obligations/services/effects";
 
@@ -23,6 +35,8 @@ import { taxEffects, type TaxEffects, type TaxInput } from "../tax-obligations/s
  * - Obligaciones tributarias: el efecto de las declaraciones guardadas a la
  *   fecha final (por pagar, saldos a favor como foto, anticipo del año y
  *   resultados fiscales de años anteriores); ver tax-obligations/services/effects.
+ *   La Retefuente pendiente de años anteriores al del corte se presenta en el
+ *   pasivo no corriente aunque su PUC esté en una línea corriente.
  * - Capital social: el capital suscrito de la empresa; la diferencia con el
  *   pagado va a 132505 (A socios).
  * - Reporte de operaciones (cripto): resultado propio = ventas − compras. Banco:
@@ -61,6 +75,8 @@ export interface EngineInput {
   presentation: Presentation;
   /** Declaraciones tributarias de la empresa (Obligaciones tributarias). */
   tax?: TaxInput;
+  /** Apertura / cierre confirmados de las cuentas bancarias. */
+  bankLifecycles?: BankAccountLifecycle[];
 }
 
 export interface Contribution {
@@ -115,6 +131,8 @@ export interface BankBalanceStatus {
   balance: BankBalance | null;
   /** Sin saldo del mes final: el último anterior, solo como referencia (no entra al ESF). */
   lastKnown: BankBalance | null;
+  /** AAAA-MM del cierre confirmado, si fue antes del mes final: saldo 0, nunca pendiente. */
+  closedPeriod?: string;
 }
 
 export interface Statements {
@@ -156,12 +174,27 @@ export function buildStatements(input: EngineInput): Statements {
   const unclassified = new Map<string, UnclassifiedPuc>();
   const pucBalances = new Map<string, number>();
 
+  /** Línea del pasivo no corriente equivalente a una corriente: la del mismo nombre o la representativa de la sección. */
+  const noncurrentLines = catalog.lines.filter((l) => l.section === "liability_noncurrent" && l.isActive).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  const noncurrentRep = catalog.sections.find((s) => s.section === "liability_noncurrent")?.representativeLineId;
+  const noncurrentFor = (line: FsLine) =>
+    noncurrentLines.find((l) => l.name.trim().toLowerCase() === line.name.trim().toLowerCase()) ?? noncurrentLines.find((l) => l.id === noncurrentRep) ?? noncurrentLines[0];
+
   /** Suma un valor de un PUC según su destino en el catálogo. */
-  function post(pucCode: string, pucConcept: string, cents: number, date: string | null, opts: { dc?: "D" | "C" | null; settlesOn?: string | null } = {}) {
+  function post(pucCode: string, pucConcept: string, cents: number, date: string | null, opts: { dc?: "D" | "C" | null; settlesOn?: string | null; noncurrent?: string } = {}) {
     if (date !== null && date > end) return;
     const m = mapping.get(pucCode);
     if (m?.excluded) return;
-    const line = m?.lineId ? lines.get(m.lineId) : undefined;
+    let line = m?.lineId ? lines.get(m.lineId) : undefined;
+    // Presentación no corriente (el PUC original se conserva en la contribución).
+    let reclassified: string | undefined;
+    if (opts.noncurrent && line?.isActive && line.section === "liability_current") {
+      const target = noncurrentFor(line);
+      if (target) {
+        reclassified = `${opts.noncurrent} (PUC ${pucCode}, línea corriente «${line.name}»)`;
+        line = target;
+      }
+    }
     if (!line || !line.isActive) {
       const u = unclassified.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), count: 0, cents: 0, inactiveLine: line ? line.name : undefined };
       u.count++;
@@ -176,6 +209,7 @@ export function buildStatements(input: EngineInput): Statements {
     if (opts.dc) value = bankAccountingCents(opts.dc, cents, DEBIT_SECTIONS.has(line.section));
     const b = bucket(line.id);
     b.cents += value;
+    if (reclassified && !b.automatic.includes(reclassified)) b.automatic.push(reclassified);
     const c = b.byPuc.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), cents: 0, count: 0 };
     c.cents += value;
     c.count++;
@@ -200,12 +234,12 @@ export function buildStatements(input: EngineInput): Statements {
   }
 
   // 2. Saldo bancario: la foto del mes final de cada cuenta; sin ella, pendiente (sin respaldo silencioso al mes anterior).
-  const bankBalances = bankBalanceStatus(input.bankBalances, end);
+  const bankBalances = bankBalanceStatus(input.bankBalances, end, input.bankLifecycles);
   for (const b of bankBalances) if (b.balance) post(b.balance.pucCode, "", b.balance.balanceCents, null);
 
   // 2b. Obligaciones tributarias a la fecha final (sin PUC configurado no se envían: bloquea en la lista de verificación).
   const tax = input.tax ? taxEffects(input.tax, end) : { effects: [], issues: [] };
-  for (const e of tax.effects) if (e.pucCode) post(e.pucCode, "", e.cents, null);
+  for (const e of tax.effects) if (e.pucCode) post(e.pucCode, "", e.cents, null, e.noncurrent ? { noncurrent: `Retefuente de años anteriores a ${end.slice(0, 4)} (no corriente)` } : {});
 
   // 3. Capital: suscrito en Capital social; la diferencia con el pagado en 132505.
   const { subscribedTotalShares, subscribedNominalValue, paidTotalShares, paidNominalValue } = input.company;
@@ -318,8 +352,9 @@ const newer = (a: BankBalance, b: BankBalance | null) => !b || a.balanceDate > b
  * extracto del MES de la fecha final (si hay varios, el más reciente). Solo se
  * consideran las cuentas con algún saldo activo hasta ese mes; las que tengan
  * solo saldos posteriores aún no existían. Los saldos son fotos: nunca se suman.
+ * Una cuenta con cierre confirmado antes del mes final tiene saldo 0 (no queda pendiente).
  */
-export function bankBalanceStatus(balances: BankBalance[], end: string): BankBalanceStatus[] {
+export function bankBalanceStatus(balances: BankBalance[], end: string, lifecycles: BankAccountLifecycle[] = []): BankBalanceStatus[] {
   const month = end.slice(0, 7);
   const accounts = new Map<string, BankBalanceStatus>();
   for (const b of balances) {
@@ -335,11 +370,15 @@ export function bankBalanceStatus(balances: BankBalance[], end: string): BankBal
   const list = [...accounts.values()].sort((x, y) => x.bank.localeCompare(y.bank, "es", { sensitivity: "base" }) || x.accountNumber.localeCompare(y.accountNumber));
   // Con saldo del mes final, el anterior no hace falta ni como referencia.
   for (const a of list) if (a.balance) a.lastKnown = null;
+  for (const a of list) {
+    const closed = lifecycles.find((l) => l.bank.trim() === a.bank && l.accountNumber.trim() === a.accountNumber)?.closedPeriod;
+    if (!a.balance && closed && closed < month) a.closedPeriod = closed;
+  }
   return list;
 }
 
-/** Cuentas sin saldo del mes final (bloquean el periodo). */
-export const pendingBankBalances = (s: Pick<Statements, "bankBalances">) => s.bankBalances.filter((b) => !b.balance);
+/** Cuentas sin saldo del mes final (bloquean el periodo). Una cuenta cerrada antes no está pendiente. */
+export const pendingBankBalances = (s: Pick<Statements, "bankBalances">) => s.bankBalances.filter((b) => !b.balance && !b.closedPeriod);
 
 // ---------------------------------------------------------------------------
 // Filas para mostrar (app, previsualizador y PDF usan las mismas)

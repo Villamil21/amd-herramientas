@@ -359,7 +359,9 @@ export function ReturnDetailModal({
                     <tr key={e.key} className={e.key === "grossEquity" || e.key === "netEquity" ? "fs-row--subtotal" : undefined}>
                       <td>{e.label}</td>
                       <td className="mono muted">{e.casilla ?? ""}</td>
-                      <td style={{ textAlign: "right" }}>{e.cents === null ? "—" : formatExactCents(e.cents)}</td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {e.cents === null ? "—" : formatExactCents(e.cents)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -395,7 +397,9 @@ export function ReturnDetailModal({
                     </td>
                     <td className="mono">{x.casilla ?? "—"}</td>
                     <td className="mono">{x.expectedCasilla ?? "—"}</td>
-                    <td style={{ textAlign: "right" }}>{formatExactCents(x.cents)}</td>
+                    <td className="nowrap" style={{ textAlign: "right" }}>
+                      {formatExactCents(x.cents)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

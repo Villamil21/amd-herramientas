@@ -194,6 +194,51 @@ export interface BankConceptMapping {
   pucCode: string;
 }
 
+/** Ciclo de vida de una cuenta bancaria (empresa + banco + número). Periodos AAAA-MM. */
+export interface BankAccountLifecycle {
+  companyId: number;
+  bank: string;
+  accountNumber: string;
+  openedPeriod: string | null;
+  closedPeriod: string | null;
+  status: "active" | "closed";
+  updatedAt: string;
+  events: BankAccountEvent[];
+}
+
+export type BankLifecycleAction = "opened" | "closed" | "kept_active" | "existed_before" | "edited";
+
+export interface BankAccountEvent {
+  bank: string;
+  accountNumber: string;
+  action: BankLifecycleAction;
+  period: string | null;
+  note: string;
+  previous: { openedPeriod?: string | null; closedPeriod?: string | null } | null;
+  createdAt: string;
+}
+
+export interface BankLifecycleInput {
+  companyId: number;
+  bank: string;
+  accountNumber: string;
+  action: BankLifecycleAction;
+  period?: string | null;
+  openedPeriod?: string | null;
+  closedPeriod?: string | null;
+  note?: string;
+}
+
+/** Banco + concepto exacto → es GMF (4x1000) o no. */
+export interface GmfRule {
+  bank: string;
+  concept: string;
+  isGmf: boolean;
+  origin: "auto" | "manual";
+  confirmed: boolean;
+  updatedAt: string;
+}
+
 export interface PucSetting {
   key: string;
   pucCode: string;
@@ -244,6 +289,20 @@ export interface Employee {
   employments: Employment[];
   liquidations: Liquidation[];
   justifications: { employeeId: number; period: string; justification: string; createdAt: string }[];
+  /** Historial de ediciones de la ficha (valores anteriores y nuevos). */
+  events: { action: string; previous: Record<string, unknown> | null; next: Record<string, unknown> | null; createdAt: string }[];
+}
+
+export interface EmployeeUpdateInput {
+  employeeId: number;
+  docType: string;
+  docNumber: string;
+  name: string;
+  /** Fecha de ingreso de la vinculación vigente. */
+  hireDate: string;
+  /** Área nueva y el mes (AAAA-MM) desde el que rige; los meses anteriores conservan la suya. */
+  area?: Area | null;
+  areaFrom?: string | null;
 }
 
 export interface PayrollRow {

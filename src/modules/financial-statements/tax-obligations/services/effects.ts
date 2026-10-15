@@ -8,6 +8,8 @@ import { PERIODICITY_LABEL, SHORT_TAX_LABEL, TAX_PUC, type TaxPeriodicity, type 
  *
  * - Retefuente / IVA / Renta por pagar: declaraciones cuyo periodo terminó al
  *   corte y que no estaban pagadas al corte (fecha de pago > corte o sin fecha).
+ *   La Retefuente pendiente de un año anterior al del corte se presenta como
+ *   pasivo NO corriente (el PUC no cambia: solo su ubicación en el ESF).
  * - Saldo a favor de IVA y de Renta: FOTO de la declaración del último periodo
  *   terminado al corte (la siguiente ya incorpora el saldo anterior: nunca se suman).
  * - Anticipo de renta: solo el de la declaración del año anterior al corte.
@@ -120,6 +122,8 @@ export interface TaxEffect {
   cents: number;
   /** Declaraciones de las que sale el valor. */
   returnIds: number[];
+  /** Se presenta en el pasivo no corriente (Retefuente de un año anterior al del corte). */
+  noncurrent?: boolean;
 }
 
 export interface TaxIssue {
@@ -161,14 +165,20 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
     if (why.length) issues.push({ level: "blocking", taxType: r.taxType, message: `${SHORT_TAX_LABEL[r.taxType]} ${periodName(r)} (formulario ${r.formNumber || "sin número"}) requiere revisión: ${why.join(" ")}` });
     return why.length === 0;
   });
-  const add = (kind: TaxEffectKind, pucKey: TaxPucKey, label: string, cents: number, returns: TaxReturn[]) => {
+  const add = (kind: TaxEffectKind, pucKey: TaxPucKey, label: string, cents: number, returns: TaxReturn[], noncurrent = false) => {
     if (cents === 0) return;
     const pucCode = input.puc.get(pucKey) || null;
-    effects.push({ kind, pucKey, pucCode, label, cents, returnIds: returns.map((r) => r.id) });
-    if (!pucCode) issues.push({ level: "blocking", taxType: returns[0].taxType, message: `Configura la cuenta PUC «${PUC_LABEL[pucKey]}» en Obligaciones tributarias: ${label} no se incluye en los Estados Financieros.` });
+    effects.push({ kind, pucKey, pucCode, label, cents, returnIds: returns.map((r) => r.id), ...(noncurrent && { noncurrent }) });
+    if (!pucCode)
+      issues.push({
+        level: "blocking",
+        taxType: returns[0].taxType,
+        message: `Configura la cuenta PUC «${PUC_LABEL[pucKey]}» en Obligaciones tributarias: ${label} no se incluye en los Estados Financieros.`,
+      });
   };
 
   // Por pagar: cada declaración terminada al corte y sin pagar al corte.
+  const cutYear = Number(cut.slice(0, 4));
   const payables: [TaxType, TaxEffectKind, TaxPucKey][] = [
     ["withholding", "withholding_payable", TAX_PUC.withholdingPayable],
     ["vat", "vat_payable", TAX_PUC.vatPayable],
@@ -177,7 +187,9 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
   for (const [type, kind, key] of payables)
     for (const r of usable.filter((x) => x.taxType === type && unpaidAt(x, cut)).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd))) {
       const { payable } = effectiveValues(r);
-      if (payable > 0) add(kind, key, `${SHORT_TAX_LABEL[type]} por pagar ${periodName(r)}`, payable, [r]);
+      // Retefuente: el año de la obligación frente al del corte decide corriente / no corriente.
+      const noncurrent = type === "withholding" && r.year < cutYear;
+      if (payable > 0) add(kind, key, `${SHORT_TAX_LABEL[type]} por pagar ${periodName(r)}${noncurrent ? " (no corriente)" : ""}`, payable, [r], noncurrent);
     }
 
   // Saldo a favor de IVA: foto del último periodo terminado según la periodicidad de la empresa.
@@ -202,7 +214,6 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
     const { favor } = effectiveValues(latest);
     if (favor > 0) add("income_favor", TAX_PUC.incomeFavor, `Saldo a favor de Renta ${latest.year}`, favor, [latest]);
   }
-  const cutYear = Number(cut.slice(0, 4));
   for (const r of income.filter((x) => x.advanceTargetYear === cutYear && (x.advanceNextCents ?? 0) > 0))
     add("income_advance", TAX_PUC.incomeAdvance, `Anticipo de Renta ${cutYear} (declaración ${r.year})`, r.advanceNextCents!, [r]);
   const prior = income.filter((r) => r.year < cutYear);

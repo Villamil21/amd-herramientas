@@ -281,6 +281,64 @@ pub struct BankConceptMapping {
     pub puc_code: String,
 }
 
+/// Ciclo de vida de una cuenta bancaria (empresa + banco + número): periodos AAAA-MM.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankAccountLifecycle {
+    pub company_id: i64,
+    pub bank: String,
+    pub account_number: String,
+    pub opened_period: Option<String>,
+    pub closed_period: Option<String>,
+    pub status: String,
+    pub updated_at: String,
+    pub events: Vec<BankAccountEvent>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankAccountEvent {
+    pub bank: String,
+    pub account_number: String,
+    pub action: String,
+    pub period: Option<String>,
+    pub note: String,
+    pub previous: Value,
+    pub created_at: String,
+}
+
+/// Respuesta del usuario sobre una cuenta: `opened` / `closed` (con su periodo),
+/// `kept_active` / `existed_before` (solo quedan en la auditoría) o `edited`
+/// (apertura y cierre tal como quedan; None = sin dato).
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankLifecycleInput {
+    pub company_id: i64,
+    pub bank: String,
+    pub account_number: String,
+    pub action: String,
+    #[serde(default)]
+    pub period: Option<String>,
+    #[serde(default)]
+    pub opened_period: Option<String>,
+    #[serde(default)]
+    pub closed_period: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// Banco + concepto exacto → es GMF (4x1000) o no.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GmfRule {
+    pub bank: String,
+    pub concept: String,
+    pub is_gmf: bool,
+    pub origin: String,
+    pub confirmed: bool,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PucSetting {
@@ -353,6 +411,7 @@ pub struct Employee {
     pub employments: Vec<Employment>,
     pub liquidations: Vec<Liquidation>,
     pub justifications: Vec<AbsenceJustification>,
+    pub events: Vec<EmployeeEvent>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -378,6 +437,31 @@ pub struct EmployeeInput {
     pub area: String,
     /// AAAA-MM desde el que rige el área.
     pub effective_from: String,
+}
+
+/// Edición de la ficha. El área nueva rige desde `area_from` (AAAA-MM) y nunca
+/// reescribe los meses anteriores; la fecha de ingreso es la de la vinculación vigente.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeUpdateInput {
+    pub employee_id: i64,
+    pub doc_type: String,
+    pub doc_number: String,
+    pub name: String,
+    pub hire_date: String,
+    #[serde(default)]
+    pub area: Option<String>,
+    #[serde(default)]
+    pub area_from: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeEvent {
+    pub action: String,
+    pub previous: Value,
+    pub next: Value,
+    pub created_at: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

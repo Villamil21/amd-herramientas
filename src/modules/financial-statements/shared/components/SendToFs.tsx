@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, FileSpreadsheet, Send } from "lucide-react";
-import { Badge, Button, Modal, useToast } from "../../../../components/ui";
+import { Button, Modal, useToast } from "../../../../components/ui";
 import { fsService } from "../../../../services/fsService";
 import { errorMessage } from "../../../../services/tauri";
 import type { BatchInput, BatchSummary } from "../../../../types/fs";
@@ -21,16 +21,33 @@ interface Props {
   exporting?: boolean;
   /** Motivo que bloquea «Exportar Excel» (si el submódulo tiene su propia validación). */
   exportBlocked?: string | null;
-  /** false: solo los botones (el estado se muestra en otro lugar, p. ej. botones en el encabezado). */
-  showStatus?: boolean;
+  /** Estado mientras hay bloqueos («Pendiente de clasificación», «Cobertura incompleta»…). Por defecto «Requiere revisión». */
+  blockedStatus?: string;
+  /** Todos los pendientes (el primero suele ser `blocked`); se listan bajo el estado. */
+  reasons?: string[];
 }
 
 /**
- * «Exportar Excel», «Enviar a Estados Financieros» y «Enviar y descargar».
+ * Zona única de acciones de Estados Financieros, siempre al inicio de los
+ * resultados de cada submódulo y con el mismo diseño:
+ * [Estado] · [Exportar Excel] [Enviar a Estados Financieros] [Enviar y descargar].
+ * Sin exportación propia del submódulo, solo los botones de envío. Con
+ * pendientes, el estado lo dice y los envíos quedan deshabilitados.
  * Enviar y descargar: envía, comprueba el éxito y solo entonces descarga. Si
  * el envío ya existe, se detiene y el usuario elige Reemplazar o Cancelar.
  */
-export function SendToFs({ build, blocked, onExport, onSent, duplicateTitle = "Este lote ya existe.", replaceLabel = "Reemplazar", exporting, exportBlocked = null, showStatus = true }: Props) {
+export function SendToFs({
+  build,
+  blocked,
+  onExport,
+  onSent,
+  duplicateTitle = "Este lote ya existe.",
+  replaceLabel = "Reemplazar",
+  exporting,
+  exportBlocked = null,
+  blockedStatus = "Requiere revisión",
+  reasons,
+}: Props) {
   const toast = useToast();
   const [sending, setSending] = useState<"send" | "download" | null>(null);
   const [duplicate, setDuplicate] = useState<{ input: BatchInput; batches: BatchSummary[]; repeated: number; download: boolean } | null>(null);
@@ -64,23 +81,32 @@ export function SendToFs({ build, blocked, onExport, onSent, duplicateTitle = "E
     void send(input, download);
   }
 
+  const pending = blocked ? (reasons?.length ? reasons : [blocked]) : [];
   return (
     <>
-      <div className="row" style={{ flexWrap: "wrap" }}>
-        {showStatus && (blocked ? <Badge tone="warning">{blocked}</Badge> : sentBatch ? <Badge tone="success">Enviado · importación #{sentBatch}</Badge> : <Badge tone="success">Listo para Estados Financieros</Badge>)}
-        {onExport && (
-          <Button icon={<FileSpreadsheet size={15} />} onClick={() => void onExport()} loading={exporting} disabled={exportBlocked !== null} title={exportBlocked ?? undefined}>
-            Exportar Excel
+      <div className="card fs-action-bar">
+        <div className="fs-action-bar__status">
+          <div className={`lot-status ${blocked ? "lot-status--attention" : "lot-status--ready"}`} role="status">
+            <span className="lot-status__dot" aria-hidden />
+            {blocked ? blockedStatus : sentBatch ? `Enviado · importación #${sentBatch}` : "Listo para Estados Financieros"}
+          </div>
+          {pending.length > 0 && <div className="fs-action-bar__detail">{pending.join(" · ")}.</div>}
+        </div>
+        <div className="fs-action-bar__actions">
+          {onExport && (
+            <Button icon={<FileSpreadsheet size={15} />} onClick={() => void onExport()} loading={exporting} disabled={exportBlocked !== null} title={exportBlocked ?? undefined}>
+              Exportar Excel
+            </Button>
+          )}
+          <Button variant="primary" icon={<Send size={15} />} disabled={Boolean(blocked) || sending !== null} loading={sending === "send"} onClick={() => start(false)} title={blocked ?? undefined}>
+            Enviar a Estados Financieros
           </Button>
-        )}
-        <Button variant="primary" icon={<Send size={15} />} disabled={Boolean(blocked) || sending !== null} loading={sending === "send"} onClick={() => start(false)} title={blocked ?? undefined}>
-          Enviar a Estados Financieros
-        </Button>
-        {onExport && (
-          <Button icon={<CheckCircle2 size={15} />} disabled={Boolean(blocked) || sending !== null} loading={sending === "download"} onClick={() => start(true)} title={blocked ?? undefined}>
-            Enviar y descargar
-          </Button>
-        )}
+          {onExport && (
+            <Button icon={<CheckCircle2 size={15} />} disabled={Boolean(blocked) || sending !== null} loading={sending === "download"} onClick={() => start(true)} title={blocked ?? undefined}>
+              Enviar y descargar
+            </Button>
+          )}
+        </div>
       </div>
       <Modal
         open={duplicate !== null}

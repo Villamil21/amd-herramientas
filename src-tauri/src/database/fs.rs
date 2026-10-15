@@ -518,6 +518,127 @@ pub fn list_bank_concept_mappings(conn: &Connection) -> AppResult<Vec<BankConcep
         .collect::<Result<_, _>>()?)
 }
 
+// ---------------------------------------------------------------------------
+// Ciclo de vida de cuentas bancarias y GMF
+// ---------------------------------------------------------------------------
+
+fn validate_optional_period(period: &Option<String>) -> AppResult<Option<String>> {
+    match period.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => {
+            validate_period(p)?;
+            Ok(Some(p.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Apertura, cierre y respuestas del usuario de las cuentas de una empresa.
+/// También aparecen las cuentas con solo respuestas «No» (sin apertura ni cierre).
+pub fn list_bank_lifecycles(conn: &Connection, company_id: i64) -> AppResult<Vec<BankAccountLifecycle>> {
+    let mut list: Vec<BankAccountLifecycle> = conn
+        .prepare("SELECT company_id, bank, account_number, opened_period, closed_period, status, updated_at FROM fs_bank_account_lifecycle WHERE company_id = ?1 ORDER BY bank, account_number")?
+        .query_map([company_id], |r| {
+            Ok(BankAccountLifecycle { company_id: r.get(0)?, bank: r.get(1)?, account_number: r.get(2)?, opened_period: r.get(3)?, closed_period: r.get(4)?, status: r.get(5)?, updated_at: r.get(6)?, events: vec![] })
+        })?
+        .collect::<Result<_, _>>()?;
+    let events: Vec<BankAccountEvent> = conn
+        .prepare("SELECT bank, account_number, action, period, note, previous, created_at FROM fs_bank_account_events WHERE company_id = ?1 ORDER BY id")?
+        .query_map([company_id], |r| Ok(BankAccountEvent { bank: r.get(0)?, account_number: r.get(1)?, action: r.get(2)?, period: r.get(3)?, note: r.get(4)?, previous: json(r.get(5)?), created_at: r.get(6)? }))?
+        .collect::<Result<_, _>>()?;
+    for e in events {
+        let i = match list.iter().position(|l| l.bank == e.bank && l.account_number == e.account_number) {
+            Some(i) => i,
+            None => {
+                list.push(BankAccountLifecycle { company_id, bank: e.bank.clone(), account_number: e.account_number.clone(), opened_period: None, closed_period: None, status: "active".into(), updated_at: e.created_at.clone(), events: vec![] });
+                list.len() - 1
+            }
+        };
+        list[i].events.push(e);
+    }
+    Ok(list)
+}
+
+/// Guarda la respuesta del usuario sobre una cuenta. Apertura y cierre son
+/// editables; cada cambio (y cada «No») queda en la auditoría con lo anterior.
+pub fn save_bank_lifecycle(conn: &mut Connection, input: &BankLifecycleInput) -> AppResult<()> {
+    company_exists(conn, input.company_id)?;
+    let (bank, account) = (input.bank.trim(), input.account_number.trim());
+    if bank.is_empty() || account.is_empty() {
+        return Err(AppError::user("La cuenta necesita banco y número de cuenta."));
+    }
+    let period = validate_optional_period(&input.period)?;
+    let tx = conn.transaction()?;
+    let current: Option<(Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT opened_period, closed_period FROM fs_bank_account_lifecycle WHERE company_id = ?1 AND bank = ?2 AND account_number = ?3",
+            params![input.company_id, bank, account],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let (old_opened, old_closed) = current.clone().unwrap_or((None, None));
+    let need_period = || period.clone().ok_or_else(|| AppError::user("Falta el periodo de la cuenta."));
+    let next = match input.action.as_str() {
+        "opened" => Some((Some(need_period()?), old_closed.clone())),
+        "closed" => Some((old_opened.clone(), Some(need_period()?))),
+        "edited" => Some((validate_optional_period(&input.opened_period)?, validate_optional_period(&input.closed_period)?)),
+        "kept_active" | "existed_before" => {
+            need_period()?;
+            None
+        }
+        _ => return Err(AppError::user("Acción no válida.")),
+    };
+    if let Some((opened, closed)) = &next {
+        if let (Some(o), Some(c)) = (opened, closed) {
+            if o > c {
+                return Err(AppError::user("El cierre de la cuenta no puede ser anterior a su apertura."));
+            }
+        }
+        let status = if closed.is_some() { "closed" } else { "active" };
+        let now = now_iso();
+        tx.execute(
+            "INSERT INTO fs_bank_account_lifecycle (company_id, bank, account_number, opened_period, closed_period, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(company_id, bank, account_number) DO UPDATE SET opened_period = excluded.opened_period, closed_period = excluded.closed_period, status = excluded.status, updated_at = excluded.updated_at",
+            params![input.company_id, bank, account, opened, closed, status, now],
+        )?;
+    }
+    let previous = serde_json::json!({ "openedPeriod": old_opened, "closedPeriod": old_closed });
+    let event_period = match (&next, input.action.as_str()) {
+        (Some((opened, _)), "opened") => opened.clone(),
+        (Some((_, closed)), "closed") => closed.clone(),
+        _ => period,
+    };
+    tx.execute(
+        "INSERT INTO fs_bank_account_events (company_id, bank, account_number, action, period, note, previous, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![input.company_id, bank, account, input.action, event_period, input.note.trim(), previous.to_string(), now_iso()],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn list_gmf_rules(conn: &Connection) -> AppResult<Vec<GmfRule>> {
+    Ok(conn
+        .prepare("SELECT bank, concept, is_gmf, origin, confirmed, updated_at FROM fs_bank_gmf_rules ORDER BY bank, concept")?
+        .query_map([], |r| Ok(GmfRule { bank: r.get(0)?, concept: r.get(1)?, is_gmf: r.get(2)?, origin: r.get(3)?, confirmed: r.get(4)?, updated_at: r.get(5)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Banco + concepto exacto → GMF sí / no (confirmado por el usuario).
+pub fn save_gmf_rule(conn: &Connection, bank: &str, concept: &str, is_gmf: bool, origin: &str) -> AppResult<()> {
+    if bank.trim().is_empty() || concept.is_empty() {
+        return Err(AppError::user("Falta el banco o el concepto."));
+    }
+    if !matches!(origin, "auto" | "manual") {
+        return Err(AppError::user("Origen de clasificación no válido."));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO fs_bank_gmf_rules (bank, concept, is_gmf, origin, confirmed, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+         ON CONFLICT(bank, concept) DO UPDATE SET is_gmf = excluded.is_gmf, origin = excluded.origin, confirmed = 1, updated_at = excluded.updated_at",
+        params![bank.trim(), concept, is_gmf, origin, now],
+    )?;
+    Ok(())
+}
+
 /// «Reclasificar movimientos anteriores»: cambio explícito del PUC de movimientos
 /// ya enviados (nunca automático). Respeta los periodos cerrados.
 pub fn reclassify_movements(conn: &mut Connection, company_id: Option<i64>, ids: &[i64], puc_code: &str) -> AppResult<i64> {
@@ -640,7 +761,7 @@ pub fn list_employees(conn: &Connection, company_id: i64) -> AppResult<Vec<Emplo
     let mut employees: Vec<Employee> = conn
         .prepare("SELECT id, company_id, doc_type, doc_number, name FROM fs_employees WHERE company_id = ?1 ORDER BY name COLLATE NOCASE")?
         .query_map([company_id], |r| {
-            Ok(Employee { id: r.get(0)?, company_id: r.get(1)?, doc_type: r.get(2)?, doc_number: r.get(3)?, name: r.get(4)?, areas: vec![], employments: vec![], liquidations: vec![], justifications: vec![] })
+            Ok(Employee { id: r.get(0)?, company_id: r.get(1)?, doc_type: r.get(2)?, doc_number: r.get(3)?, name: r.get(4)?, areas: vec![], employments: vec![], liquidations: vec![], justifications: vec![], events: vec![] })
         })?
         .collect::<Result<_, _>>()?;
     for e in &mut employees {
@@ -659,6 +780,10 @@ pub fn list_employees(conn: &Connection, company_id: i64) -> AppResult<Vec<Emplo
         e.justifications = conn
             .prepare("SELECT employee_id, period, justification, created_at FROM fs_absence_justifications WHERE employee_id = ?1 ORDER BY period")?
             .query_map([e.id], |r| Ok(AbsenceJustification { employee_id: r.get(0)?, period: r.get(1)?, justification: r.get(2)?, created_at: r.get(3)? }))?
+            .collect::<Result<_, _>>()?;
+        e.events = conn
+            .prepare("SELECT action, previous, next, created_at FROM fs_employee_events WHERE employee_id = ?1 ORDER BY id")?
+            .query_map([e.id], |r| Ok(EmployeeEvent { action: r.get(0)?, previous: json(r.get(1)?), next: json(r.get(2)?), created_at: r.get(3)? }))?
             .collect::<Result<_, _>>()?;
     }
     Ok(employees)
@@ -714,11 +839,122 @@ pub fn create_employee(conn: &mut Connection, input: &EmployeeInput) -> AppResul
 pub fn set_employee_area(conn: &Connection, employee_id: i64, area: &str, effective_from: &str) -> AppResult<()> {
     validate_area(area)?;
     validate_period(effective_from)?;
+    let previous = area_at(conn, employee_id, effective_from)?;
     conn.execute(
         "INSERT INTO fs_employee_areas (employee_id, area, effective_from, created_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(employee_id, effective_from) DO UPDATE SET area = excluded.area",
         params![employee_id, area, effective_from, now_iso()],
     )?;
+    employee_event(conn, employee_id, "area_changed", serde_json::json!({ "area": previous }), serde_json::json!({ "area": area, "areaFrom": effective_from }))?;
+    Ok(())
+}
+
+/// Área vigente en un periodo (la última vigencia que empezó en o antes de él).
+fn area_at(conn: &Connection, employee_id: i64, period: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row("SELECT area FROM fs_employee_areas WHERE employee_id = ?1 AND effective_from <= ?2 ORDER BY effective_from DESC LIMIT 1", params![employee_id, period], |r| r.get(0))
+        .optional()?)
+}
+
+fn employee_event(conn: &Connection, employee_id: i64, action: &str, previous: Value, next: Value) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO fs_employee_events (employee_id, action, previous, next, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![employee_id, action, previous.to_string(), next.to_string(), now_iso()],
+    )?;
+    Ok(())
+}
+
+/// «Editar empleado»: corrige la ficha sin borrarla. El área nueva rige desde
+/// `area_from` y nunca desde un mes con nómina ya enviada (esos meses conservan
+/// su área; una corrección real se hace reemplazando el envío). Cada edición
+/// queda en el historial con los valores anteriores.
+pub fn update_employee(conn: &mut Connection, input: &EmployeeUpdateInput) -> AppResult<()> {
+    let (old_type, old_number, old_name): (String, String, String) = conn
+        .query_row("SELECT doc_type, doc_number, name FROM fs_employees WHERE id = ?1", [input.employee_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()?
+        .ok_or_else(|| AppError::user("El empleado no existe."))?;
+    let doc_type = input.doc_type.trim().to_uppercase();
+    let doc_number: String = input.doc_number.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let name = input.name.trim();
+    if doc_type.is_empty() || doc_number.is_empty() || name.is_empty() {
+        return Err(AppError::user("Tipo de documento, número y nombre son obligatorios."));
+    }
+    validate_iso_date(&input.hire_date, "Fecha de ingreso")?;
+    // Vinculación vigente (la última): su fecha de ingreso es la editable.
+    let (employment_id, old_hire, end): (i64, String, Option<String>) = conn.query_row(
+        "SELECT id, hire_date, end_date FROM fs_employments WHERE employee_id = ?1 ORDER BY number DESC LIMIT 1",
+        [input.employee_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    if end.as_deref().is_some_and(|e| input.hire_date.as_str() > e) {
+        return Err(AppError::user("La fecha de ingreso no puede ser posterior a la liquidación de la vinculación."));
+    }
+    let previous_end: Option<String> = conn
+        .query_row("SELECT end_date FROM fs_employments WHERE employee_id = ?1 AND id <> ?2 ORDER BY number DESC LIMIT 1", params![input.employee_id, employment_id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    if previous_end.as_deref().is_some_and(|e| input.hire_date.as_str() <= e) {
+        return Err(AppError::user("La fecha de ingreso debe ser posterior a la liquidación de la vinculación anterior."));
+    }
+
+    let area_change = match (input.area.as_deref().filter(|a| !a.is_empty()), input.area_from.as_deref().filter(|p| !p.is_empty())) {
+        (Some(area), Some(from)) => {
+            validate_area(area)?;
+            validate_period(from)?;
+            let current = area_at(conn, input.employee_id, from)?;
+            if current.as_deref() == Some(area) {
+                None
+            } else {
+                let last_sent: Option<String> = conn.query_row(
+                    "SELECT MAX(p.period) FROM fs_payroll_rows p JOIN fs_batches b ON b.id = p.batch_id WHERE p.employee_id = ?1 AND b.status = 'active'",
+                    [input.employee_id],
+                    |r| r.get(0),
+                )?;
+                if let Some(last) = last_sent.filter(|l| from <= l.as_str()) {
+                    return Err(AppError::user(format!(
+                        "La nómina de {last} ya fue enviada con el área vigente: el cambio de área debe regir desde un mes posterior. Para corregir meses ya enviados, reemplaza el envío de esa planilla."
+                    )));
+                }
+                Some((area.to_string(), from.to_string(), current))
+            }
+        }
+        (Some(_), None) => return Err(AppError::user("Indica desde qué mes rige el área nueva.")),
+        _ => None,
+    };
+
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    tx.execute("UPDATE fs_employees SET doc_type = ?1, doc_number = ?2, name = ?3, updated_at = ?4 WHERE id = ?5", params![doc_type, doc_number, name, now, input.employee_id]).map_err(|e| match &e {
+        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => AppError::user(format!("Ya existe otro empleado con {doc_type} {doc_number} en esta empresa.")),
+        _ => e.into(),
+    })?;
+    tx.execute("UPDATE fs_employments SET hire_date = ?1, updated_at = ?2 WHERE id = ?3", params![input.hire_date, now, employment_id])?;
+    let mut previous = serde_json::Map::new();
+    let mut next = serde_json::Map::new();
+    let mut diff = |key: &str, old: &str, new: &str| {
+        if old != new {
+            previous.insert(key.into(), old.into());
+            next.insert(key.into(), new.into());
+        }
+    };
+    diff("docType", &old_type, &doc_type);
+    diff("docNumber", &old_number, &doc_number);
+    diff("name", &old_name, name);
+    diff("hireDate", &old_hire, &input.hire_date);
+    if let Some((area, from, current)) = &area_change {
+        tx.execute(
+            "INSERT INTO fs_employee_areas (employee_id, area, effective_from, created_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(employee_id, effective_from) DO UPDATE SET area = excluded.area",
+            params![input.employee_id, area, from, now],
+        )?;
+        previous.insert("area".into(), current.clone().map_or(Value::Null, Value::from));
+        next.insert("area".into(), area.as_str().into());
+        next.insert("areaFrom".into(), from.as_str().into());
+    }
+    if !next.is_empty() {
+        employee_event(&tx, input.employee_id, "edited", Value::Object(previous), Value::Object(next))?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -1384,5 +1620,63 @@ mod tests {
         assert!(crate::database::companies::delete(&conn, a).unwrap_err().0.contains("Estados Financieros"));
         let b = company(&conn, "900222222");
         crate::database::companies::delete(&conn, b).unwrap();
+    }
+
+    #[test]
+    fn bank_account_lifecycle_is_confirmed_editable_and_audited() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let input = |action: &str, period: Option<&str>| BankLifecycleInput { company_id: a, bank: "Bancolombia".into(), account_number: "1234".into(), action: action.into(), period: period.map(String::from), opened_period: None, closed_period: None, note: String::new() };
+        // «No, sigue activa»: solo auditoría, sin cierre.
+        save_bank_lifecycle(&mut conn, &input("kept_active", Some("2026-03"))).unwrap();
+        let l = &list_bank_lifecycles(&conn, a).unwrap()[0];
+        assert_eq!((l.status.as_str(), l.closed_period.as_deref(), l.events.len()), ("active", None, 1));
+        save_bank_lifecycle(&mut conn, &input("opened", Some("2026-04"))).unwrap();
+        save_bank_lifecycle(&mut conn, &input("closed", Some("2026-06"))).unwrap();
+        let l = &list_bank_lifecycles(&conn, a).unwrap()[0];
+        assert_eq!((l.opened_period.as_deref(), l.closed_period.as_deref(), l.status.as_str()), (Some("2026-04"), Some("2026-06"), "closed"));
+        assert!(save_bank_lifecycle(&mut conn, &input("closed", Some("2026-02"))).is_err(), "el cierre no puede ser anterior a la apertura");
+        // Corrección: se quita el cierre y queda lo anterior en la auditoría.
+        save_bank_lifecycle(&mut conn, &BankLifecycleInput { opened_period: Some("2026-04".into()), closed_period: None, note: "Error al confirmar".into(), ..input("edited", None) }).unwrap();
+        let l = &list_bank_lifecycles(&conn, a).unwrap()[0];
+        assert_eq!((l.closed_period.as_deref(), l.status.as_str(), l.events.len()), (None, "active", 4));
+        assert_eq!(l.events[3].previous["closedPeriod"], "2026-06");
+        assert!(save_bank_lifecycle(&mut conn, &input("closed", None)).is_err(), "el cierre necesita periodo");
+        assert!(list_bank_lifecycles(&conn, company(&conn, "900222222")).unwrap().is_empty(), "por empresa");
+    }
+
+    #[test]
+    fn gmf_rules_remember_confirmations_and_rejections() {
+        let mut conn = db();
+        save_gmf_rule(&conn, "BBVA", "IMPUESTO MOV FINANCIEROS", true, "auto").unwrap();
+        save_gmf_rule(&conn, "BBVA", "GRAVAMEN ESPECIAL", false, "auto").unwrap();
+        save_gmf_rule(&conn, "BBVA", "GRAVAMEN ESPECIAL", true, "manual").unwrap();
+        assert!(save_gmf_rule(&conn, "BBVA", "X", true, "otro").is_err());
+        let rules = list_gmf_rules(&conn).unwrap();
+        assert_eq!(rules.iter().map(|r| (r.concept.as_str(), r.is_gmf, r.origin.as_str())).collect::<Vec<_>>(), [("GRAVAMEN ESPECIAL", true, "manual"), ("IMPUESTO MOV FINANCIEROS", true, "auto")]);
+        assert!(run_pending(&mut conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn employee_edit_keeps_area_history_and_audits() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana".into(), hire_date: "2026-01-01".into(), area: "sales".into(), effective_from: "2026-01".into() }).unwrap();
+        let employment = list_employees(&conn, a).unwrap()[0].employments[0].id;
+        let mut b = batch(a, "payroll", "payroll:2026-06", vec![movement("2026-06-30", "510506", 100, "n1")]);
+        b.payroll_rows.push(PayrollRowInput { employee_id: id, employment_id: employment, period: "2026-06".into(), payment_date: "2026-07-05".into(), detail: None });
+        send_batch(&mut conn, &b).unwrap();
+        let edit = |area_from: &str| EmployeeUpdateInput { employee_id: id, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana María".into(), hire_date: "2026-01-02".into(), area: Some("admin".into()), area_from: Some(area_from.into()) };
+        assert!(update_employee(&mut conn, &edit("2026-06")).unwrap_err().0.contains("2026-06"), "junio ya se envió con Ventas");
+        update_employee(&mut conn, &edit("2026-07")).unwrap();
+        let e = &list_employees(&conn, a).unwrap()[0];
+        assert_eq!(e.areas.iter().map(|x| (x.area.as_str(), x.effective_from.as_str())).collect::<Vec<_>>(), [("sales", "2026-01"), ("admin", "2026-07")]);
+        assert_eq!((e.name.as_str(), e.employments[0].hire_date.as_str()), ("Ana María", "2026-01-02"));
+        assert_eq!((e.events.len(), e.events[0].previous["name"].as_str(), e.events[0].previous["area"].as_str()), (1, Some("Ana"), Some("sales")));
+        // La nómina de junio conserva su área (el detalle enviado no cambia).
+        assert_eq!(list_payroll_rows(&conn, a).unwrap()[0].period, "2026-06");
+        let other = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "999".into(), name: "Luis".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() }).unwrap();
+        let dup = EmployeeUpdateInput { employee_id: other, doc_number: "123".into(), area: None, area_from: None, ..edit("2026-08") };
+        assert!(update_employee(&mut conn, &dup).unwrap_err().0.contains("CC 123"));
     }
 }

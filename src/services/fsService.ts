@@ -2,14 +2,18 @@ import type {
   Adjustment,
   AdjustmentInput,
   BankAccount,
+  BankAccountLifecycle,
+  BankLifecycleInput,
   BankBalance,
   BankConceptMapping,
   BatchInput,
   BatchSummary,
   Employee,
+  EmployeeUpdateInput,
   FsCatalog,
   FsPucMapping,
   FsSectionKey,
+  GmfRule,
   Liquidation,
   Movement,
   PayrollRow,
@@ -43,6 +47,11 @@ export const fsService = {
   bankBalances: (companyId: number) => call<BankBalance[]>("list_fs_bank_balances", { companyId }),
   bankAccounts: () => call<BankAccount[]>("list_fs_bank_accounts"),
   bankConceptMappings: () => call<BankConceptMapping[]>("list_fs_bank_concept_mappings"),
+  /** Apertura / cierre de las cuentas de una empresa, con su auditoría. */
+  bankLifecycles: (companyId: number) => call<BankAccountLifecycle[]>("list_fs_bank_lifecycles", { companyId }),
+  saveBankLifecycle: (input: BankLifecycleInput) => call<void>("save_fs_bank_lifecycle", { input }),
+  gmfRules: () => call<GmfRule[]>("list_fs_bank_gmf_rules"),
+  saveGmfRule: (bank: string, concept: string, isGmf: boolean, origin: "auto" | "manual") => call<void>("save_fs_bank_gmf_rule", { bank, concept, isGmf, origin }),
 
   // Configuración global
   pucSettings: () => call<PucSetting[]>("list_fs_puc_settings"),
@@ -57,7 +66,9 @@ export const fsService = {
 
   // Nómina
   employees: (companyId: number) => call<Employee[]>("list_fs_employees", { companyId }),
-  createEmployee: (input: { companyId: number; docType: string; docNumber: string; name: string; hireDate: string; area: string; effectiveFrom: string }) => call<number>("create_fs_employee", { input }),
+  createEmployee: (input: { companyId: number; docType: string; docNumber: string; name: string; hireDate: string; area: string; effectiveFrom: string }) =>
+    call<number>("create_fs_employee", { input }),
+  updateEmployee: (input: EmployeeUpdateInput) => call<void>("update_fs_employee", { input }),
   setEmployeeArea: (employeeId: number, area: string, effectiveFrom: string) => call<void>("set_fs_employee_area", { employeeId, area, effectiveFrom }),
   addEmployment: (employeeId: number, hireDate: string) => call<number>("add_fs_employment", { employeeId, hireDate }),
   registerLiquidation: (input: { employmentId: number; liquidationDate: string; lastPeriod: string; notes: string }) => call<Liquidation>("register_fs_liquidation", { input }),

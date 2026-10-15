@@ -3,6 +3,7 @@ import { Alert, Button, Field, Input, Modal, Select, Textarea, useToast } from "
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import { AREA_LABEL, type Area, type Employee } from "../../../types/fs";
+import { areaFor } from "./calc";
 import { formatExactCents, lastDayOfMonth, periodLabel } from "../shared/money";
 
 function useSave(onDone: () => void | Promise<unknown>) {
@@ -174,6 +175,115 @@ export function AreaChangeModal({ employee, period, onClose, onSaved }: { employ
             </Select>
           )}
         </Field>
+      </div>
+    </Modal>
+  );
+}
+
+const FIELD_LABEL: Record<string, string> = { docType: "Tipo de documento", docNumber: "Número", name: "Nombre", hireDate: "Fecha de ingreso", area: "Área", areaFrom: "Área desde" };
+
+const fieldValue = (key: string, value: unknown) =>
+  value === null || value === undefined || value === "" ? "—" : key === "area" ? (AREA_LABEL[value as Area] ?? String(value)) : key === "areaFrom" ? periodLabel(String(value)) : String(value);
+
+/**
+ * «Editar empleado»: corrige la ficha sin eliminarla. Un cambio de área no
+ * reescribe el pasado: rige desde el mes indicado (los meses anteriores y la
+ * nómina ya enviada conservan su área). Cada edición queda en el historial.
+ */
+export function EmployeeEditModal({ employee, period, onClose, onSaved }: { employee: Employee | null; period: string; onClose: () => void; onSaved: () => void | Promise<unknown> }) {
+  const [values, setValues] = useState({ docType: "", docNumber: "", name: "", hireDate: "", area: "" as Area | "", areaFrom: "" });
+  const { saving, error, run } = useSave(onSaved);
+  const employment = employee?.employments[employee.employments.length - 1];
+  useEffect(() => {
+    if (!employee) return;
+    const from = period || new Date().toISOString().slice(0, 7);
+    setValues({ docType: employee.docType, docNumber: employee.docNumber, name: employee.name, hireDate: employment?.hireDate ?? "", area: areaFor(employee, from) ?? "", areaFrom: from });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee, period]);
+  const set = (key: keyof typeof values) => (e: { target: { value: string } }) => setValues((v) => ({ ...v, [key]: e.target.value }));
+  const currentArea = employee && /^\d{4}-\d{2}$/.test(values.areaFrom) ? areaFor(employee, values.areaFrom) : undefined;
+  const areaChanged = Boolean(values.area) && values.area !== currentArea;
+  const ready = values.docType.trim() && values.docNumber.trim() && values.name.trim() && /^\d{4}-\d{2}-\d{2}$/.test(values.hireDate) && (!areaChanged || /^\d{4}-\d{2}$/.test(values.areaFrom));
+  const save = () =>
+    employee &&
+    void run(
+      () =>
+        fsService.updateEmployee({
+          employeeId: employee.id,
+          docType: values.docType,
+          docNumber: values.docNumber,
+          name: values.name,
+          hireDate: values.hireDate,
+          area: areaChanged ? (values.area as Area) : null,
+          areaFrom: areaChanged ? values.areaFrom : null,
+        }),
+      "Ficha del empleado actualizada.",
+    );
+  return (
+    <Modal
+      open={employee !== null}
+      title="Editar empleado"
+      description={employee ? `${employee.name} · ${employee.docType} ${employee.docNumber}. Los cambios no modifican la nómina ya enviada.` : ""}
+      onClose={onClose}
+      locked={saving}
+      footer={footer(saving, onClose, save, "Guardar cambios", !ready)}
+    >
+      <div className="stack">
+        {error && <Alert tone="danger">{error}</Alert>}
+        <div className="form-grid">
+          <Field label="Tipo de documento" required>
+            {(id) => <Input id={id} value={values.docType} onChange={set("docType")} />}
+          </Field>
+          <Field label="Número de documento" required hint="Es la llave con la que se reconoce en la planilla.">
+            {(id) => <Input id={id} value={values.docNumber} onChange={set("docNumber")} />}
+          </Field>
+          <Field label="Nombre" required className="span-2">
+            {(id) => <Input id={id} value={values.name} onChange={set("name")} />}
+          </Field>
+          <Field label="Fecha de ingreso" required hint={employment ? `Vinculación #${employment.number}${employment.endDate ? ` (liquidada el ${employment.endDate})` : " vigente"}.` : undefined}>
+            {(id) => <Input id={id} type="date" value={values.hireDate} onChange={set("hireDate")} />}
+          </Field>
+          <span />
+          <Field label="Área contable" required hint={currentArea ? `Vigente en ${periodLabel(values.areaFrom)}: ${AREA_LABEL[currentArea]}.` : undefined}>
+            {(id) => (
+              <Select id={id} value={values.area} onChange={set("area")}>
+                <option value="">Seleccionar…</option>
+                <option value="admin">Administración</option>
+                <option value="sales">Ventas</option>
+              </Select>
+            )}
+          </Field>
+          <Field label="Área nueva rige desde" required={areaChanged} hint="Los meses anteriores conservan su área.">
+            {(id) => <Input id={id} type="month" value={values.areaFrom} onChange={set("areaFrom")} />}
+          </Field>
+        </div>
+        {areaChanged && currentArea && (
+          <Alert tone="info">
+            Desde {periodLabel(values.areaFrom)}: {AREA_LABEL[values.area as Area]}. Los meses anteriores conservan {AREA_LABEL[currentArea]}. Para corregir meses ya enviados, reemplaza el envío de
+            esa planilla.
+          </Alert>
+        )}
+        {employee && (
+          <div className="stack stack--sm">
+            <div className="field__hint">Historial de área: {employee.areas.map((a) => `${AREA_LABEL[a.area]} desde ${periodLabel(a.effectiveFrom)}`).join(" · ")}</div>
+            {employee.events.length > 0 && (
+              <ul className="fs-history">
+                {[...employee.events].reverse().map((e, i) => (
+                  <li key={i}>
+                    <span>
+                      {Object.keys(e.next ?? {})
+                        .filter((k) => k !== "areaFrom")
+                        .map((k) => `${FIELD_LABEL[k] ?? k}: ${fieldValue(k, e.previous?.[k])} → ${fieldValue(k, e.next?.[k])}`)
+                        .join(" · ")}
+                      {e.next?.areaFrom ? ` (desde ${fieldValue("areaFrom", e.next.areaFrom)})` : ""}
+                    </span>
+                    <span className="muted">{e.createdAt.replace("T", " ").slice(0, 16)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );

@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.24.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Obligaciones tributarias → Retención en la fuente: en el Estado de Situación Financiera, la Retefuente pendiente de un año anterior al de los Estados Financieros se presenta como pasivo no corriente; la del mismo año sigue como pasivo corriente. El código PUC no cambia y una declaración pagada antes del corte no aparece.",
+      "Extractos bancarios: si un extracto termina con saldo final $0, la app pregunta si la cuenta fue cerrada; si empieza con saldo $0 y no hay extractos anteriores de esa cuenta, pregunta si es nueva. Nunca se asume solo por el saldo. Con el cierre o la apertura confirmados, los meses posteriores o anteriores quedan «N/A» en la cobertura y no bloquean el Generador. La apertura y el cierre se pueden corregir desde la cobertura y queda el historial.",
+      "Extractos bancarios — GMF / 4x1000: los conceptos se detectan por palabras clave (GMF, 4x1000, gravamen, movimientos financieros…) y se pueden confirmar o quitar; la decisión se recuerda por banco y concepto. A Estados Financieros va el 50 % del valor neto (cargos − devoluciones); el extracto se conserva completo en el detalle y en Movimientos contables.",
+      "Nómina: nuevo «Editar empleado» (documento, nombre, fecha de ingreso y área). Un cambio de área rige desde el mes indicado y no modifica los meses ya enviados; cada edición queda en el historial.",
+      "Los valores en pesos ya no se parten en dos líneas en las tablas de Renta, Nómina y demás submódulos; el resultado fiscal negativo se muestra entre paréntesis.",
+      "Todos los submódulos de Estados Financieros tienen ahora una sola zona de acciones al inicio de los resultados: estado (Listo, Pendiente de clasificación, Requiere revisión, Enviado) y los botones Exportar Excel, Enviar a Estados Financieros y Enviar y descargar. Se quitaron los bloques repetidos del final."
+    ]
+  },
+  {
     "version": "1.23.0",
     "date": "2026-10-15",
     "notes": [

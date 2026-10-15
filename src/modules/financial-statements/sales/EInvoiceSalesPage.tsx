@@ -175,6 +175,14 @@ export default function EInvoiceSalesPage() {
 
       {book.result && (
         <>
+          <SendToFs
+            blocked={blocked}
+            blockedStatus={unknownTypes.length || missingKeys.length ? "Pendiente de clasificación" : "Requiere revisión"}
+            build={build}
+            onExport={exportExcel}
+            exporting={exporting}
+            duplicateTitle="Algunos documentos ya fueron enviados."
+          />
           {issuers.length > 1 && <Alert tone="danger">El archivo trae documentos de varios emisores ({issuers.join(", ")}): importa uno por empresa.</Alert>}
           {issuers.length === 1 && !company && (
             <Alert tone="danger" title={`No hay una empresa registrada con NIT ${issuers[0]}`}>
@@ -247,16 +255,14 @@ export default function EInvoiceSalesPage() {
                     <tr key={m}>
                       <td>{periodLabel(m)}</td>
                       <td style={{ textAlign: "right" }}>{formatInteger(v.count)}</td>
-                      <td style={{ textAlign: "right" }}>{formatExactCents(v.cents)}</td>
+                      <td className="nowrap" style={{ textAlign: "right" }}>
+                        {formatExactCents(v.cents)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </Card>
-
-          <Card title="Estados Financieros">
-            <SendToFs blocked={blocked} build={build} onExport={exportExcel} exporting={exporting} duplicateTitle="Algunos documentos ya fueron enviados." />
           </Card>
         </>
       )}

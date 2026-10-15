@@ -262,6 +262,7 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
     );
   const detail = (m.detail ?? {}) as Record<string, unknown>;
   const original = Array.isArray(detail.movements) ? (detail.movements as { date: string; description: string; amountCents: number }[]) : [];
+  const gmf = detail.gmf as { origin?: string; percent: number; outflowCents: number; inflowCents: number; originalNetCents: number; accountingCents: number } | undefined;
   return (
     <div className="stack">
       <div className="summary-grid">
@@ -300,12 +301,25 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
                 <tr key={i}>
                   <td>{o.date}</td>
                   <td>{o.description}</td>
-                  <td style={{ textAlign: "right" }}>{formatExactCents(o.amountCents)}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(o.amountCents)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {gmf && (
+        <Alert
+          tone="info"
+          title={`Clasificación especial: GMF / 4x1000 · ${gmf.percent} % a Estados Financieros`}
+          items={[
+            `Salidas del extracto: ${formatExactCents(gmf.outflowCents)} · Entradas / devoluciones: ${formatExactCents(gmf.inflowCents)}`,
+            `Valor original neto: ${formatExactCents(gmf.originalNetCents)} → valor contable enviado (${gmf.percent} %): ${formatExactCents(gmf.accountingCents)}`,
+            `GMF confirmado: Sí · Origen: ${gmf.origin === "manual" ? "Manual" : "Automática (palabra clave)"}`,
+          ]}
+        >
+          El extracto se conserva al 100 %; la otra mitad no se envía a ninguna cuenta.
+        </Alert>
       )}
       {Array.isArray(detail.reclassified) && <Alert tone="warning" title="Reclasificado" items={(detail.reclassified as { from: string; to: string; at: string }[]).map((r) => `${r.from} → ${r.to} (${r.at.slice(0, 10)})`)} />}
     </div>

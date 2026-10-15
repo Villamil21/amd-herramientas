@@ -126,6 +126,31 @@ pub fn create_fs_employee(db: State<'_, Db>, input: EmployeeInput) -> AppResult<
 }
 
 #[tauri::command]
+pub fn update_fs_employee(db: State<'_, Db>, input: EmployeeUpdateInput) -> AppResult<()> {
+    db.with(|c| fs::update_employee(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_lifecycles(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankAccountLifecycle>> {
+    db.with(|c| fs::list_bank_lifecycles(c, company_id))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_lifecycle(db: State<'_, Db>, input: BankLifecycleInput) -> AppResult<()> {
+    db.with(|c| fs::save_bank_lifecycle(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_gmf_rules(db: State<'_, Db>) -> AppResult<Vec<GmfRule>> {
+    db.with(|c| fs::list_gmf_rules(c))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_gmf_rule(db: State<'_, Db>, bank: String, concept: String, is_gmf: bool, origin: String) -> AppResult<()> {
+    db.with(|c| fs::save_gmf_rule(c, &bank, &concept, is_gmf, &origin))
+}
+
+#[tauri::command]
 pub fn set_fs_employee_area(db: State<'_, Db>, employee_id: i64, area: String, effective_from: String) -> AppResult<()> {
     db.with(|c| fs::set_employee_area(c, employee_id, &area, &effective_from))
 }
