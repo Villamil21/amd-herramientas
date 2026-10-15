@@ -114,3 +114,19 @@ export interface DebitCreditSummary {
 
 /** Error con un mensaje listo para mostrar al usuario. */
 export class StatementError extends Error {}
+
+/**
+ * Un extracto sin movimientos sigue siendo un extracto válido (la cuenta pudo no
+ * tener movimientos en el mes) siempre que se haya reconocido el formato y se
+ * identifiquen la cuenta, el periodo y el saldo final. Si falta alguno, no se
+ * puede distinguir de un PDF que no se pudo interpretar: ahí sí es un error.
+ */
+export function assertEmptyStatementIdentified(
+  movementCount: number,
+  info: { accountNumber?: string; periodFrom?: string; periodTo?: string },
+  closingBalanceCents: number | undefined,
+  message: string,
+): void {
+  if (movementCount > 0) return;
+  if (!info.accountNumber || !info.periodFrom || !info.periodTo || closingBalanceCents === undefined) throw new StatementError(message);
+}

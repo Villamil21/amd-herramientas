@@ -30,7 +30,7 @@ import { normalizeDescription } from "../../shared/groupingService";
 import { parseStatementAmount } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText } from "../../shared/pdf/pdfTypes";
 import { buildRows, center, joinWords, type TextRow, type Word } from "../../shared/pdf/rows";
-import { StatementError, type ParseIssue } from "../../shared/types";
+import { assertEmptyStatementIdentified, StatementError, type ParseIssue } from "../../shared/types";
 import type { CoopcentralAnomaly, CoopcentralMovement, CoopcentralPeriodTotals, CoopcentralStatement } from "../types";
 
 export const COOPCENTRAL_MESSAGES = {
@@ -475,11 +475,12 @@ export function parseCoopcentralStatement(doc: PdfDocumentText): CoopcentralStat
   }
 
   if (tables === 0) throw new StatementError(COOPCENTRAL_MESSAGES.format);
-  if (movements.length === 0 && anomalies.length === 0) throw new StatementError(COOPCENTRAL_MESSAGES.noMovements);
+  const info = readAccountInfo(headerAreas);
+  if (anomalies.length === 0) assertEmptyStatementIdentified(movements.length, info, closingBalanceCents, COOPCENTRAL_MESSAGES.noMovements);
 
   return {
     bank: "Coopcentral",
-    ...readAccountInfo(headerAreas),
+    ...info,
     pageCount: doc.pageCount,
     movementsByPage,
     movements,

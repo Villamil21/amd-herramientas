@@ -25,6 +25,8 @@ interface Props {
   blockedStatus?: string;
   /** Todos los pendientes (el primero suele ser `blocked`); se listan bajo el estado. */
   reasons?: string[];
+  /** Estado cuando no hay bloqueos (por defecto «Listo para Estados Financieros»), p. ej. «Procesado sin movimientos». */
+  readyStatus?: string;
 }
 
 /**
@@ -47,6 +49,7 @@ export function SendToFs({
   exportBlocked = null,
   blockedStatus = "Requiere revisión",
   reasons,
+  readyStatus = "Listo para Estados Financieros",
 }: Props) {
   const toast = useToast();
   const [sending, setSending] = useState<"send" | "download" | null>(null);
@@ -88,7 +91,7 @@ export function SendToFs({
         <div className="fs-action-bar__status">
           <div className={`lot-status ${blocked ? "lot-status--attention" : "lot-status--ready"}`} role="status">
             <span className="lot-status__dot" aria-hidden />
-            {blocked ? blockedStatus : sentBatch ? `Enviado · importación #${sentBatch}` : "Listo para Estados Financieros"}
+            {blocked ? blockedStatus : sentBatch ? `Enviado · importación #${sentBatch}` : readyStatus}
           </div>
           {pending.length > 0 && <div className="fs-action-bar__detail">{pending.join(" · ")}.</div>}
         </div>

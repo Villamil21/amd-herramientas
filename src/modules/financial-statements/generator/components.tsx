@@ -484,7 +484,7 @@ function BankStatementTable({ cell }: { cell: BankCell }) {
                   {s.replaced.length > 0 && <div className="table__secondary">Reemplazó {s.replaced.map((b) => `#${b.id}`).join(", ")}</div>}
                 </td>
                 <td className="nowrap">{formatIsoDate(s.batch.createdAt.slice(0, 10))}</td>
-                <td style={{ textAlign: "right" }}>{formatInteger(s.movementCount)}</td>
+                <td style={{ textAlign: "right" }}>{s.movementCount === 0 ? "0 · sin movimientos" : formatInteger(s.movementCount)}</td>
                 <td>{s.batch.status === "active" ? <Badge tone="success">Activo</Badge> : s.batch.status === "replaced" ? <Badge tone="warning">Reemplazado{s.batch.replacedBy ? ` por #${s.batch.replacedBy}` : ""}</Badge> : <Badge>Anulado</Badge>}</td>
                 <td className="nowrap" style={{ textAlign: "right" }}>{s.closingBalanceCents === null ? "—" : formatExactCents(s.closingBalanceCents)}</td>
               </tr>

@@ -3,6 +3,7 @@ import { employeeKey, findAbsences, type Absence } from "../payroll/calc";
 import { monthsBetween, periodLabel } from "../shared/money";
 import { periodsPerYear } from "../tax-obligations/services/effects";
 import type { TaxPeriodicity, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import { statementMonths } from "../bank/bankAccounting";
 import { isBalanced, pendingBankBalances, type BankBalanceStatus, type Statements } from "./engine";
 
 /**
@@ -154,7 +155,7 @@ export function bankStatements(movements: Movement[], balances: BankBalance[], b
     const bank = String(meta.bank ?? own[0]?.bank ?? ownBalances[0]?.bank ?? "").trim() || "Banco sin identificar";
     const accountNumber = String(meta.accountNumber ?? own[0]?.accountNumber ?? ownBalances[0]?.accountNumber ?? "").trim();
     const months =
-      batch.periodStart && batch.periodEnd ? monthsBetween(batch.periodStart, batch.periodEnd) : [...new Set([...own.map((m) => m.accountingDate), ...ownBalances.map((b) => b.balanceDate)].map((d) => d.slice(0, 7)))].sort();
+      batch.periodStart && batch.periodEnd ? statementMonths(batch.periodStart, batch.periodEnd) : [...new Set([...own.map((m) => m.accountingDate), ...ownBalances.map((b) => b.balanceDate)].map((d) => d.slice(0, 7)))].sort();
     const movementCount = own.reduce((sum, m) => sum + (typeof m.detail?.count === "number" ? m.detail.count : 1), 0);
     const balance = [...ownBalances].sort((a, b) => b.balanceDate.localeCompare(a.balanceDate))[0];
     return { batch, bank, accountNumber, months, movementCount, closingBalanceCents: balance ? balance.balanceCents : null, replaced: bankBatches.filter((b) => b.replacedBy === batch.id) };

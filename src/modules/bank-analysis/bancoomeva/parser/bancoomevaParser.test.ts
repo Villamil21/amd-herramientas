@@ -318,9 +318,12 @@ describe("parser Bancoomeva", () => {
     expectError(() => parseBancoomevaStatement(other), BANCOOMEVA_MESSAGES.format);
   });
 
-  it("informa si no hay movimientos", () => {
+  it("sin movimientos: válido si identifica cuenta, periodo y saldo final; si no, informa que no se encontraron", () => {
     const d = docOf(page(1, [...accountBlock(), ...header(629.9), ...totalsBlock({ opening: 0, debit: 0, credit: 0, closing: 0 }, 580), ...legal(540)]));
-    expectError(() => parseBancoomevaStatement(d), BANCOOMEVA_MESSAGES.noMovements);
+    const s = parseBancoomevaStatement(d);
+    expect([s.movements.length, s.totals.closingBalanceCents, Boolean(s.accountNumber && s.periodFrom && s.periodTo)]).toEqual([0, 0, true]);
+    const unidentified = docOf(page(1, [...header(629.9), ...totalsBlock({ opening: 0, debit: 0, credit: 0, closing: 0 }, 580), ...legal(540)]));
+    expectError(() => parseBancoomevaStatement(unidentified), BANCOOMEVA_MESSAGES.noMovements);
   });
 });
 

@@ -32,7 +32,9 @@ describe.skipIf(files.length === 0)("extracto Bancolombia real", () => {
 
       // Todas las páginas con tabla aportan movimientos.
       expect(Object.keys(statement.movementsByPage).length).toBe(text.pageCount);
-      for (const count of Object.values(statement.movementsByPage)) expect(count).toBeGreaterThan(0);
+      // Un extracto sin movimientos es válido (cuenta, periodo y saldo final identificados).
+      if (statement.movements.length === 0) expect([statement.accountNumber, statement.periodFrom, statement.periodTo, statement.totals.currentBalanceCents].every((v) => v !== undefined)).toBe(true);
+      else for (const count of Object.values(statement.movementsByPage)) expect(count).toBeGreaterThan(0);
       // Ningún encabezado ni cierre convertido en movimiento.
       for (const m of statement.movements) {
         expect(m.description).not.toMatch(/FECHA|DESCRIPCI|FIN ESTADO DE CUENTA|P[AÁ]GINA/);
@@ -40,7 +42,8 @@ describe.skipIf(files.length === 0)("extracto Bancolombia real", () => {
       }
       expect(statement.issues).toEqual([]);
       // Controles: secuencia de saldos, RESUMEN y agrupación.
-      for (const check of validation.checks) expect(check, check.detail).toMatchObject({ status: "ok" });
+      // Sin movimientos no hay secuencia de saldos que revisar («no disponible»); los demás controles sí aplican.
+      for (const check of validation.checks) expect(check, check.detail).toMatchObject({ status: check.id === "balances" && statement.movements.length === 0 ? "unavailable" : "ok" });
       expect(validation.validated).toBe(true);
 
       if (process.env.BANCOLOMBIA_PDF_REPORT) {

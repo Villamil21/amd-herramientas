@@ -154,6 +154,23 @@ describe("cuentas abiertas o cerradas durante el año", () => {
   });
 });
 
+describe("extracto sin movimientos", () => {
+  it("prueba 13 — febrero sin movimientos cuenta como cubierto (Bancolombia: desde el 31 del mes anterior)", () => {
+    const months = ["2026-01", "2026-02", "2026-03"];
+    const statements = [
+      { ...bankBatch(1, "Bancolombia", "55400008286", "2026-01"), periodStart: "2025-12-31", periodEnd: "2026-01-31" },
+      { ...bankBatch(2, "Bancolombia", "55400008286", "2026-02"), periodStart: "2026-01-31", periodEnd: "2026-02-28", recordCount: 0, metadata: { bank: "Bancolombia", accountNumber: "55400008286", movementCount: 0 } },
+    ];
+    const balances = [{ ...balance(2, "2026-02-28", 0), bank: "Bancolombia", accountNumber: "55400008286" }];
+    const a = bankCoverage(months, [], balances, statements).banks[0].accounts[0];
+    expect(a.missing).toEqual(["2026-03"]);
+    const feb = a.cells["2026-02"];
+    expect([feb.loaded, feb.statements[0].movementCount, feb.statements[0].closingBalanceCents]).toEqual([1, 0, 0]);
+    // El extracto de febrero no marca enero: enero lo cubre su propio extracto.
+    expect(a.cells["2026-01"].statements.map((s) => s.batch.id)).toEqual([1]);
+  });
+});
+
 describe("duplicados activos", () => {
   it("detecta un documento activo en dos importaciones", () => {
     expect(activeDuplicates([mv(1, "2026-01-01", 1), { ...mv(2, "2026-01-01", 2), documentId: "d1" }, { ...mv(3, "2026-01-01", 3), documentId: "d1", status: "replaced" }])).toEqual([{ source: "purchases", documentId: "d1", batchIds: [1, 2] }]);

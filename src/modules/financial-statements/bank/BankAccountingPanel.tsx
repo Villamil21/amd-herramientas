@@ -206,6 +206,7 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
         blocked={blocking[0]?.text ?? null}
         blockedStatus={blocking[0]?.status}
         reasons={blocking.map((b) => b.text)}
+        readyStatus={statement.movementCount === 0 ? "Procesado sin movimientos · listo para Estados Financieros" : undefined}
         build={() => (companyId === null ? null : buildBankBatch(companyId, statement, fileName, decisions, balancePuc ?? "", confirmedGmf))}
         onExport={onExport}
         exporting={exporting}
@@ -216,6 +217,12 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
           void reloadAccountHistory();
         }}
       />
+
+      {statement.movementCount === 0 && (
+        <Alert tone="info" title="Este extracto no contiene movimientos en el periodo.">
+          Puedes registrarlo igualmente para completar la cobertura bancaria: se guarda el extracto con su saldo final, sin crear movimientos contables.
+        </Alert>
+      )}
 
       {questions.map((q) => (
         <Alert key={q.kind} tone="warning" title={QUESTION[q.kind].title}>

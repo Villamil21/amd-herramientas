@@ -1,5 +1,5 @@
 import type { BankAccountLifecycle, BatchInput, BatchSummary, GmfRule, MovementInput } from "../../../types/fs";
-import { slashToIso } from "../shared/money";
+import { lastDayOfMonth, slashToIso } from "../shared/money";
 
 /**
  * Capa contable de los extractos bancarios. Cada banco conserva su lector y su
@@ -32,6 +32,8 @@ export interface AccountingStatement {
   /** AAAA-MM-DD. */
   periodFrom?: string;
   periodTo?: string;
+  /** Movimientos originales leídos del extracto (0 = extracto válido sin movimientos en el periodo). */
+  movementCount: number;
   /** Saldo inicial del extracto (para detectar una posible apertura). */
   openingBalanceCents?: number;
   closingBalanceCents?: number;
@@ -55,6 +57,7 @@ export function fromSignedGroups(
     accountNumber: statement.accountNumber,
     periodFrom: slashToIso(statement.periodFrom),
     periodTo: slashToIso(statement.periodTo),
+    movementCount: groups.reduce((n, g) => n + g.count, 0),
     openingBalanceCents: statement.totals.previousBalanceCents,
     closingBalanceCents: statement.totals.currentBalanceCents,
     concepts: groups
@@ -90,6 +93,7 @@ export function fromTypedGroups(
     accountNumber: statement.accountNumber,
     periodFrom: slashToIso(statement.periodFrom),
     periodTo: slashToIso(statement.periodTo),
+    movementCount: groups.reduce((n, g) => n + g.count, 0),
     openingBalanceCents,
     closingBalanceCents,
     concepts: groups.map((g) => ({
@@ -101,6 +105,27 @@ export function fromTypedGroups(
       movements: g.movements.map((m) => ({ date: m.date ?? m.operationDate ?? m.applicationDate ?? "", description: m.description ?? m.concept ?? "", amountCents: m.amountCents })),
     })),
   };
+}
+
+/**
+ * Meses (AAAA-MM) que cubre un extracto. Algunos bancos (Bancolombia) ponen como
+ * «desde» el corte anterior, el último día del mes previo (febrero: 2026/01/31 a
+ * 2026/02/28): ese día no hace que el extracto cubra también el mes anterior.
+ */
+export function statementMonths(periodFrom: string, periodTo: string): string[] {
+  let from = periodFrom.slice(0, 7);
+  const to = periodTo.slice(0, 7);
+  if (from < to && periodFrom === lastDayOfMonth(from)) {
+    const [y, m] = from.split("-").map(Number);
+    from = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  }
+  const out: string[] = [];
+  for (let cur = from; cur <= to; ) {
+    out.push(cur);
+    const [y, m] = cur.split("-").map(Number);
+    cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  }
+  return out;
 }
 
 /** Destino de un concepto en ESTE extracto. «Seleccionar» no es válido para enviar; «No enviar» nunca se guarda como regla. */
@@ -205,7 +230,7 @@ export function lifecycleQuestions(statement: AccountingStatement, lifecycle: Ba
   const answered = (action: string, period: string) => lifecycle?.events.some((e) => e.action === action && e.period === period) ?? false;
   const end = statement.periodTo?.slice(0, 7);
   if (end && statement.closingBalanceCents === 0 && lifecycle?.closedPeriod !== end && !answered("kept_active", end)) out.push({ kind: "closed", period: end });
-  const start = statement.periodFrom?.slice(0, 7);
+  const start = statement.periodFrom && statement.periodTo ? statementMonths(statement.periodFrom, statement.periodTo)[0] : statement.periodFrom?.slice(0, 7);
   const knownEarlier = Boolean(lifecycle?.openedPeriod && start && lifecycle.openedPeriod < start);
   if (start && statement.openingBalanceCents === 0 && !earlierStatement && !knownEarlier && lifecycle?.openedPeriod !== start && !answered("existed_before", start))
     out.push({ kind: "opened", period: start });
@@ -300,6 +325,10 @@ export function buildBankBatch(
     metadata: {
       bank: statement.bank,
       accountNumber: statement.accountNumber,
+      // Trazabilidad del extracto: un extracto sin movimientos también se registra (cubre el periodo).
+      movementCount: statement.movementCount,
+      openingBalanceCents: statement.openingBalanceCents,
+      closingBalanceCents: statement.closingBalanceCents,
       skipped: statement.concepts.filter((c) => decisions[c.key]?.destination === "skip").map((c) => c.description),
       ...(gmfGroups.size > 0 && { gmf: [...new Set([...gmfGroups.values()].map((g) => g.description))], gmfPercent: GMF_PERCENT }),
     },

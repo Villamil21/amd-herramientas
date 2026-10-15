@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BankAccountLifecycle, BatchSummary, GmfRule } from "../../../types/fs";
 import { bankAccountingCents } from "../generator/engine";
-import { buildBankBatch, gmfAccountingCents, gmfRuleKey, gmfState, hasEarlierStatement, isGmfConcept, lifecycleQuestions, type AccountingConcept, type AccountingStatement } from "./bankAccounting";
+import { buildBankBatch, fromSignedGroups, statementMonths, gmfAccountingCents, gmfRuleKey, gmfState, hasEarlierStatement, isGmfConcept, lifecycleQuestions, type AccountingConcept, type AccountingStatement } from "./bankAccounting";
 
 const concept = (key: string, description: string, dc: "D" | "C", totalCents: number, count = 1): AccountingConcept => ({
   key,
@@ -17,6 +17,7 @@ const statement = (concepts: AccountingConcept[], extra: Partial<AccountingState
   accountNumber: "0013007491",
   periodFrom: "2026-08-01",
   periodTo: "2026-08-31",
+  movementCount: concepts.reduce((n, c) => n + c.count, 0),
   openingBalanceCents: 1_000,
   closingBalanceCents: 2_000,
   concepts,
@@ -170,5 +171,27 @@ describe("apertura y cierre de cuentas — siempre con confirmación", () => {
         { ...earlier, metadata: { bank: "BBVA", accountNumber: "999" } },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("extracto válido sin movimientos", () => {
+  it("prueba 13 — Bancolombia ••••8286 febrero 2026: 0 movimientos y saldo $0 se registra sin movimientos contables", () => {
+    const s = fromSignedGroups({ bank: "Bancolombia", accountNumber: "55400008286", periodFrom: "2026/01/31", periodTo: "2026/02/28", totals: { previousBalanceCents: 0, currentBalanceCents: 0 } }, []);
+    expect([s.movementCount, s.concepts.length, s.periodFrom, s.periodTo]).toEqual([0, 0, "2026-01-31", "2026-02-28"]);
+    const batch = buildBankBatch(1, s, "Extracto Bancolombia 8286 02 2026.pdf", {}, "111005");
+    // Ningún movimiento contable ficticio: solo el extracto (lote) y su saldo final.
+    expect(batch.movements).toEqual([]);
+    expect(batch.bankBalances).toEqual([{ bank: "Bancolombia", accountNumber: "55400008286", balanceDate: "2026-02-28", balanceCents: 0, pucCode: "111005" }]);
+    expect(batch.metadata).toMatchObject({ movementCount: 0, openingBalanceCents: 0, closingBalanceCents: 0 });
+    // Saldo final 0: igual se pregunta por el cierre (sin movimientos ≠ cuenta cerrada); sin historial, por la apertura en febrero.
+    expect(lifecycleQuestions(s, null, false)).toEqual([{ kind: "closed", period: "2026-02" }, { kind: "opened", period: "2026-02" }]);
+  });
+
+  it("el «desde» en el último día del mes anterior no cubre ese mes", () => {
+    expect(statementMonths("2026-01-31", "2026-02-28")).toEqual(["2026-02"]);
+    expect(statementMonths("2025-12-31", "2026-01-31")).toEqual(["2026-01"]);
+    expect(statementMonths("2026-02-01", "2026-02-28")).toEqual(["2026-02"]);
+    expect(statementMonths("2026-01-15", "2026-03-10")).toEqual(["2026-01", "2026-02", "2026-03"]);
+    expect(statementMonths("2026-03-31", "2026-03-31")).toEqual(["2026-03"]);
   });
 });

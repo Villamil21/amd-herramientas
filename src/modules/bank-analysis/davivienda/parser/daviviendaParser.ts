@@ -25,7 +25,7 @@ import { normalizeDescription } from "../../shared/groupingService";
 import { parseStatementAmount, signOf } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText } from "../../shared/pdf/pdfTypes";
 import { buildRows, center, joinWords, type TextRow, type Word } from "../../shared/pdf/rows";
-import { StatementError, type BankMovement, type ParseIssue, type ParsedStatement, type StatementTotals } from "../../shared/types";
+import { assertEmptyStatementIdentified, StatementError, type BankMovement, type ParseIssue, type ParsedStatement, type StatementTotals } from "../../shared/types";
 
 export const DAVIVIENDA_MESSAGES = {
   format: "El PDF no coincide con el formato Davivienda soportado.",
@@ -363,9 +363,10 @@ export function parseDaviviendaStatement(doc: PdfDocumentText): ParsedStatement 
   }
 
   if (tables === 0) throw new StatementError(DAVIVIENDA_MESSAGES.format);
-  if (drafts.length === 0) throw new StatementError(DAVIVIENDA_MESSAGES.noMovements);
 
   const info = readAccountInfo(headerAreas);
+  const totals = readTotals(headerAreas);
+  assertEmptyStatementIdentified(drafts.length, info, totals.currentBalanceCents, DAVIVIENDA_MESSAGES.noMovements);
   const movements: BankMovement[] = drafts.map((d, index) => ({
     index,
     date: d.date,
@@ -385,7 +386,7 @@ export function parseDaviviendaStatement(doc: PdfDocumentText): ParsedStatement 
     pageCount: doc.pageCount,
     movementsByPage,
     movements,
-    totals: readTotals(headerAreas),
+    totals,
     issues,
     joinedLines,
   };

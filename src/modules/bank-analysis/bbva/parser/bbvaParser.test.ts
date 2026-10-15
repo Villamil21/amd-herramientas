@@ -245,7 +245,9 @@ describe("parser BBVA", () => {
   it("rechaza un PDF que no es un extracto BBVA y uno sin movimientos", () => {
     const other: PdfDocumentText = { pageCount: 1, pages: [page(1, [left("SALDO INICIAL", 40, 700), left("TOTAL DEBITO", 200, 700)])] };
     expect(() => parseBbvaStatement(other)).toThrow(new StatementError(BBVA_MESSAGES.format));
-    expect(() => parseBbvaStatement(statement([[]]))).toThrow(new StatementError(BBVA_MESSAGES.noMovements));
+    // Sin movimientos pero con cuenta, periodo y saldo final: extracto válido (cubre el periodo).
+    const empty = parseBbvaStatement(statement([[]]));
+    expect([empty.movements.length, empty.totals.closingBalanceCents !== undefined, Boolean(empty.accountNumber && empty.periodFrom && empty.periodTo)]).toEqual([0, true, true]);
   });
 });
 

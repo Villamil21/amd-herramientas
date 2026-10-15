@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.24.1",
+    "date": "2026-10-15",
+    "notes": [
+      "Extractos bancarios: un extracto sin movimientos ya no es un error. Si se identifican la cuenta, el periodo y el saldo final, se muestra «Procesado sin movimientos» y se puede enviar a Estados Financieros: se registra el extracto y su saldo final, sin crear movimientos contables, y el mes queda cubierto en el Generador. Las preguntas de cierre o apertura por saldo $0 siguen aplicando.",
+      "Si no se puede identificar la cuenta, el periodo o el saldo final, se sigue mostrando el error de análisis.",
+      "Cobertura bancaria: los extractos de Bancolombia (que empiezan el último día del mes anterior) ya no marcan también el mes anterior como cubierto."
+    ]
+  },
+  {
     "version": "1.24.0",
     "date": "2026-10-15",
     "notes": [

@@ -27,7 +27,7 @@ import { normalizeDescription } from "../../shared/groupingService";
 import { parseStatementAmount } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText, PdfTextItem } from "../../shared/pdf/pdfTypes";
 import { splitWords, type Word } from "../../shared/pdf/rows";
-import { StatementError, type ParseIssue } from "../../shared/types";
+import { assertEmptyStatementIdentified, StatementError, type ParseIssue } from "../../shared/types";
 import type { BancoomevaAnomaly, BancoomevaMovement, BancoomevaStatement, BancoomevaTotals } from "../types";
 
 export const BANCOOMEVA_MESSAGES = {
@@ -333,7 +333,6 @@ export function parseBancoomevaStatement(doc: PdfDocumentText): BancoomevaStatem
     joinedLines += result.joinedLines;
   }
   if (tables === 0) throw new StatementError(BANCOOMEVA_MESSAGES.format);
-  if (raws.length === 0) throw new StatementError(BANCOOMEVA_MESSAGES.noMovements);
 
   // Totales del extracto: se toman una sola vez; si otra página trae valores distintos, se informa.
   const totals: BancoomevaTotals = {};
@@ -346,6 +345,8 @@ export function parseBancoomevaStatement(doc: PdfDocumentText): BancoomevaStatem
     }
     if (differs) totalsMismatchPages.push(page);
   }
+  const info = readAccountInfo(allRows);
+  assertEmptyStatementIdentified(raws.length, info, totals.closingBalanceCents, BANCOOMEVA_MESSAGES.noMovements);
 
   const movements: BancoomevaMovement[] = [];
   const anomalies: BancoomevaAnomaly[] = [];
@@ -378,7 +379,7 @@ export function parseBancoomevaStatement(doc: PdfDocumentText): BancoomevaStatem
 
   return {
     bank: "Bancoomeva",
-    ...readAccountInfo(allRows),
+    ...info,
     pageCount: doc.pageCount,
     movementsByPage,
     movements,

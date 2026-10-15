@@ -33,7 +33,7 @@ import { normalizeKey } from "../../../../utils/text";
 import { normalizeDescription } from "../../shared/groupingService";
 import { parseStatementAmount } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText, PdfTextItem } from "../../shared/pdf/pdfTypes";
-import { StatementError, type ParseIssue } from "../../shared/types";
+import { assertEmptyStatementIdentified, StatementError, type ParseIssue } from "../../shared/types";
 import type { BbvaAnomaly, BbvaMovement, BbvaStatement, BbvaSummaryLine, BbvaTotals } from "../types";
 
 export const BBVA_MESSAGES = {
@@ -311,7 +311,8 @@ export function parseBbvaStatement(doc: PdfDocumentText): BbvaStatement {
     if (result.rows.length > 0) movementsByPage[page.pageNumber] = result.rows.length;
     raws.push(...result.rows);
   }
-  if (raws.length === 0 && issues.length === 0) throw new StatementError(BBVA_MESSAGES.noMovements);
+  const info = readAccountInfo(headers);
+  if (issues.length === 0) assertEmptyStatementIdentified(raws.length, info, totals.closingBalanceCents, BBVA_MESSAGES.noMovements);
 
   const movements: BbvaMovement[] = [];
   const anomalies: BbvaAnomaly[] = [];
@@ -328,5 +329,5 @@ export function parseBbvaStatement(doc: PdfDocumentText): BbvaStatement {
     movements.push({ ...common, transactionType: credit ? "credit" : "debit", amountCents: credit ? creditCents : chargeCents });
   });
 
-  return { bank: "BBVA", ...readAccountInfo(headers), pageCount: doc.pageCount, movementsByPage, movements, anomalies, issues, totals };
+  return { bank: "BBVA", ...info, pageCount: doc.pageCount, movementsByPage, movements, anomalies, issues, totals };
 }

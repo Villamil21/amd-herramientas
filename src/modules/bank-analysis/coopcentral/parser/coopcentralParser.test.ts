@@ -282,8 +282,9 @@ describe("parser Coopcentral", () => {
     expect(() => parseCoopcentralStatement(doc(page(1, [...items, ...tableItems(rows)])))).toThrow(COOPCENTRAL_MESSAGES.noAmountColumns);
   });
 
-  it("sin movimientos informa que no se encontraron", () => {
-    expect(() => parseCoopcentralStatement(single([OPEN, close("1,000.00")]))).toThrow(COOPCENTRAL_MESSAGES.noMovements);
+  it("sin movimientos: válido si identifica cuenta, periodo y saldo final", () => {
+    const s = parseCoopcentralStatement(single([OPEN, close("1,000.00")]));
+    expect([s.movements.length, s.closingBalanceCents, Boolean(s.accountNumber && s.periodFrom && s.periodTo)]).toEqual([0, 100000, true]);
   });
 });
 

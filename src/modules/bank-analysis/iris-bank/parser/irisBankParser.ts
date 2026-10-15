@@ -27,7 +27,7 @@ import { normalizeDescription } from "../../shared/groupingService";
 import { parseStatementAmount, signOf } from "../../shared/money";
 import type { PdfDocumentText, PdfPageText } from "../../shared/pdf/pdfTypes";
 import { buildRows, joinWords, type TextRow, type Word } from "../../shared/pdf/rows";
-import { StatementError, type BankMovement, type ParseIssue, type ParsedStatement, type StatementTotals } from "../../shared/types";
+import { assertEmptyStatementIdentified, StatementError, type BankMovement, type ParseIssue, type ParsedStatement, type StatementTotals } from "../../shared/types";
 
 export const IRIS_BANK_MESSAGES = {
   format: "El PDF no coincide con el formato Iris Bank soportado.",
@@ -407,7 +407,9 @@ export function parseIrisBankStatement(doc: PdfDocumentText): ParsedStatement {
   }
 
   if (tables === 0) throw new StatementError(IRIS_BANK_MESSAGES.format);
-  if (anchors.length === 0) throw new StatementError(IRIS_BANK_MESSAGES.noMovements);
+  const info = readAccountInfo(headerAreas);
+  const totals = readTotals(headerAreas);
+  assertEmptyStatementIdentified(anchors.length, info, totals.currentBalanceCents, IRIS_BANK_MESSAGES.noMovements);
 
   const movements: BankMovement[] = [];
   for (const a of anchors) {
@@ -432,11 +434,11 @@ export function parseIrisBankStatement(doc: PdfDocumentText): ParsedStatement {
 
   return {
     bank: "Iris Bank",
-    ...readAccountInfo(headerAreas),
+    ...info,
     pageCount: doc.pageCount,
     movementsByPage,
     movements,
-    totals: readTotals(headerAreas),
+    totals,
     issues,
     joinedLines,
   };
