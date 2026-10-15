@@ -3134,6 +3134,24 @@ button.stat--link {
   background: var(--accent-green-soft);
 }
 
+.fs-row--result td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent-green);
+}
+
+/* Resultado negativo (pérdida): todo el bloque en rojo */
+.fs-row--result.is-negative td {
+  background: var(--color-danger-soft);
+  color: var(--color-danger-ink);
+}
+
+.fs-row--result.is-negative td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.fs-row--result.is-negative td:last-child {
+  border-top-color: var(--color-danger);
+}
+
 .fs-row--gap td {
   height: 10px;
   padding: 0;
@@ -3143,6 +3161,78 @@ button.stat--link {
 .fs-row--detail td {
   background: var(--color-surface-alt);
   font-size: var(--text-sm);
+}
+
+/* Clasificación PUC por niveles: Estado → Grupo → Línea */
+.fs-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-pick__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.fs-pick__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fs-pick__option {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
+}
+
+.fs-pick__option:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-hover);
+}
+
+.fs-pick__option.is-active {
+  border-color: var(--accent-green);
+  background: var(--accent-green-soft);
+  color: var(--accent-green-ink);
+}
+
+.fs-pick__path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.fs-pick__path.is-ready {
+  border-style: solid;
+  border-color: var(--accent-green);
+  background: var(--accent-green-soft);
+  color: var(--accent-green-ink);
+}
+
+.fs-pick__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .fs-tax {

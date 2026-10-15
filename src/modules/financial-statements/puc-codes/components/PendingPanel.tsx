@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, FileSpreadsheet, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, XCircle } from "lucide-react";
 import { Button, useToast } from "../../../../components/ui";
 import { pucService } from "../../../../services/pucService";
 import { groupLabel, groupSummary, PENDING_CATEGORIES, type PendingAction } from "../services/pending";
@@ -73,8 +73,6 @@ interface Props {
   onChanged: () => Promise<void> | void;
   /** Motivo por el que no se puede exportar (null: se puede). */
   exportBlock: string | null;
-  exporting: boolean;
-  onExport: () => void;
 }
 
 /**
@@ -82,7 +80,7 @@ interface Props {
  * quedan, qué falta y en qué factura, y el acceso al siguiente. Sin
  * pendientes: «Todo clasificado» y la exportación habilitada.
  */
-export function PendingPanel({ actions, expanded, onExpandedChange, focusId, onNext, onOpenDocument, onExclude, onChanged, exportBlock, exporting, onExport }: Props) {
+export function PendingPanel({ actions, expanded, onExpandedChange, focusId, onNext, onOpenDocument, onExclude, onChanged, exportBlock }: Props) {
   if (actions.length === 0) {
     return (
       <section className="card pending-panel pending-panel--ready" aria-label="Estado del análisis">
@@ -93,11 +91,8 @@ export function PendingPanel({ actions, expanded, onExpandedChange, focusId, onN
               Todo clasificado
               <span className="pending-panel__count">0</span>
             </h2>
-            <p>0 pendientes. {exportBlock ?? "Listo para exportar."}</p>
+            <p>0 pendientes. {exportBlock ?? "Listo para exportar y enviar con los botones de arriba."}</p>
           </div>
-          <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={onExport} loading={exporting} disabled={exportBlock !== null}>
-            Exportar Excel
-          </Button>
         </header>
       </section>
     );

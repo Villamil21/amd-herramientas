@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.22.1",
+    "date": "2026-10-15",
+    "notes": [
+      "Clasificación contable de compras: «Exportar Excel», «Enviar a Estados Financieros» y «Enviar y descargar» están ahora arriba, junto a «Ver tabla PUC» y «Tipos de documento». Se quitaron los botones repetidos de la parte inferior.",
+      "Clasificar un código PUC ahora se hace por pasos: Estado (Activo, Pasivo, Patrimonio, Estado de Resultados o No afecta Estados Financieros) → Grupo → Línea. Antes de guardar se muestra la ruta completa.",
+      "Generador: un RESULTADO negativo se destaca en rojo, con el valor entre paréntesis; los positivos siguen en verde.",
+      "Los encabezados de sección, los totales y los resultados usan todo el ancho del estado, en la app y en el PDF, para evitar saltos de línea innecesarios. El PDF sigue teniendo exactamente dos páginas."
+    ]
+  },
+  {
     "version": "1.22.0",
     "date": "2026-10-15",
     "notes": [

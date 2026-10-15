@@ -1,29 +1,25 @@
-import { useMemo } from "react";
 import { navigate, paths } from "../../../../app/router";
-import { Alert, Button, Card } from "../../../../components/ui";
-import type { Company, Supplier } from "../../../../types/models";
+import { Alert, Badge, Button, Card } from "../../../../components/ui";
 import { formatInteger } from "../../../../utils/format";
-import { SendToFs } from "../../shared/components/SendToFs";
-import { buildPurchasesBatch, companyCheck, PROBLEM_TEXT, sendBlock } from "../services/accounting";
-import type { Assignments, PucReport } from "../types";
+import { type DocCompany, PROBLEM_TEXT } from "../services/accounting";
 
 interface Props {
-  report: PucReport;
+  docs: DocCompany[];
   pendingActions: number;
-  companies: Company[];
-  suppliers: Supplier[];
-  assignments: Assignments;
-  folderName: string;
+  /** Motivo que bloquea el envío; null = listo. */
+  blocked: string | null;
+  /** Importación del último envío de esta pantalla. */
+  sentBatch: number | null;
   onDecide: (fileName: string, decision: "ignore" | "process") => void;
   onOpen: (fileName: string) => void;
-  onExport: () => Promise<string | null | void>;
-  exporting?: boolean;
 }
 
-/** Envío a Estados Financieros: empresa por NIT del adquiriente, alertas NIT / nombre y bloqueo por pendientes. */
-export function PurchasesFsCard({ report, pendingActions, companies, suppliers, assignments, folderName, onDecide, onOpen, onExport, exporting }: Props) {
-  const docs = useMemo(() => companyCheck(report, companies, assignments), [report, companies, assignments]);
-  const blocked = sendBlock(pendingActions, docs);
+/**
+ * Estado del envío a Estados Financieros: empresa por NIT del adquiriente,
+ * alertas NIT / nombre y bloqueo por pendientes. Los botones de exportar y
+ * enviar están en el encabezado de la página.
+ */
+export function PurchasesFsCard({ docs, pendingActions, blocked, sentBatch, onDecide, onOpen }: Props) {
   const problems = docs.filter((d) => d.problem);
   const sendable = docs.filter((d) => !d.problem && d.decision !== "ignore");
   const company = sendable[0]?.company;
@@ -76,7 +72,9 @@ export function PurchasesFsCard({ report, pendingActions, companies, suppliers, 
           </div>
         )}
         {docs.some((d) => d.decision === "ignore") && <span className="field__hint">{formatInteger(docs.filter((d) => d.decision === "ignore").length)} facturas ignoradas por diferencia de nombre: no se envían (la decisión queda registrada).</span>}
-        <SendToFs blocked={blocked} build={() => buildPurchasesBatch(docs, suppliers, folderName)} onExport={onExport} exporting={exporting} duplicateTitle="Algunas facturas ya fueron enviadas." />
+        <div className="row">
+          {blocked ? <Badge tone="warning">{blocked}</Badge> : sentBatch ? <Badge tone="success">Enviado · importación #{sentBatch}</Badge> : <Badge tone="success">Listo para Estados Financieros</Badge>}
+        </div>
       </div>
     </Card>
   );

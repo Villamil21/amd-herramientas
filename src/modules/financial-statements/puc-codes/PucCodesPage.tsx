@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpenText, FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
+import { BookOpenText, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, PageHeader, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
 import { companyService } from "../../../services/companyService";
@@ -16,6 +16,8 @@ import { PucCatalogModal } from "./components/PucCatalog";
 import { PucSummary } from "./components/PucSummary";
 import { PurchasesFsCard } from "./components/PurchasesFsCard";
 import { TitleMappingsModal } from "./components/TitleMappingsModal";
+import { SendToFs } from "../shared/components/SendToFs";
+import { buildPurchasesBatch, companyCheck, sendBlock } from "./services/accounting";
 import { buildReport } from "./services/analysis";
 import { exportPucExcel } from "./services/excelExport";
 import { pickInvoiceFolder, processPucFolder, type InvoiceFolder } from "./services/folder";
@@ -54,6 +56,7 @@ export default function PucCodesPage() {
   const [supplierCodes, setSupplierCodes] = useState<Record<number, string[]>>({});
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
+  const [sentBatch, setSentBatch] = useState<number | null>(null);
   const [selected, setSelected] = useState<{ fileName: string; products: boolean } | null>(null);
   const [filter, setFilter] = useState<DocumentFilter>("all");
   const [pendingExpanded, setPendingExpanded] = useState(false);
@@ -101,6 +104,7 @@ export default function PucCodesPage() {
 
   function resetLot() {
     setExportedPath(null);
+    setSentBatch(null);
     setAssignments({});
     setSelected(null);
     setResolving(false);
@@ -149,6 +153,9 @@ export default function PucCodesPage() {
   const selectedActionId = selected ? `doc:${selected.fileName}` : undefined;
   /** Con pendientes no se exporta: no hay forma de omitir esta validación. */
   const blocked = report ? exportBlock(report, actions) : null;
+  /** Envío a Estados Financieros: empresa de cada factura por NIT del adquiriente. */
+  const companyDocs = useMemo(() => (report ? companyCheck(report, companies, assignments) : []), [report, companies, assignments]);
+  const sendBlocked = sendBlock(actions.length, companyDocs);
   const supplierByNit = useMemo(() => new Map((suppliers ?? []).map((s) => [s.nit, s])), [suppliers]);
   /** Proveedor de la factura abierta. null: su NIT no está en Proveedores. undefined: aún no se sabe. */
   const selectedSupplier = suppliers && selectedRow?.issuerNit ? (supplierByNit.get(selectedRow.issuerNit) ?? null) : undefined;
@@ -257,10 +264,17 @@ export default function PucCodesPage() {
             <Button icon={<Tags size={15} />} onClick={() => setTitlesOpen(true)}>
               Tipos de documento
             </Button>
-            {report && (
-              <Button variant="primary" icon={<FileSpreadsheet size={15} />} onClick={() => void exportExcel()} loading={exporting} disabled={blocked !== null} title={blocked ? `${blocked} Resuélvelos para exportar.` : undefined}>
-                Exportar Excel
-              </Button>
+            {report && folder && (
+              <SendToFs
+                showStatus={false}
+                blocked={sendBlocked}
+                build={() => buildPurchasesBatch(companyDocs, suppliers ?? [], folder.folderName)}
+                onExport={exportExcel}
+                exporting={exporting}
+                exportBlocked={blocked ? `${blocked} Resuélvelos para exportar.` : null}
+                onSent={setSentBatch}
+                duplicateTitle="Algunas facturas ya fueron enviadas."
+              />
             )}
           </>
         }
@@ -336,8 +350,6 @@ export default function PucCodesPage() {
             onExclude={(fileName) => assign(fileName, { ...assignments[fileName], excluded: true })}
             onChanged={reloadAndAdvance}
             exportBlock={blocked}
-            exporting={exporting}
-            onExport={() => void exportExcel()}
           />
 
           <div className="stat-row">
@@ -360,16 +372,12 @@ export default function PucCodesPage() {
           <PucSummary report={report} partial={actions.length > 0} />
           {folder && (
             <PurchasesFsCard
-              report={report}
+              docs={companyDocs}
               pendingActions={actions.length}
-              companies={companies}
-              suppliers={suppliers ?? []}
-              assignments={assignments}
-              folderName={folder.folderName}
+              blocked={sendBlocked}
+              sentBatch={sentBatch}
               onDecide={(fileName, decision) => assign(fileName, { ...assignments[fileName], companyDecision: decision })}
               onOpen={(fileName) => setSelected({ fileName, products: false })}
-              onExport={exportExcel}
-              exporting={exporting}
             />
           )}
         </>

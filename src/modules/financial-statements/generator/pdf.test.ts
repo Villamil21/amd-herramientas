@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StatementRow } from "./engine";
-import { fitRows, PAGE, renderStatementsPdf, statementsFileName, type StatementsPdfModel } from "./pdf";
+import { fitRows, labelWidth, PAGE, renderStatementsPdf, statementsFileName, type StatementsPdfModel } from "./pdf";
 
 const lines = (n: number): StatementRow[] => [
   { kind: "title", label: "ACTIVO" },
@@ -40,6 +40,23 @@ describe("PDF de Estados Financieros", () => {
     expect(many.size).toBeLessThan(few.size);
     expect(many.height).toBeLessThanOrEqual(available);
     expect(fitRows(lines(500), available).height).toBeLessThanOrEqual(available + 0.001);
+  });
+
+  it("encabezados, totales y resultados no reservan NOTA: tienen más ancho que una cuenta", () => {
+    const header = labelWidth({ kind: "header", label: "INGRESOS DE ACTIVIDADES ORDINARIAS" });
+    const result = labelWidth({ kind: "result", label: "RESULTADO ANTES DE IMPUESTOS", cents: 0, pesos: 0 });
+    const line = labelWidth({ kind: "line", label: "Ventas", cents: 0, pesos: 0 });
+    expect(header).toBe(PAGE.width - 2 * 54);
+    expect(result).toBeGreaterThan(line);
+    expect(header).toBeGreaterThan(result);
+  });
+
+  it("un texto partido en dos renglones ocupa más alto (y sigue cabiendo)", () => {
+    const available = PAGE.height - 150 - 156;
+    const one = fitRows(lines(10), available);
+    const two = fitRows(lines(10), available, (r) => (r.kind === "header" ? 2 : 1));
+    expect(two.height).toBeGreaterThan(one.height);
+    expect(two.height).toBeLessThanOrEqual(available);
   });
 
   it("nombre del archivo: EEFF (mes final) (año) - (empresa).pdf", () => {

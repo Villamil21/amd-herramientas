@@ -10,6 +10,10 @@ import type { StatementRow } from "./engine";
  *
  * No aparece «Banco», «OTC» ni la fecha de generación (se guardan solo en el
  * snapshot). Negativos en rojo entre paréntesis; ceros como «-».
+ *
+ * Títulos y encabezados de sección no tienen NOTA ni Valor y usan todo el
+ * ancho; totales y resultados llegan hasta su valor. Un texto solo se parte en
+ * dos renglones si no cabe (nunca se reduce la fuente de una fila sola).
  */
 
 export interface PdfImage {
@@ -43,14 +47,35 @@ const HEADER_BOTTOM = 150;
 
 const NOTES_TEXT = "Las notas descritas son parte integral de los Estados Financieros.";
 
-/** Alto de una fila según su tipo, para un tamaño de fuente y un factor de interlineado. */
-function rowHeight(row: StatementRow, size: number, leading: number): number {
-  if (row.kind === "gap") return size * leading * 0.6;
-  if (row.kind === "title") return size * leading * 1.45;
-  if (row.kind === "header") return size * leading * 1.25;
-  if (row.kind === "total" || row.kind === "result") return size * leading * 1.2;
-  return size * leading;
+/** Ancho de la raya sobre el valor de subtotales, totales y resultados. */
+const VALUE_RULE = 95;
+
+const indentOf = (row: StatementRow) => (row.kind === "line" ? 14 : row.kind === "subtotal" ? 6 : 0);
+
+/**
+ * Ancho disponible para el texto de una fila. Títulos y encabezados no tienen
+ * NOTA ni Valor: usan todo el ancho. Totales y resultados llegan hasta su
+ * valor (la columna NOTA está vacía). Solo las cuentas se detienen antes de NOTA.
+ */
+export function labelWidth(row: StatementRow): number {
+  const left = MARGIN_X + indentOf(row);
+  if (row.kind === "line") return NOTE_X - 18 - left;
+  if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") return VALUE_RIGHT - VALUE_RULE - 10 - left;
+  return VALUE_RIGHT - left;
 }
+
+/** Alto de una fila según su tipo, para un tamaño de fuente, un interlineado y sus renglones de texto. */
+function rowHeight(row: StatementRow, size: number, leading: number, lines = 1): number {
+  const extra = (lines - 1) * size * leading;
+  if (row.kind === "gap") return size * leading * 0.6;
+  if (row.kind === "title") return size * leading * 1.45 + extra;
+  if (row.kind === "header") return size * leading * 1.25 + extra;
+  if (row.kind === "total" || row.kind === "result") return size * leading * 1.2 + extra;
+  return size * leading + extra;
+}
+
+/** Renglones del texto de una fila para un tamaño de fuente (1 si cabe en una línea). */
+export type LineCounter = (row: StatementRow, size: number) => number;
 
 export interface FitResult {
   size: number;
@@ -63,8 +88,8 @@ export interface FitResult {
  * en el espacio disponible. Primero baja la fuente (hasta 6 pt) y luego el
  * interlineado (hasta 1,15): siempre devuelve algo que cabe en una página.
  */
-export function fitRows(rows: StatementRow[], available: number): FitResult {
-  const height = (size: number, leading: number) => rows.reduce((s, r) => s + rowHeight(r, size, leading), 0);
+export function fitRows(rows: StatementRow[], available: number, count: LineCounter = () => 1): FitResult {
+  const height = (size: number, leading: number) => rows.reduce((s, r) => s + rowHeight(r, size, leading, count(r, size)), 0);
   const fits = (size: number, leading: number) => height(size, leading) <= available - 0.01;
   // Pasos enteros (cuartos de punto, centésimas de interlineado): sin errores de acumulación.
   for (let quarter = 38; quarter >= 24; quarter--) {
@@ -113,25 +138,34 @@ function header(pdf: JsPDF, model: StatementsPdfModel, title: string) {
   pdf.line(MARGIN_X, HEADER_BOTTOM - 4, VALUE_RIGHT, HEADER_BOTTOM - 4);
 }
 
+/** Texto de la fila partido en renglones: una sola línea siempre que quepa en su ancho. */
+function wrapLabel(pdf: JsPDF, row: StatementRow, size: number): string[] {
+  if (row.kind === "gap") return [];
+  pdf.setFont("helvetica", row.kind === "line" ? "normal" : "bold");
+  pdf.setFontSize(row.kind === "title" ? size + 1 : size);
+  return pdf.splitTextToSize(row.label, labelWidth(row)) as string[];
+}
+
 function table(pdf: JsPDF, rows: StatementRow[]) {
   const top = HEADER_BOTTOM + 6;
   const available = PAGE.height - FOOTER_HEIGHT - top;
-  const { size, leading } = fitRows(rows, available);
+  const { size, leading } = fitRows(rows, available, (row, s) => Math.max(1, wrapLabel(pdf, row, s).length));
   let y = top;
   for (const row of rows) {
-    const h = rowHeight(row, size, leading);
+    const label = wrapLabel(pdf, row, size);
+    const h = rowHeight(row, size, leading, Math.max(1, label.length));
+    // Baseline del último renglón: el valor va alineado con él.
     const baseline = y + h - size * 0.35;
     if (row.kind !== "gap") {
       const bold = row.kind !== "line";
-      const indent = row.kind === "line" ? 14 : row.kind === "subtotal" ? 6 : 0;
-      text(pdf, row.label, MARGIN_X + indent, baseline, { size: row.kind === "title" ? size + 1 : size, bold });
+      label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: row.kind === "title" ? size + 1 : size, bold }));
       if (row.pesos !== undefined) {
         const value = formatStatementPesos(row.pesos);
         text(pdf, value, VALUE_RIGHT, baseline, { size, bold, align: "right", color: row.pesos < 0 ? COLORS.negative : COLORS.text });
         if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") {
           pdf.setDrawColor(COLORS.line);
           pdf.setLineWidth(row.kind === "subtotal" ? 0.4 : 0.7);
-          pdf.line(VALUE_RIGHT - 95, y + size * 0.15, VALUE_RIGHT, y + size * 0.15);
+          pdf.line(VALUE_RIGHT - VALUE_RULE, y + size * 0.15, VALUE_RIGHT, y + size * 0.15);
         }
       }
     }

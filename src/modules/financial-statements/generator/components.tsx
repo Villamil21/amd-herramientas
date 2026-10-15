@@ -22,20 +22,38 @@ export function StatementView({ title, rows, lines }: { title: string; rows: Sta
         <thead>
           <tr>
             <th />
-            <th style={{ width: 70, textAlign: "center" }}>NOTA</th>
-            <th style={{ width: 160, textAlign: "right" }}>Valor</th>
+            <th style={{ width: 56, textAlign: "center" }}>NOTA</th>
+            <th style={{ width: 130, textAlign: "right" }}>Valor</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => {
             if (r.kind === "gap") return <tr key={i} className="fs-row--gap"><td colSpan={3} /></tr>;
+            // Títulos y encabezados usan todo el ancho; totales y resultados, el ancho de Concepto + NOTA. Solo las cuentas llevan NOTA.
+            if (r.kind === "title" || r.kind === "header")
+              return (
+                <tr key={i} className={`fs-row--${r.kind}`}>
+                  <td colSpan={3}>{r.label}</td>
+                </tr>
+              );
             const detail = r.lineId !== undefined ? lines.get(r.lineId) : undefined;
+            const negative = r.pesos !== undefined && r.pesos < 0;
             return (
               <Fragment key={i}>
-                <tr className={`fs-row--${r.kind}${detail ? " is-clickable" : ""}`} onClick={detail ? () => setOpen(open === r.lineId ? null : r.lineId!) : undefined} title={r.cents !== undefined ? `Exacto: ${formatExactCents(r.cents)}` : undefined}>
-                  <td>{r.label}</td>
-                  <td />
-                  <td style={{ textAlign: "right" }} className={r.pesos !== undefined && r.pesos < 0 ? "amount--negative" : undefined}>
+                <tr
+                  className={`fs-row--${r.kind}${r.kind === "result" && negative ? " is-negative" : ""}${detail ? " is-clickable" : ""}`}
+                  onClick={detail ? () => setOpen(open === r.lineId ? null : r.lineId!) : undefined}
+                  title={r.cents !== undefined ? `Exacto: ${formatExactCents(r.cents)}` : undefined}
+                >
+                  {r.kind === "line" ? (
+                    <>
+                      <td>{r.label}</td>
+                      <td />
+                    </>
+                  ) : (
+                    <td colSpan={2}>{r.label}</td>
+                  )}
+                  <td style={{ textAlign: "right" }} className={negative ? "amount--negative" : undefined}>
                     {r.pesos !== undefined ? formatStatementPesos(r.pesos) : ""}
                   </td>
                 </tr>

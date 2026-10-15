@@ -19,6 +19,10 @@ interface Props {
   duplicateTitle?: string;
   replaceLabel?: string;
   exporting?: boolean;
+  /** Motivo que bloquea «Exportar Excel» (si el submódulo tiene su propia validación). */
+  exportBlocked?: string | null;
+  /** false: solo los botones (el estado se muestra en otro lugar, p. ej. botones en el encabezado). */
+  showStatus?: boolean;
 }
 
 /**
@@ -26,7 +30,7 @@ interface Props {
  * Enviar y descargar: envía, comprueba el éxito y solo entonces descarga. Si
  * el envío ya existe, se detiene y el usuario elige Reemplazar o Cancelar.
  */
-export function SendToFs({ build, blocked, onExport, onSent, duplicateTitle = "Este lote ya existe.", replaceLabel = "Reemplazar", exporting }: Props) {
+export function SendToFs({ build, blocked, onExport, onSent, duplicateTitle = "Este lote ya existe.", replaceLabel = "Reemplazar", exporting, exportBlocked = null, showStatus = true }: Props) {
   const toast = useToast();
   const [sending, setSending] = useState<"send" | "download" | null>(null);
   const [duplicate, setDuplicate] = useState<{ input: BatchInput; batches: BatchSummary[]; repeated: number; download: boolean } | null>(null);
@@ -63,9 +67,9 @@ export function SendToFs({ build, blocked, onExport, onSent, duplicateTitle = "E
   return (
     <>
       <div className="row" style={{ flexWrap: "wrap" }}>
-        {blocked ? <Badge tone="warning">{blocked}</Badge> : sentBatch ? <Badge tone="success">Enviado · importación #{sentBatch}</Badge> : <Badge tone="success">Listo para Estados Financieros</Badge>}
+        {showStatus && (blocked ? <Badge tone="warning">{blocked}</Badge> : sentBatch ? <Badge tone="success">Enviado · importación #{sentBatch}</Badge> : <Badge tone="success">Listo para Estados Financieros</Badge>)}
         {onExport && (
-          <Button icon={<FileSpreadsheet size={15} />} onClick={() => void onExport()} loading={exporting}>
+          <Button icon={<FileSpreadsheet size={15} />} onClick={() => void onExport()} loading={exporting} disabled={exportBlocked !== null} title={exportBlocked ?? undefined}>
             Exportar Excel
           </Button>
         )}
