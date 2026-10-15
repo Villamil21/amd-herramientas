@@ -1,18 +1,25 @@
-//! Estados Financieros → Códigos PUC por factura. El catálogo solo se lista
-//! (no hay comandos para modificarlo); la clasificación de títulos sí se
-//! guarda, igual que los códigos usados con cada proveedor. Los PDF se leen
-//! con los comandos de `invoices`.
+//! Tabla de Códigos PUC y Estados Financieros → Clasificación contable de
+//! compras. El catálogo oficial solo se lista; los códigos personalizados se
+//! crean aquí. La clasificación de títulos se guarda, igual que los códigos
+//! usados con cada proveedor. Los PDF se leen con los comandos de `invoices`.
 
 use tauri::State;
 
 use crate::database::{puc, Db};
 use crate::error::AppResult;
-use crate::models::puc::PucCode;
+use crate::models::puc::{CustomPucCodeInput, PucCode};
 use crate::models::withholding::{validate_title_category, DocumentTitleMapping, DocumentTitleMappingInput};
 
+/// Catálogo oficial + códigos personalizados.
 #[tauri::command]
 pub fn list_puc_codes(db: State<'_, Db>) -> AppResult<Vec<PucCode>> {
-    db.with(|c| puc::list_codes(c))
+    db.with(|c| puc::list_all_codes(c))
+}
+
+/// Crea un código personalizado (global). El concepto y el padre los confirma el usuario.
+#[tauri::command]
+pub fn create_custom_puc_code(db: State<'_, Db>, input: CustomPucCodeInput) -> AppResult<PucCode> {
+    db.with(|c| puc::create_custom_code(c, &input))
 }
 
 #[tauri::command]

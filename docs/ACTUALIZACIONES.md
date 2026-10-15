@@ -64,13 +64,13 @@ https://github.com/Villamil21/amd-herramientas/releases/latest/download/latest.j
 ```bash
 npm run version:bump -- minor      # patch = correcciones · minor = módulos/funciones · major = cambios incompatibles
 # edita las novedades en src/app/changelog.json
-./scripts/release.sh               # pide la contraseña de la clave; corre pruebas; compila universal; firma
+./scripts/release.sh               # pide la contraseña de la clave; corre pruebas; compila para Apple Silicon; firma
 ```
 
 Queda en `release/vX.Y.Z/`:
 
-- `AMD-Herramientas_X.Y.Z_universal.app.tar.gz` y `.sig` → paquete de actualización firmado
-- `AMD-Herramientas_X.Y.Z_universal.dmg` → instalador para usuarios nuevos
+- `AMD-Herramientas_X.Y.Z_aarch64.app.tar.gz` y `.sig` → paquete de actualización firmado
+- `AMD-Herramientas_X.Y.Z_aarch64.dmg` → instalador para usuarios nuevos (solo Mac con Apple Silicon; las Mac Intel ya no se soportan)
 - `latest.json` → manifiesto (versión, novedades, firma, URL)
 
 Crea en GitHub un release con etiqueta **`vX.Y.Z`** (márcalo como *latest*) y sube esos cuatro archivos. Las apps instaladas lo detectarán en el próximo arranque.

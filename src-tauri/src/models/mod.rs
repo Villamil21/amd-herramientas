@@ -1,6 +1,7 @@
 pub mod company;
 pub mod concept;
 pub mod dropi;
+pub mod fs;
 pub mod identity_document;
 pub mod minimum_wage;
 pub mod puc;

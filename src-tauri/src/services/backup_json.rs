@@ -2,7 +2,9 @@
 //! PNG), proveedores (con su configuración de retención), clasificación de
 //! estados de Dropi, tabla de retenciones, UVT por año, títulos Factura / Nota,
 //! tipos de documento de identidad, Tabla de Autorretenciones, tipos de
-//! documento de Ventas, SMMLV por año y configuración.
+//! documento de Ventas, SMMLV por año, Estados Financieros (catálogo,
+//! movimientos, nómina, ajustes, periodos y códigos PUC personalizados) y
+//! configuración.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -63,6 +65,9 @@ pub struct SignerBackup {
     /// Ausente en backups anteriores al certificado de ingresos.
     #[serde(default)]
     pub personal_document: String,
+    /// Ausente en backups anteriores a Estados Financieros.
+    #[serde(default)]
+    pub accountant_title: String,
     pub created_at: String,
     pub updated_at: String,
     /// PNG en base64; `None` si la firma ya faltaba al exportar.
@@ -117,6 +122,9 @@ pub struct BackupFile {
     /// SMMLV por año. `None` en backups anteriores: se conservan los valores actuales.
     #[serde(default)]
     pub minimum_wages: Option<Vec<MinimumWage>>,
+    /// Estados Financieros: tabla → filas. `None` en backups anteriores: se conserva la información actual.
+    #[serde(default)]
+    pub financial_statements: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -151,6 +159,8 @@ pub struct BackupSummary {
     pub supplier_puc_codes: Option<usize>,
     /// `None` si el backup es anterior al SMMLV por año.
     pub minimum_wages: Option<usize>,
+    /// Movimientos contables de Estados Financieros. `None` si el backup es anterior.
+    pub financial_statements: Option<usize>,
 }
 
 pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
@@ -200,6 +210,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
                     role: s.role,
                     professional_document: s.professional_document,
                     personal_document: s.personal_document,
+                    accountant_title: s.accountant_title,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                 })
@@ -217,7 +228,103 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
         puc_document_titles: Some(puc::list_titles(conn)?),
         supplier_puc_codes: Some(puc::list_all_supplier_codes(conn)?),
         minimum_wages: Some(minimum_wages::list(conn)?),
+        financial_statements: Some(dump_financial_statements(conn)?),
     })
+}
+
+/// Tablas de Estados Financieros (y códigos PUC personalizados) en orden de
+/// dependencias: se restauran en este orden y se vacían en el inverso.
+const FS_TABLES: &[&str] = &[
+    "puc_custom_codes",
+    "fs_lines",
+    "fs_sections",
+    "fs_puc_mappings",
+    "fs_puc_mapping_history",
+    "fs_batches",
+    "fs_movements",
+    "fs_decisions",
+    "fs_bank_concept_mappings",
+    "fs_bank_accounts",
+    "fs_bank_balances",
+    "fs_employees",
+    "fs_employee_areas",
+    "fs_employments",
+    "fs_liquidations",
+    "fs_absence_justifications",
+    "fs_payroll_rows",
+    "fs_puc_settings",
+    "fs_sales_doc_types",
+    "fs_opening_drafts",
+    "fs_adjustments",
+    "fs_adjustment_history",
+    "fs_periods",
+    "fs_period_events",
+    "fs_statement_versions",
+];
+
+type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;
+
+fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
+    use rusqlite::types::Value as Sql;
+    let mut out = BTreeMap::new();
+    for table in FS_TABLES {
+        let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
+        let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+        let rows = stmt
+            .query_map([], |r| {
+                let mut row = serde_json::Map::new();
+                for (i, c) in columns.iter().enumerate() {
+                    let value = match r.get::<_, Sql>(i)? {
+                        Sql::Null | Sql::Blob(_) => serde_json::Value::Null,
+                        Sql::Integer(n) => n.into(),
+                        Sql::Real(f) => serde_json::json!(f),
+                        Sql::Text(t) => t.into(),
+                    };
+                    row.insert(c.clone(), value);
+                }
+                Ok(row)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        out.insert(table.to_string(), rows);
+    }
+    Ok(out)
+}
+
+/// Reemplaza la información de Estados Financieros por la del backup. Solo se
+/// usan las columnas que existen en esta versión; las restricciones de SQLite
+/// validan cada fila.
+fn restore_financial_statements(tx: &Connection, data: &FsDump) -> AppResult<()> {
+    for table in FS_TABLES.iter().rev() {
+        tx.execute(&format!("DELETE FROM {table}"), [])?;
+    }
+    for table in FS_TABLES {
+        let Some(rows) = data.get(*table) else { continue };
+        let columns: Vec<String> = tx.prepare(&format!("PRAGMA table_info({table})"))?.query_map([], |r| r.get(1))?.collect::<Result<_, _>>()?;
+        for row in rows {
+            let keys: Vec<&String> = row.keys().filter(|k| columns.contains(k)).collect();
+            if keys.is_empty() {
+                continue;
+            }
+            let values: Vec<rusqlite::types::Value> = keys
+                .iter()
+                .map(|k| match &row[k.as_str()] {
+                    serde_json::Value::Null => rusqlite::types::Value::Null,
+                    serde_json::Value::Bool(b) => rusqlite::types::Value::Integer(*b as i64),
+                    serde_json::Value::Number(n) => n.as_i64().map(rusqlite::types::Value::Integer).unwrap_or_else(|| rusqlite::types::Value::Real(n.as_f64().unwrap_or(0.0))),
+                    serde_json::Value::String(t) => rusqlite::types::Value::Text(t.clone()),
+                    other => rusqlite::types::Value::Text(other.to_string()),
+                })
+                .collect();
+            let names = keys.iter().map(|k| format!("\"{k}\"")).collect::<Vec<_>>().join(", ");
+            let marks = keys.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            tx.execute(&format!("INSERT INTO {table} ({names}) VALUES ({marks})"), rusqlite::params_from_iter(values))
+                .map_err(|e| {
+                    eprintln!("[backup] {table}: {e}");
+                    AppError::user("La información de Estados Financieros del backup está dañada o incompleta.")
+                })?;
+        }
+    }
+    Ok(())
 }
 
 fn supplier_input(s: &Supplier) -> SupplierInput {
@@ -265,6 +372,7 @@ fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
         role: s.role.clone(),
         professional_document: s.professional_document.clone(),
         personal_document: s.personal_document.clone(),
+        accountant_title: s.accountant_title.clone(),
         // Marcador para validar nombre, cargo y documento; el archivo real se asigna al restaurar.
         signature_file: "-".into(),
     }
@@ -418,6 +526,8 @@ fn company_input(c: &Company) -> CompanyInput {
         paid_total_shares: c.paid_total_shares,
         paid_nominal_value: c.paid_nominal_value,
         ciiu_code: c.ciiu_code.clone(),
+        legal_rep_name: c.legal_rep_name.clone(),
+        legal_rep_document: c.legal_rep_document.clone(),
         shareholders: c.shareholders.clone(),
     }
 }
@@ -452,6 +562,7 @@ pub fn summary(file_name: &str, file: &BackupFile) -> BackupSummary {
         puc_document_titles: file.puc_document_titles.as_ref().map(Vec::len),
         supplier_puc_codes: file.supplier_puc_codes.as_ref().map(Vec::len),
         minimum_wages: file.minimum_wages.as_ref().map(Vec::len),
+        financial_statements: file.financial_statements.as_ref().map(|d| d.get("fs_movements").map_or(0, Vec::len)),
     }
 }
 
@@ -524,6 +635,9 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
     // 2. Reemplazar datos en transacción.
     let result = (|| -> AppResult<()> {
         let tx = conn.transaction()?;
+        // Las empresas se reemplazan conservando su id: la información de Estados
+        // Financieros que las referencia se revisa al final, no fila por fila.
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
         tx.execute("DELETE FROM companies", [])?;
         tx.execute("DELETE FROM retention_concepts", [])?;
         let placeholders = INTERNAL_SETTINGS.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -551,6 +665,8 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                     paid_total_shares: v.paid_total_shares,
                     paid_nominal_value: v.paid_nominal_value,
                     ciiu_code: v.ciiu_code,
+                    legal_rep_name: v.legal_rep_name,
+                    legal_rep_document: v.legal_rep_document,
                     shareholders: v.shareholders,
                     created_at: c.company.created_at.clone(),
                     updated_at: c.company.updated_at.clone(),
@@ -584,6 +700,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         role: v.role,
                         professional_document: v.professional_document,
                         personal_document: v.personal_document,
+                        accountant_title: v.accountant_title,
                         signature_file: signature_file.clone(),
                         created_at: s.created_at.clone(),
                         updated_at: s.updated_at.clone(),
@@ -594,7 +711,9 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
         }
         // Un backup anterior a los códigos PUC por proveedor reemplaza los proveedores:
         // los códigos actuales se guardan por NIT para devolverlos a los que sigan existiendo.
-        let kept_puc_codes = if file.suppliers.is_some() && file.supplier_puc_codes.is_none() { Some(puc::list_all_supplier_codes(&tx)?) } else { None };
+        // El historial proveedor → PUC se reinició con Estados Financieros: el de un backup anterior no se restaura.
+        let file_puc_codes = if file.financial_statements.is_some() { file.supplier_puc_codes.as_ref() } else { None };
+        let kept_puc_codes = if file.suppliers.is_some() && file_puc_codes.is_none() { Some(puc::list_all_supplier_codes(&tx)?) } else { None };
         if let Some(list) = &file.suppliers {
             tx.execute("DELETE FROM supplier_withholding_rules", [])?;
             tx.execute("DELETE FROM supplier_puc_codes", [])?;
@@ -718,7 +837,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 )?;
             }
         }
-        if let Some(list) = file.supplier_puc_codes.as_ref().or(kept_puc_codes.as_ref()) {
+        if let Some(list) = file_puc_codes.or(kept_puc_codes.as_ref()) {
             tx.execute("DELETE FROM supplier_puc_codes", [])?;
             for c in list {
                 let supplier_nit = normalize_nit(&c.supplier_nit);
@@ -785,6 +904,14 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                 crate::database::set_setting(&tx, k, v)?;
             }
         }
+        if let Some(data) = &file.financial_statements {
+            restore_financial_statements(&tx, data)?;
+        }
+        if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(AppError::user(
+                "El backup no incluye empresas que tienen información en Estados Financieros. Para no perderla, la restauración se canceló y tus datos no cambiaron.",
+            ));
+        }
         tx.commit()?;
         Ok(())
     })();
@@ -813,6 +940,62 @@ mod tests {
     ];
 
     #[test]
+    fn financial_statements_survive_backup_and_are_never_lost() {
+        use crate::database::fs;
+        use crate::models::fs::{BatchInput, MovementInput};
+        let dir = std::env::temp_dir().join(format!("amd-json-fs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x')", []).unwrap();
+        crate::database::puc::create_custom_code(&conn, &crate::models::puc::CustomPucCodeInput { code: "11050501".into(), concept: "Caja dueño".into(), parent_code: "110505".into() }).unwrap();
+        fs::set_mapping(&mut conn, "11050501", Some(1), false).unwrap();
+        let input = BatchInput {
+            company_id: 5,
+            source: "opening".into(),
+            file_name: String::new(),
+            period_label: String::new(),
+            period_start: None,
+            period_end: None,
+            dedupe_key: "opening:2025-12-31".into(),
+            replace: false,
+            metadata: None,
+            movements: vec![MovementInput { accounting_date: "2025-12-31".into(), puc_code: "11050501".into(), amount_cents: -200_000_000, ..Default::default() }],
+            bank_balances: vec![],
+            bank_concept_mappings: vec![],
+            payroll_rows: vec![],
+            decisions: vec![],
+        };
+        fs::send_batch(&mut conn, &input).unwrap();
+        let file = build(&conn, &dir, &dir, "9.9.9").unwrap();
+        assert_eq!(summary("b.json", &file).financial_statements, Some(1));
+        let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+
+        // En otra instalación: todo vuelve igual (código personalizado, mapeo, lote y movimiento).
+        let mut other = Connection::open_in_memory().unwrap();
+        other.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut other).unwrap();
+        restore(&mut other, &dir, &dir, &parsed).unwrap();
+        let moves = fs::list_movements(&other, 5).unwrap();
+        assert_eq!((moves.len(), moves[0].amount_cents, moves[0].puc_concept.as_str()), (1, -200_000_000, "Caja dueño"));
+        assert!(fs::list_mappings(&other).unwrap().iter().any(|m| m.puc_code == "11050501" && m.line_id == Some(1)));
+        assert_eq!(fs::list_batches(&other, 5).unwrap()[0].dedupe_key, "opening:2025-12-31");
+
+        // Un backup anterior (sin Estados Financieros ni esta empresa) no puede dejar movimientos huérfanos.
+        let older = BackupFile { financial_statements: None, companies: vec![], ..parsed.clone() };
+        let e = restore(&mut other, &dir, &dir, &older).unwrap_err();
+        assert!(e.0.contains("Estados Financieros"), "{}", e.0);
+        assert_eq!(fs::list_movements(&other, 5).unwrap().len(), 1, "nada cambió");
+        // Sin la sección pero con la empresa: se conserva la información actual.
+        let older = BackupFile { financial_statements: None, ..parsed };
+        restore(&mut other, &dir, &dir, &older).unwrap();
+        assert_eq!(fs::list_movements(&other, 5).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn export_then_restore_roundtrip() {
         let dir = std::env::temp_dir().join(format!("amd-json-bk-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -838,6 +1021,8 @@ mod tests {
                 paid_total_shares: None,
                 paid_nominal_value: None,
                 ciiu_code: "0111".into(),
+                legal_rep_name: String::new(),
+                legal_rep_document: String::new(),
                 shareholders: vec![],
             },
         )
@@ -864,6 +1049,7 @@ mod tests {
                 role: "Contadora Pública".into(),
                 professional_document: "TP-290048".into(),
                 personal_document: "CC 1.192.729.629".into(),
+                accountant_title: "Contadora Pública".into(),
                 signature_file: signature.clone(),
             },
         )

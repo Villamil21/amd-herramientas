@@ -7,6 +7,7 @@ pub mod companies;
 pub mod concepts;
 pub mod dropi;
 pub mod files;
+pub mod fs;
 pub mod identity_documents;
 pub mod invoices;
 pub mod minimum_wages;

@@ -1,5 +1,6 @@
 import { FileSpreadsheet } from "lucide-react";
 import { Button, PageHeader } from "../../../components/ui";
+import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
 import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
 import { BbvaGroupsTable } from "./components/BbvaGroupsTable";
@@ -54,6 +55,7 @@ export default function BbvaStatementPage() {
           <BbvaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
           <BbvaSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
           <BbvaGroupsTable groups={state.analysis.groups} />
+          <TypedBankAccounting statement={state.analysis.statement} closingBalanceCents={state.analysis.statement.totals.closingBalanceCents} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting} />
         </>
       )}
     </>

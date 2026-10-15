@@ -39,20 +39,20 @@ for vol in /Volumes/AMD\ Herramientas*; do
   echo "→ Expulsando instalador montado: $vol"
   diskutil eject "$vol" >/dev/null
 done
-rm -f src-tauri/target/universal-apple-darwin/release/bundle/macos/rw.*.dmg
+rm -f src-tauri/target/aarch64-apple-darwin/release/bundle/macos/rw.*.dmg
 
-echo "→ Compilación universal (Apple Silicon + Intel)"
-rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+echo "→ Compilación para Apple Silicon"
+rustup target add aarch64-apple-darwin >/dev/null
 # Solo el .app (y el paquete firmado de actualización). El .dmg se crea aparte:
 # el AppleScript que decora la ventana del instalador en Finder falla a veces
 # (-10006) y haría fallar toda la compilación.
-npx tauri build --target universal-apple-darwin --bundles app
+npx tauri build --target aarch64-apple-darwin --bundles app
 
 echo "→ Instalador .dmg"
-BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+BUNDLE=src-tauri/target/aarch64-apple-darwin/release/bundle
 VERSION="$(node -p "require('./package.json').version")"
 APP="$BUNDLE/macos/AMD Herramientas.app"
-DMG="$BUNDLE/dmg/AMD Herramientas_${VERSION}_universal.dmg"
+DMG="$BUNDLE/dmg/AMD Herramientas_${VERSION}_aarch64.dmg"
 mkdir -p "$BUNDLE/dmg"
 rm -f "$DMG" "$BUNDLE"/dmg/rw.*.dmg
 STAGING="$(mktemp -d)"

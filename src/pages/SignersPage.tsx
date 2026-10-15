@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
-import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, useToast } from "../components/ui";
+import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { signerService } from "../services/signerService";
-import type { CertificateSigner, CertificateSignerInput } from "../types/models";
+import type { AccountantTitle, CertificateSigner, CertificateSignerInput } from "../types/models";
 
-const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", personalDocument: "", signatureFile: "" };
+const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", personalDocument: "", accountantTitle: "", signatureFile: "" };
 /** "loading" mientras se lee la firma guardada; "missing" si SQLite la referencia pero el archivo ya no está. */
 type SignatureStatus = "none" | "loading" | "ok" | "missing";
 
@@ -23,7 +23,7 @@ export function SignersPage() {
     const token = ++loadToken.current;
     setEditing(s); setPreview(null); setError(null);
     if (!s) { setValues(empty); setStatus("none"); return; }
-    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, personalDocument: s.personalDocument, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
+    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, personalDocument: s.personalDocument, accountantTitle: s.accountantTitle, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
     if (!s.signatureAvailable) { setStatus(s.signatureFile ? "missing" : "none"); return; }
     setStatus("loading");
     const markMissing = () => { if (token === loadToken.current) { setStatus("missing"); setValues(v => ({ ...v, signatureFile: "" })); } };
@@ -68,6 +68,7 @@ export function SignersPage() {
         <Field label="Cargo" required>{id => <Input id={id} value={values.role} onChange={e => setValues(v => ({ ...v, role: e.target.value }))} />}</Field>
         <Field label="Documento profesional" required hint="Ej. TP-290048">{id => <Input id={id} value={values.professionalDocument} onChange={e => setValues(v => ({ ...v, professionalDocument: e.target.value }))} />}</Field>
         <Field label="Documento de identidad" hint="Opcional. Ej. CC 1192729629. Aparece bajo la firma del certificado de ingresos.">{id => <Input id={id} value={values.personalDocument} onChange={e => setValues(v => ({ ...v, personalDocument: e.target.value }))} />}</Field>
+        <Field label="En Estados Financieros se muestra como" hint="Para firmar como contador en los Estados Financieros. No se deduce del nombre.">{id => <Select id={id} value={values.accountantTitle} onChange={e => setValues(v => ({ ...v, accountantTitle: e.target.value as AccountantTitle }))}><option value="">Sin definir</option><option value="Contador Público">Contador Público</option><option value="Contadora Pública">Contadora Pública</option></Select>}</Field>
       </div>
     </Modal>
     <ConfirmDialog open={!!removing} danger title="Eliminar firma" message="La firma y su imagen se eliminarán." confirmLabel="Eliminar" loading={busy} onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />

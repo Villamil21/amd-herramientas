@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Genera release/v<versión>/ con:
- *   - AMD-Herramientas_<versión>_universal.app.tar.gz (+ .sig)  → paquete de actualización
- *   - AMD-Herramientas_<versión>_universal.dmg                  → instalador para usuarios nuevos
+ *   - AMD-Herramientas_<versión>_aarch64.app.tar.gz (+ .sig)  → paquete de actualización (solo Apple Silicon)
+ *   - AMD-Herramientas_<versión>_aarch64.dmg                  → instalador para usuarios nuevos
  *   - latest.json                                               → manifiesto que consulta la app
  *
  * Subir TODOS esos archivos al release de GitHub con etiqueta v<versión>.
@@ -19,7 +19,7 @@ const changelog = JSON.parse(readFileSync(join(root, "src", "app", "changelog.js
 const version = pkg.version;
 
 const bundleDirs = [
-  join(root, "src-tauri", "target", "universal-apple-darwin", "release", "bundle"),
+  join(root, "src-tauri", "target", "aarch64-apple-darwin", "release", "bundle"),
   join(root, "src-tauri", "target", "release", "bundle"),
 ];
 const bundleDir = bundleDirs.find((d) => existsSync(join(d, "macos")));
@@ -27,8 +27,7 @@ if (!bundleDir) {
   console.error("No se encontró el bundle. Ejecuta primero scripts/release.sh (o tauri build).");
   process.exit(1);
 }
-const universal = bundleDir.includes("universal-apple-darwin");
-const arch = universal ? "universal" : process.arch === "arm64" ? "aarch64" : "x64";
+const arch = bundleDir.includes("aarch64-apple-darwin") || process.arch === "arm64" ? "aarch64" : "x64";
 
 const macos = join(bundleDir, "macos");
 const tarball = readdirSync(macos).find((f) => f.endsWith(".app.tar.gz"));
@@ -54,10 +53,7 @@ const baseUrl = (process.env.RELEASE_BASE_URL ?? endpoint.replace(/latest\/downl
 
 const entry = changelog.find((e) => e.version === version);
 const platform = { signature, url: `${baseUrl}${updateName}` };
-const platforms =
-  arch === "universal" ? { "darwin-aarch64": platform, "darwin-x86_64": platform }
-  : arch === "aarch64" ? { "darwin-aarch64": platform }
-  : { "darwin-x86_64": platform };
+const platforms = arch === "aarch64" ? { "darwin-aarch64": platform } : { "darwin-x86_64": platform };
 
 const manifest = {
   version,
@@ -69,4 +65,4 @@ writeFileSync(join(outDir, "latest.json"), JSON.stringify(manifest, null, 2) + "
 
 console.log(`Listo: ${outDir}`);
 for (const f of readdirSync(outDir)) console.log(`  - ${f}`);
-if (!universal) console.warn("Aviso: build de una sola arquitectura. Para Intel y Apple Silicon usa scripts/release.sh (universal).");
+if (arch !== "aarch64") console.warn("Aviso: este build no es para Apple Silicon. Usa scripts/release.sh.");

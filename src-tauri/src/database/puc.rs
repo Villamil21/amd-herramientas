@@ -5,21 +5,80 @@
 //! - `puc_document_title_mappings`: título de documento → Factura electrónica
 //!   / Nota crédito. Misma forma que los títulos de IVA de compras, pero en su
 //!   propia tabla: una decisión en un módulo no cambia el otro.
+//! - `puc_custom_codes`: códigos personalizados (globales). Solo existen si el
+//!   usuario los creó con su concepto y su padre (salvo 7305 NO APLICA).
 //! - `supplier_puc_codes`: códigos que el usuario ha confirmado para cada
 //!   proveedor registrado (por su id). Son accesos rápidos: nunca se asignan solos.
+//!   La migración 014 reinició este historial (las filas anteriores quedan archivadas).
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::{AppError, AppResult};
-use crate::models::puc::{PucCode, SupplierPucCode};
+use crate::models::puc::{CustomPucCodeInput, PucCode, SupplierPucCode};
+use crate::models::clean;
 use crate::models::withholding::{DocumentTitleMapping, DocumentTitleMappingInput};
 use crate::services::time::now_iso;
 
-/// Todo el catálogo en el orden del PUC: como texto, «1» < «11» < «1105» < «110505».
+/// Catálogo oficial en el orden del PUC: como texto, «1» < «11» < «1105» < «110505».
 pub fn list_codes(conn: &Connection) -> AppResult<Vec<PucCode>> {
     let mut stmt = conn.prepare("SELECT code, concept FROM puc_codes ORDER BY code")?;
-    let rows = stmt.query_map([], |r| Ok(PucCode { code: r.get(0)?, concept: r.get(1)? }))?.collect::<Result<_, _>>()?;
+    let rows = stmt.query_map([], |r| Ok(PucCode { code: r.get(0)?, concept: r.get(1)?, custom: false, parent_code: None }))?.collect::<Result<_, _>>()?;
     Ok(rows)
+}
+
+/// Oficial + personalizados, en el orden del PUC.
+pub fn list_all_codes(conn: &Connection) -> AppResult<Vec<PucCode>> {
+    let mut rows = list_codes(conn)?;
+    let mut stmt = conn.prepare("SELECT code, concept, parent_code FROM puc_custom_codes ORDER BY code")?;
+    let custom = stmt.query_map([], |r| Ok(PucCode { code: r.get(0)?, concept: r.get(1)?, custom: true, parent_code: Some(r.get(2)?) }))?.collect::<Result<Vec<_>, _>>()?;
+    rows.extend(custom);
+    rows.sort_by(|a, b| a.code.cmp(&b.code));
+    Ok(rows)
+}
+
+/// Concepto de un código que se puede usar en un movimiento: subcuenta oficial
+/// de 6 dígitos o código personalizado guardado.
+pub fn assignable_concept(conn: &Connection, code: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT concept FROM puc_codes WHERE code = ?1 AND length(code) = 6 UNION ALL SELECT concept FROM puc_custom_codes WHERE code = ?1",
+            [code],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+fn code_exists(conn: &Connection, code: &str) -> AppResult<bool> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM puc_codes WHERE code = ?1) OR EXISTS(SELECT 1 FROM puc_custom_codes WHERE code = ?1)", [code], |r| r.get(0))?)
+}
+
+/// Crea un código personalizado. El concepto lo escribe el usuario y el padre lo
+/// confirma él: debe existir (oficial o personalizado) y ser el inicio del código.
+pub fn create_custom_code(conn: &Connection, input: &CustomPucCodeInput) -> AppResult<PucCode> {
+    let code: String = input.code.chars().filter(|c| !c.is_whitespace()).collect();
+    let concept = clean(&input.concept, 200);
+    let parent = input.parent_code.trim().to_string();
+    if !(4..=12).contains(&code.len()) || !code.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::user("El código debe tener entre 4 y 12 dígitos, solo números."));
+    }
+    if concept.is_empty() {
+        return Err(AppError::user("Escribe el concepto de la cuenta."));
+    }
+    if code_exists(conn, &code)? {
+        return Err(AppError::user(format!("El código {code} ya existe en la Tabla de Códigos PUC.")));
+    }
+    if parent.is_empty() || !code.starts_with(&parent) || parent.len() >= code.len() {
+        return Err(AppError::user("Confirma el código padre: debe ser el inicio del código nuevo (ej. 110505 para 11050501)."));
+    }
+    if !code_exists(conn, &parent)? {
+        return Err(AppError::user(format!("El código padre {parent} no existe en la Tabla de Códigos PUC.")));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO puc_custom_codes (code, concept, parent_code, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![code, concept, parent, now],
+    )?;
+    Ok(PucCode { code, concept, custom: true, parent_code: Some(parent) })
 }
 
 const COLUMNS: &str = "id, normalized_title, display_title, category, created_at, updated_at";
@@ -93,15 +152,14 @@ pub fn list_supplier_codes(conn: &Connection, supplier_id: i64) -> AppResult<Vec
 
 /// Asocia un código al proveedor. Si ya lo tenía no se duplica: se actualizan
 /// la fecha de último uso y el contador. Solo admite subcuentas de 6 dígitos del
-/// catálogo y proveedores registrados.
+/// catálogo o códigos personalizados, y proveedores registrados.
 pub fn record_supplier_code(conn: &Connection, supplier_id: i64, code: &str) -> AppResult<()> {
     record_supplier_code_at(conn, supplier_id, code, &now_iso())
 }
 
 fn record_supplier_code_at(conn: &Connection, supplier_id: i64, code: &str, now: &str) -> AppResult<()> {
-    let known: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM puc_codes WHERE code = ?1 AND length(code) = 6)", [code], |r| r.get(0))?;
-    if !known {
-        return Err(AppError::user("No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos."));
+    if assignable_concept(conn, code)?.is_none() {
+        return Err(AppError::user("No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos o un código personalizado."));
     }
     let registered: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM suppliers WHERE id = ?1)", [supplier_id], |r| r.get(0))?;
     if !registered {
@@ -115,19 +173,6 @@ fn record_supplier_code_at(conn: &Connection, supplier_id: i64, code: &str, now:
             last_used_at = excluded.last_used_at",
         params![supplier_id, code, now],
     )?;
-    Ok(())
-}
-
-/// Un proveedor recién creado recibe los códigos que la versión anterior guardó
-/// solo por NIT (tabla de archivo de la migración 011): pasan a su registro y
-/// salen del archivo.
-pub fn adopt_codes_saved_by_nit(conn: &Connection, supplier_id: i64, nit: &str) -> AppResult<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at)
-         SELECT ?1, puc_code, usage_count, created_at, last_used_at FROM supplier_puc_codes_by_nit WHERE supplier_nit = ?2 ORDER BY id",
-        params![supplier_id, nit],
-    )?;
-    conn.execute("DELETE FROM supplier_puc_codes_by_nit WHERE supplier_nit = ?1", [nit])?;
     Ok(())
 }
 
@@ -145,12 +190,12 @@ pub fn list_all_supplier_codes(conn: &Connection) -> AppResult<Vec<SupplierPucCo
 
 /// Restauración de backup: el proveedor se localiza por NIT. Se omite, sin
 /// fallar, una asociación repetida, de un proveedor que no está o cuyo código
-/// no sea una subcuenta del catálogo de esta versión. Devuelve si se insertó.
+/// no sea asignable en esta versión. Devuelve si se insertó.
 pub fn insert_supplier_code_full(conn: &Connection, c: &SupplierPucCode) -> AppResult<bool> {
     let n = conn.execute(
         "INSERT OR IGNORE INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at)
          SELECT s.id, ?2, ?3, ?4, ?5 FROM suppliers s
-         WHERE s.nit = ?1 AND EXISTS (SELECT 1 FROM puc_codes WHERE code = ?2 AND length(code) = 6)",
+         WHERE s.nit = ?1 AND (EXISTS (SELECT 1 FROM puc_codes WHERE code = ?2 AND length(code) = 6) OR EXISTS (SELECT 1 FROM puc_custom_codes WHERE code = ?2))",
         params![c.supplier_nit, c.puc_code, c.usage_count.max(1), c.created_at, c.last_used_at],
     )?;
     Ok(n > 0)
@@ -277,7 +322,7 @@ mod tests {
         for bad in ["5135", "1105", "11", "999999", "", "51359A"] {
             assert!(record_supplier_code(&conn, a, bad).unwrap_err().0.contains("código de 6 dígitos"), "{bad}");
         }
-        assert!(conn.execute("INSERT INTO supplier_puc_codes (supplier_id, puc_code, created_at, last_used_at) VALUES (?1, '5135', 'x', 'x')", [a]).is_err());
+        assert!(conn.execute("INSERT INTO supplier_puc_codes (supplier_id, puc_code, created_at, last_used_at) VALUES (?1, '51A5', 'x', 'x')", [a]).is_err());
         // Solo contra un proveedor registrado: sin él no se guarda nada.
         assert!(record_supplier_code(&conn, 99_999, "513595").is_err());
         assert_eq!(list_all_supplier_codes(&conn).unwrap().len(), 3);
@@ -291,6 +336,41 @@ mod tests {
         assert_eq!(list_supplier_codes(&conn, a).unwrap().len(), 2);
         crate::database::suppliers::delete(&conn, a).unwrap();
         assert_eq!(list_all_supplier_codes(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn custom_codes_are_global_validated_and_assignable() {
+        let mut conn = db();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        // 7305 NO APLICA viene creado (bajo 73 COSTOS INDIRECTOS) y es asignable.
+        assert_eq!(assignable_concept(&conn, "7305").unwrap().as_deref(), Some("NO APLICA"));
+        let input = |code: &str, concept: &str, parent: &str| CustomPucCodeInput { code: code.into(), concept: concept.into(), parent_code: parent.into() };
+        let created = create_custom_code(&conn, &input("11050501", "Caja dueño", "110505")).unwrap();
+        assert_eq!((created.code.as_str(), created.custom, created.parent_code.as_deref()), ("11050501", true, Some("110505")));
+        // Un código oficial no existente bajo una cuenta oficial (6205 → 620501).
+        create_custom_code(&conn, &input("620501", "Mercancías importadas", "6205")).unwrap();
+        for (bad, why) in [
+            (input("110505", "X", "1105"), "ya existe"),
+            (input("11050501", "X", "110505"), "ya existe"),
+            (input("11050502", "", "110505"), "concepto"),
+            (input("11050502", "X", ""), "padre"),
+            (input("11050502", "X", "1110"), "padre"),
+            (input("99990001", "X", "9999"), "no existe"),
+            (input("12A4", "X", "12"), "dígitos"),
+        ] {
+            let e = create_custom_code(&conn, &bad).unwrap_err().0;
+            assert!(e.contains(why), "{}: {e}", bad.code);
+        }
+        let all = list_all_codes(&conn).unwrap();
+        assert_eq!(all.len(), 2517 + 3);
+        let i = all.iter().position(|c| c.code == "11050501").unwrap();
+        assert_eq!((all[i - 1].code.as_str(), all[i + 1].code.as_str()), ("110505", "110510"), "en el orden del PUC");
+        // Se puede usar con un proveedor y sobrevive a un nuevo arranque.
+        let id = supplier(&conn, "890399003");
+        record_supplier_code(&conn, id, "11050501").unwrap();
+        assert!(run_pending(&mut conn).unwrap().is_empty());
+        assert_eq!(list_supplier_codes(&conn, id).unwrap(), ["11050501"]);
+        assert_eq!(list_codes(&conn).unwrap().len(), 2517, "el catálogo oficial no cambia");
     }
 
     #[test]

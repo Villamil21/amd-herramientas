@@ -8,6 +8,7 @@ const signer: CertificateSigner = {
   role: "Contadora Pública",
   professionalDocument: "TP-290048",
   personalDocument: "1192729629",
+  accountantTitle: "",
   signatureFile: "firma.png",
   createdAt: "x",
   updatedAt: "x",

@@ -13,6 +13,9 @@ pub struct CertificateSigner {
     /// Identificación personal (ej. "CC 1.192.729.629"). Opcional.
     #[serde(default)]
     pub personal_document: String,
+    /// «Contador Público» / «Contadora Pública» en los Estados Financieros. Vacío = sin definir.
+    #[serde(default)]
+    pub accountant_title: String,
     pub signature_file: String,
     pub created_at: String,
     pub updated_at: String,
@@ -20,6 +23,9 @@ pub struct CertificateSigner {
     #[serde(default)]
     pub signature_available: bool,
 }
+
+/// Cómo se muestra el contador en los Estados Financieros ("" = sin definir). Nunca se deduce del nombre.
+pub const ACCOUNTANT_TITLES: [&str; 3] = ["", "Contador Público", "Contadora Pública"];
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -29,12 +35,17 @@ pub struct CertificateSignerInput {
     pub professional_document: String,
     #[serde(default)]
     pub personal_document: String,
+    #[serde(default)]
+    pub accountant_title: String,
     pub signature_file: String,
 }
 
 impl CertificateSignerInput {
     pub fn validated(self) -> AppResult<Self> {
-        let value = Self { name: clean(&self.name, 200), role: clean(&self.role, 120), professional_document: clean(&self.professional_document, 60), personal_document: clean(&self.personal_document, 60), signature_file: clean(&self.signature_file, 100) };
+        let value = Self { name: clean(&self.name, 200), role: clean(&self.role, 120), professional_document: clean(&self.professional_document, 60), personal_document: clean(&self.personal_document, 60), accountant_title: clean(&self.accountant_title, 40), signature_file: clean(&self.signature_file, 100) };
+        if !ACCOUNTANT_TITLES.contains(&value.accountant_title.as_str()) {
+            return Err(AppError::user("Elige «Contador Público» o «Contadora Pública»."));
+        }
         if value.name.is_empty() || value.role.is_empty() || value.professional_document.is_empty() || value.signature_file.is_empty() {
             return Err(AppError::user("Nombre, cargo, documento profesional y firma son obligatorios."));
         }

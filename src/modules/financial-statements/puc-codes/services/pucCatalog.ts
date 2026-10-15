@@ -5,18 +5,20 @@ import { normalizeKey } from "../../../../utils/text";
  * Catálogo PUC en memoria: índice por código, búsqueda de códigos asignables
  * y filas para mostrarlo con su jerarquía.
  *
- * Niveles: clase (1 dígito) → grupo (2) → cuenta (4) → subcuenta (6). Solo la
- * subcuenta de 6 dígitos se puede asignar a una factura o producto; los demás
- * niveles organizan y dan contexto.
+ * Niveles: clase (1 dígito) → grupo (2) → cuenta (4) → subcuenta (6). Se
+ * asignan la subcuenta oficial de 6 dígitos y los códigos personalizados
+ * (creados en la app, globales, de 4 a 12 dígitos, ej. 11050501 o 7305); los
+ * demás niveles organizan y dan contexto.
  */
 
 export type PucLevel = "class" | "group" | "account" | "leaf";
 
 const LEVEL: Record<number, PucLevel> = { 1: "class", 2: "group", 4: "account", 6: "leaf" };
 
-export const levelOf = (code: string): PucLevel | undefined => LEVEL[code.length];
+/** Nivel por longitud. Un código de más de 6 dígitos (solo personalizados) se muestra como subcuenta. */
+export const levelOf = (code: string): PucLevel | undefined => LEVEL[code.length] ?? (code.length > 6 ? "leaf" : undefined);
 
-/** Código final asignable: exactamente 6 dígitos. */
+/** Código oficial asignable: exactamente 6 dígitos. */
 export const isSelectableCode = (code: string) => /^\d{6}$/.test(code);
 
 /** Subcuenta con el texto ya normalizado para buscar. */
@@ -29,24 +31,46 @@ interface Leaf extends PucCode {
 }
 
 export interface PucIndex {
-  /** Todo el catálogo, en el orden del PUC. */
+  /** Todo el catálogo (oficial + personalizado), en el orden del PUC. */
   all: PucCode[];
   /** Código (cualquier nivel) → concepto. */
   concepts: Map<string, string>;
+  /** Códigos asignables: subcuentas oficiales de 6 dígitos y personalizados. */
   leaves: Leaf[];
+  /** Códigos personalizados (creados en la app). */
+  custom: Set<string>;
 }
 
 export function buildPucIndex(codes: PucCode[]): PucIndex {
-  // Como texto, el orden es el del catálogo: «1» < «11» < «1105» < «110505» < «1110».
-  const all = codes.filter((c) => levelOf(c.code)).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  // Como texto, el orden es el del catálogo: «1» < «11» < «1105» < «110505» < «11050501» < «1110».
+  const all = codes.filter((c) => c.custom || levelOf(c.code)).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   const concepts = new Map(all.map((c) => [c.code, c.concept]));
-  const leaves = all.filter((c) => isSelectableCode(c.code)).map((c) => ({ ...c, key: normalizeKey(c.concept), accountKey: normalizeKey(concepts.get(c.code.slice(0, 4)) ?? ""), groupKey: normalizeKey(concepts.get(c.code.slice(0, 2)) ?? "") }));
-  return { all, concepts, leaves };
+  const custom = new Set(all.filter((c) => c.custom).map((c) => c.code));
+  const leaves = all
+    .filter((c) => c.custom || isSelectableCode(c.code))
+    .map((c) => ({ ...c, key: normalizeKey(c.concept), accountKey: normalizeKey(concepts.get(c.code.slice(0, 4)) ?? ""), groupKey: normalizeKey(concepts.get(c.code.slice(0, 2)) ?? "") }));
+  return { all, concepts, leaves, custom };
 }
 
-/** Concepto de un código asignable; undefined si no existe o no es de 6 dígitos. */
+/** El código se puede asignar a un movimiento (subcuenta oficial de 6 dígitos o personalizado). */
+export const isAssignable = (index: PucIndex, code: string | undefined): code is string => Boolean(code && (index.custom.has(code) || (isSelectableCode(code) && index.concepts.has(code))));
+
+/** Concepto de un código asignable; undefined si no existe o no se puede asignar. */
 export function leafConcept(index: PucIndex, code: string | undefined): string | undefined {
-  return code && isSelectableCode(code) ? index.concepts.get(code) : undefined;
+  return isAssignable(index, code) ? index.concepts.get(code) : undefined;
+}
+
+/**
+ * Padre sugerido para un código personalizado nuevo: el código existente más
+ * largo con el que empieza (11050501 → 110505). Solo es una sugerencia: el
+ * usuario lo confirma.
+ */
+export function suggestParent(index: PucIndex, code: string): string | undefined {
+  for (let n = code.length - 1; n >= 1; n--) {
+    const prefix = code.slice(0, n);
+    if (index.concepts.has(prefix)) return prefix;
+  }
+  return undefined;
 }
 
 /** «1105 CAJA · DISPONIBLE»: la cuenta y el grupo de una subcuenta, si están en el catálogo. */
@@ -56,7 +80,7 @@ export function leafContext(index: PucIndex, code: string): string {
   return [account && `${code.slice(0, 4)} ${account}`, group].filter(Boolean).join(" · ");
 }
 
-const plain = ({ code, concept }: PucCode): PucCode => ({ code, concept });
+const plain = ({ code, concept, custom }: PucCode): PucCode => ({ code, concept, custom });
 
 export interface LeafSearch {
   /** Códigos de 6 dígitos que coinciden, hasta `limit`. */
@@ -114,6 +138,8 @@ export interface PucRow {
   code: string;
   /** undefined: el nivel no está en el catálogo fuente (solo agrupa a sus hijos). */
   concept?: string;
+  /** Código creado en la app. */
+  custom?: boolean;
 }
 
 /** Prefijos que son ancestros de un código: «110505» → «1», «11», «1105». */
@@ -141,6 +167,8 @@ export function catalogRows(index: PucIndex, options: { classCode?: string; quer
     for (const code of matched) {
       visible.add(code);
       for (const a of ancestors(code)) visible.add(a);
+      // El padre de un personalizado de más de 6 dígitos (110505 para 11050501).
+      if (code.length > 6) visible.add(code.slice(0, 6));
     }
     // Lo que cuelga de un nivel que coincide también se muestra.
     const parents = matched.filter((c) => c.length < 6);
@@ -157,7 +185,7 @@ export function catalogRows(index: PucIndex, options: { classCode?: string; quer
       if (!index.concepts.has(a)) rows.push({ level: levelOf(a)!, code: a });
     }
     emitted.add(c.code);
-    rows.push({ level: levelOf(c.code)!, code: c.code, concept: c.concept });
+    rows.push({ level: levelOf(c.code) ?? "leaf", code: c.code, concept: c.concept, custom: c.custom || undefined });
   }
   return rows;
 }

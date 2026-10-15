@@ -1,5 +1,6 @@
 import { FileSpreadsheet } from "lucide-react";
 import { Button, PageHeader } from "../../../components/ui";
+import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
 import { DebitCreditSummaryCards } from "../shared/components/DebitCreditSummaryCards";
 import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
@@ -47,6 +48,7 @@ export default function BancoomevaStatementPage() {
           <BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
           <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
           <BancoomevaGroupsTable groups={state.analysis.groups} />
+          <TypedBankAccounting statement={state.analysis.statement} closingBalanceCents={state.analysis.statement.totals.closingBalanceCents} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting} />
         </>
       )}
     </>

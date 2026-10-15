@@ -21,6 +21,7 @@ import { SuppliersPage } from "../pages/SuppliersPage";
 import { WithholdingTablePage } from "../pages/WithholdingTablePage";
 import { SelfWithholdingTablePage } from "../pages/SelfWithholdingTablePage";
 import { PucTablePage } from "../pages/PucTablePage";
+import { FsCatalogPage } from "../pages/FsCatalogPage";
 import { MinimumWagesPage } from "../pages/MinimumWagesPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 
@@ -33,6 +34,11 @@ function resolve(segments: string[]) {
     case undefined:
     case "herramientas": {
       if (!moduleId) return { active: "tools", crumbs: [{ label: "Herramientas" }], page: <ToolsPage /> };
+      // Extractos bancarios se movió a Estados Financieros: los enlaces anteriores siguen funcionando.
+      if (moduleId === "extractos-bancarios") {
+        queueMicrotask(() => navigate(["/herramientas/estados-financieros/extractos-bancarios", subId].filter(Boolean).join("/")));
+        return { active: "tools", crumbs: [tools], page: <Loader /> };
+      }
       const mod = findModule(moduleId);
       if (!mod) break;
       const modCrumb: Crumb = { label: mod.name, onClick: () => navigate(paths.module(mod.id)) };
@@ -75,6 +81,8 @@ function resolve(segments: string[]) {
       return { active: "self-withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Autorretenciones" }], page: <SelfWithholdingTablePage initialSearch={moduleId ?? ""} /> };
     case "tabla-puc":
       return { active: "puc-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Códigos PUC" }], page: <PucTablePage /> };
+    case "catalogo-estados-financieros":
+      return { active: "fs-catalog", crumbs: [{ label: "Datos" }, { label: "Catálogo de cuentas de Estados Financieros" }], page: <FsCatalogPage /> };
     case "smmlv":
       return { active: "minimum-wages", crumbs: [{ label: "Datos" }, { label: "SMMLV por año" }], page: <MinimumWagesPage /> };
     case "configuracion":

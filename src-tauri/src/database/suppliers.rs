@@ -4,6 +4,7 @@ use rusqlite::{params, Connection, ErrorCode, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::models::supplier::{Supplier, SupplierInput};
+#[cfg(test)]
 use crate::database::puc;
 use crate::models::withholding::{SupplierWithholdingRule, WithholdingProfileInput};
 use crate::services::time::now_iso;
@@ -68,9 +69,7 @@ pub fn insert(conn: &Connection, s: &SupplierInput) -> AppResult<i64> {
         params![s.nit, s.business_name, s.vat_type, now],
     )
     .map_err(|e| duplicate_nit(e, &s.nit))?;
-    let id = conn.last_insert_rowid();
-    puc::adopt_codes_saved_by_nit(conn, id, &s.nit)?;
-    Ok(id)
+    Ok(conn.last_insert_rowid())
 }
 
 /// Inserta un proveedor completo (restauración de backup), con sus reglas de retención.
@@ -282,12 +281,19 @@ mod tests {
         assert_eq!((price.id, price.vat_type.as_deref(), price.person_type.as_deref(), price.fiscal_regime.as_deref(), price.fiscal_checked_at.as_deref()), (7, Some("purchase"), Some("PJ"), Some("O-15"), Some("f")));
         assert_eq!(price.withholding_rules.iter().map(|r| (r.id, r.rate_id, r.is_default)).collect::<Vec<_>>(), vec![(3, 6, true), (4, 13, false)], "las reglas de retención siguen en su proveedor");
 
-        // Los códigos PUC pasan al proveedor real; los de un NIT sin proveedor esperan a que se cree.
-        assert_eq!(puc::list_supplier_codes(&conn, 7).unwrap(), ["513595"]);
-        assert_eq!(puc::list_all_supplier_codes(&conn).unwrap()[0].usage_count, 4);
+        // La 012 pasó los códigos PUC al proveedor real; la 014 reinició ese historial y lo dejó archivado.
+        let archived: Vec<(i64, String, i64)> = conn
+            .prepare("SELECT supplier_id, puc_code, usage_count FROM supplier_puc_codes_archive_014")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(archived, vec![(7, "513595".to_string(), 4)]);
+        assert!(puc::list_all_supplier_codes(&conn).unwrap().is_empty());
         let new_id = insert(&conn, &SupplierInput { nit: "800123456".into(), business_name: "NUEVO".into(), vat_type: None }).unwrap();
         assert!(new_id > 9, "los id no se reutilizan");
-        assert_eq!(puc::list_supplier_codes(&conn, new_id).unwrap(), ["110505"]);
+        assert!(puc::list_supplier_codes(&conn, new_id).unwrap().is_empty(), "el historial guardado por NIT también se reinició");
 
         // Siguen vigentes el NIT único, las categorías válidas y el borrado en cascada.
         assert!(conn.execute("INSERT INTO suppliers (nit, business_name, created_at, updated_at) VALUES ('900319753', 'X', 'c', 'u')", []).is_err());

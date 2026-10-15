@@ -1,5 +1,6 @@
 import { FileSpreadsheet } from "lucide-react";
 import { Button, PageHeader } from "../../../components/ui";
+import { SignedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
 import { DEFAULT_GROUP_LABELS, type GroupLabels } from "../shared/components/groupLabels";
 import { GroupsTable } from "../shared/components/GroupsTable";
 import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
@@ -58,6 +59,7 @@ export default function IrisBankStatementPage() {
           <ValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} validatedMessage={VALIDATED} />
           <SummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.currentBalanceCents} />
           <GroupsTable groups={state.analysis.groups} labels={LABELS} />
+          <SignedBankAccounting statement={state.analysis.statement} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting} />
         </>
       )}
     </>

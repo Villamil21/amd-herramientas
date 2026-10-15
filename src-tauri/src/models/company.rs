@@ -24,6 +24,11 @@ pub struct Company {
     /// Código CIIU como texto (conserva ceros iniciales). Vacío = sin configurar; ausente en backups anteriores.
     #[serde(default)]
     pub ciiu_code: String,
+    /// Representante legal (Estados Financieros). Vacío = sin configurar; ausente en backups anteriores.
+    #[serde(default)]
+    pub legal_rep_name: String,
+    #[serde(default)]
+    pub legal_rep_document: String,
     #[serde(default)]
     pub shareholders: Vec<Shareholder>,
     pub created_at: String,
@@ -65,6 +70,10 @@ pub struct CompanyInput {
     #[serde(default)]
     pub ciiu_code: String,
     #[serde(default)]
+    pub legal_rep_name: String,
+    #[serde(default)]
+    pub legal_rep_document: String,
+    #[serde(default)]
     pub shareholders: Vec<Shareholder>,
 }
 
@@ -86,6 +95,8 @@ impl CompanyInput {
             paid_total_shares: self.paid_total_shares,
             paid_nominal_value: self.paid_nominal_value,
             ciiu_code: validate_ciiu(&self.ciiu_code)?,
+            legal_rep_name: clean(&self.legal_rep_name, 200),
+            legal_rep_document: clean(&self.legal_rep_document, 60),
             shareholders: self.shareholders.into_iter().enumerate().map(|(i, s)| Shareholder {
                 id: s.id,
                 name: clean(&s.name, 200),

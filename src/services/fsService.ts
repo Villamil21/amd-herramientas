@@ -1,0 +1,80 @@
+import type {
+  Adjustment,
+  AdjustmentInput,
+  BankAccount,
+  BankBalance,
+  BankConceptMapping,
+  BatchInput,
+  BatchSummary,
+  Employee,
+  FsCatalog,
+  FsPucMapping,
+  FsSectionKey,
+  Liquidation,
+  Movement,
+  PayrollRow,
+  Period,
+  PeriodKey,
+  PucSetting,
+  SalesDocCategory,
+  SalesDocType,
+  SendOutcome,
+  StatementVersion,
+} from "../types/fs";
+import { call } from "./tauri";
+
+/** Estados Financieros: todo lo que se guarda en SQLite (con sus reglas de integridad en Rust). */
+export const fsService = {
+  // Catálogo de cuentas
+  catalog: () => call<FsCatalog>("get_fs_catalog"),
+  createLine: (section: FsSectionKey, name: string) => call<number>("create_fs_line", { section, name }),
+  updateLine: (id: number, name: string, isActive: boolean) => call<void>("update_fs_line", { id, name, isActive }),
+  reorderLines: (section: FsSectionKey, ids: number[]) => call<void>("reorder_fs_lines", { section, ids }),
+  setRepresentative: (section: FsSectionKey, lineId: number) => call<void>("set_fs_section_representative", { section, lineId }),
+  mappings: () => call<FsPucMapping[]>("list_fs_puc_mappings"),
+  /** PUC → línea, o «No afecta Estados Financieros» (excluded). */
+  setMapping: (pucCode: string, lineId: number | null, excluded: boolean) => call<void>("set_fs_puc_mapping", { pucCode, lineId, excluded }),
+
+  // Movimientos
+  send: (input: BatchInput) => call<SendOutcome>("send_fs_batch", { input }),
+  batches: (companyId: number) => call<BatchSummary[]>("list_fs_batches", { companyId }),
+  movements: (companyId: number) => call<Movement[]>("list_fs_movements", { companyId }),
+  reclassify: (companyId: number | null, ids: number[], pucCode: string) => call<number>("reclassify_fs_movements", { companyId, ids, pucCode }),
+  bankBalances: (companyId: number) => call<BankBalance[]>("list_fs_bank_balances", { companyId }),
+  bankAccounts: () => call<BankAccount[]>("list_fs_bank_accounts"),
+  bankConceptMappings: () => call<BankConceptMapping[]>("list_fs_bank_concept_mappings"),
+
+  // Configuración global
+  pucSettings: () => call<PucSetting[]>("list_fs_puc_settings"),
+  savePucSettings: (items: PucSetting[]) => call<void>("save_fs_puc_settings", { items }),
+  salesDocTypes: () => call<SalesDocType[]>("list_fs_sales_doc_types"),
+  saveSalesDocType: (normalizedLabel: string, originalLabel: string, category: SalesDocCategory) => call<void>("save_fs_sales_doc_type", { normalizedLabel, originalLabel, category }),
+
+  // Saldos iniciales
+  openingDraft: (companyId: number, balanceDate: string) => call<unknown>("get_fs_opening_draft", { companyId, balanceDate }),
+  openingDates: (companyId: number) => call<string[]>("list_fs_opening_dates", { companyId }),
+  saveOpeningDraft: (companyId: number, balanceDate: string, rows: unknown[]) => call<void>("save_fs_opening_draft", { companyId, balanceDate, rows }),
+
+  // Nómina
+  employees: (companyId: number) => call<Employee[]>("list_fs_employees", { companyId }),
+  createEmployee: (input: { companyId: number; docType: string; docNumber: string; name: string; hireDate: string; area: string; effectiveFrom: string }) => call<number>("create_fs_employee", { input }),
+  setEmployeeArea: (employeeId: number, area: string, effectiveFrom: string) => call<void>("set_fs_employee_area", { employeeId, area, effectiveFrom }),
+  addEmployment: (employeeId: number, hireDate: string) => call<number>("add_fs_employment", { employeeId, hireDate }),
+  registerLiquidation: (input: { employmentId: number; liquidationDate: string; lastPeriod: string; notes: string }) => call<Liquidation>("register_fs_liquidation", { input }),
+  justifyAbsence: (employeeId: number, period: string, justification: string) => call<void>("justify_fs_absence", { employeeId, period, justification }),
+  payrollRows: (companyId: number) => call<PayrollRow[]>("list_fs_payroll_rows", { companyId }),
+
+  // Ajustes
+  createAdjustment: (input: AdjustmentInput) => call<number>("create_fs_adjustment", { input }),
+  updateAdjustment: (id: number, input: AdjustmentInput) => call<void>("update_fs_adjustment", { id, input }),
+  adjustments: (companyId: number) => call<Adjustment[]>("list_fs_adjustments", { companyId }),
+
+  // Periodos
+  period: (key: PeriodKey) => call<Period | null>("get_fs_period", { key }),
+  periods: (companyId: number) => call<Period[]>("list_fs_periods", { companyId }),
+  markReady: (key: PeriodKey, hash: string) => call<void>("mark_fs_period_ready", { key, hash }),
+  markNeedsReview: (key: PeriodKey, reason: string) => call<void>("mark_fs_period_needs_review", { key, reason }),
+  recordVersion: (key: PeriodKey, fileName: string, snapshot: unknown) => call<StatementVersion>("record_fs_statement_version", { key, fileName, snapshot }),
+  close: (key: PeriodKey, snapshot: unknown) => call<void>("close_fs_period", { key, snapshot }),
+  unlock: (key: PeriodKey, note: string) => call<void>("unlock_fs_period", { key, note }),
+};

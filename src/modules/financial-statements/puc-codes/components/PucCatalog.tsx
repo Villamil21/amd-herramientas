@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { EmptyState, Input, Modal, Select } from "../../../../components/ui";
+import { Badge, EmptyState, Input, Modal, Select } from "../../../../components/ui";
 import { useDebounced } from "../../../../hooks/useDebounced";
 import { formatInteger } from "../../../../utils/format";
 import { catalogRows, pucClasses, type PucIndex, type PucRow } from "../services/pucCatalog";
@@ -8,7 +8,7 @@ import { catalogRows, pucClasses, type PucIndex, type PucRow } from "../services
 /** Filas que se dibujan a la vez; una búsqueda muy amplia se acota en vez de pintar todo el catálogo. */
 const MAX_ROWS = 900;
 
-function CatalogRow({ row }: { row: PucRow }) {
+function CatalogRow({ row, excluded }: { row: PucRow; excluded?: boolean }) {
   const missing = row.concept === undefined;
   if (row.level === "class" || row.level === "group") {
     // Clase y grupo son títulos: organizan la tabla y no se pueden asignar. El código queda en el tooltip.
@@ -29,7 +29,11 @@ function CatalogRow({ row }: { row: PucRow }) {
   return (
     <tr className={`puc-row puc-row--${row.level}`}>
       <td className="puc-row__code selectable">{row.code}</td>
-      <td className="selectable">{missing ? <span className="puc-row__missing">Cuenta sin denominación en el catálogo fuente</span> : row.concept}</td>
+      <td className="selectable">
+        {missing ? <span className="puc-row__missing">Cuenta sin denominación en el catálogo fuente</span> : row.concept}
+        {row.custom && <> <Badge>Personalizado</Badge></>}
+        {excluded && <> <Badge tone="dark">No aplica · Excluido de EEFF</Badge></>}
+      </td>
     </tr>
   );
 }
@@ -39,7 +43,7 @@ function CatalogRow({ row }: { row: PucRow }) {
  * (subtítulo) → subcuentas de 6 dígitos (las únicas que se pueden asignar).
  * Solo consulta: no crea, edita ni elimina códigos.
  */
-export function PucCatalog({ index, maxHeight }: { index: PucIndex; maxHeight?: string }) {
+export function PucCatalog({ index, maxHeight, excluded }: { index: PucIndex; maxHeight?: string; /** Códigos marcados «No afecta Estados Financieros». */ excluded?: Set<string> }) {
   const classes = useMemo(() => pucClasses(index), [index]);
   const [classCode, setClassCode] = useState("1");
   const [search, setSearch] = useState("");
@@ -61,7 +65,7 @@ export function PucCatalog({ index, maxHeight }: { index: PucIndex; maxHeight?: 
           </Select>
           <span className="muted" style={{ fontSize: "var(--text-sm)" }}>
             {query ? "Buscando en todo el catálogo · " : ""}
-            {leaves === 1 ? "1 código de 6 dígitos" : `${formatInteger(leaves)} códigos de 6 dígitos`}
+            {leaves === 1 ? "1 código asignable" : `${formatInteger(leaves)} códigos asignables`}
           </span>
         </div>
         <div className="search" style={{ width: 320 }}>
@@ -82,7 +86,7 @@ export function PucCatalog({ index, maxHeight }: { index: PucIndex; maxHeight?: 
             </thead>
             <tbody>
               {shown.map((r) => (
-                <CatalogRow key={r.code} row={r} />
+                <CatalogRow key={r.code} row={r} excluded={excluded?.has(r.code)} />
               ))}
               {shown.length < rows.length && (
                 <tr>

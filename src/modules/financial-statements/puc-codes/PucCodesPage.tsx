@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, PageHeader, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
+import { companyService } from "../../../services/companyService";
 import { pucService } from "../../../services/pucService";
 import { supplierService } from "../../../services/supplierService";
 import { errorMessage } from "../../../services/tauri";
-import type { DocumentTitleMapping, PucCode, Supplier } from "../../../types/models";
+import type { Company, DocumentTitleMapping, PucCode, Supplier } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
 import { Stat } from "../../bank-analysis/shared/components/Stat";
 import { DocumentDetailModal } from "./components/DocumentDetailModal";
@@ -13,6 +14,7 @@ import { DOCUMENTS_ANCHOR, DocumentsTable, type DocumentFilter } from "./compone
 import { LotStatusIndicator, PendingPanel, pendingItemId } from "./components/PendingPanel";
 import { PucCatalogModal } from "./components/PucCatalog";
 import { PucSummary } from "./components/PucSummary";
+import { PurchasesFsCard } from "./components/PurchasesFsCard";
 import { TitleMappingsModal } from "./components/TitleMappingsModal";
 import { buildReport } from "./services/analysis";
 import { exportPucExcel } from "./services/excelExport";
@@ -40,6 +42,7 @@ export default function PucCodesPage() {
   const [confirmReset, setConfirmReset] = useState<"pick" | "analyze" | null>(null);
   const [picking, setPicking] = useState(false);
   const [codes, setCodes] = useState<PucCode[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [titles, setTitles] = useState<DocumentTitleMapping[]>([]);
   const [titlesOpen, setTitlesOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -81,6 +84,7 @@ export default function PucCodesPage() {
     void loadTitles();
     void loadSuppliers();
     pucService.listCodes().then(setCodes, (e) => toast(errorMessage(e), "error"));
+    companyService.list().then(setCompanies, (e) => toast(errorMessage(e), "error"));
     // Al salir de la pantalla se detiene un análisis en curso.
     return () => {
       cancelled.current = true;
@@ -219,6 +223,8 @@ export default function PucCodesPage() {
     scrollToId(DOCUMENTS_ANCHOR);
   }
 
+  const reloadCodes = useCallback(() => pucService.listCodes().then(setCodes, (e) => toast(errorMessage(e), "error")), [toast]);
+
   async function exportExcel() {
     if (!report || !folder || exporting || blocked !== null) return;
     setExporting(true);
@@ -241,8 +247,8 @@ export default function PucCodesPage() {
     <>
       <PageHeader
         eyebrow="Estados Financieros"
-        title="Códigos PUC por factura"
-        description="Selecciona una carpeta con facturas electrónicas en PDF, asigna el código PUC de cada una (a toda la factura o por producto) y consolida los valores por código."
+        title="Clasificación contable de compras"
+        description="Selecciona una carpeta con facturas electrónicas en PDF, asigna el código PUC de cada una (a toda la factura o por producto), consolida los valores por código y envíalos a Estados Financieros."
         actions={
           <>
             <Button icon={<BookOpenText size={15} />} onClick={() => setCatalogOpen(true)}>
@@ -352,6 +358,20 @@ export default function PucCodesPage() {
 
           <DocumentsTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r, products = false) => setSelected({ fileName: r.fileName, products })} onAction={runAction} />
           <PucSummary report={report} partial={actions.length > 0} />
+          {folder && (
+            <PurchasesFsCard
+              report={report}
+              pendingActions={actions.length}
+              companies={companies}
+              suppliers={suppliers ?? []}
+              assignments={assignments}
+              folderName={folder.folderName}
+              onDecide={(fileName, decision) => assign(fileName, { ...assignments[fileName], companyDecision: decision })}
+              onOpen={(fileName) => setSelected({ fileName, products: false })}
+              onExport={exportExcel}
+              exporting={exporting}
+            />
+          )}
         </>
       )}
 
@@ -372,6 +392,7 @@ export default function PucCodesPage() {
         }}
         remainingPending={actions.filter((a) => a.id !== selectedActionId).length}
         onNextPending={() => resolveNext(selectedActionId)}
+        onCodesChanged={reloadCodes}
       />
       <ConfirmDialog
         open={confirmReset !== null}

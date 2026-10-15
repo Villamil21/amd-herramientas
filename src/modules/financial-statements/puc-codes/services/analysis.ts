@@ -139,6 +139,8 @@ function parsedRow(fileName: string, doc: ParsedPucDocument, index: PucIndex, ca
     issueDate: doc.issueDate,
     issuerNit: doc.issuerNit,
     issuerName: doc.issuerName,
+    buyerNit: doc.buyerNit,
+    buyerName: doc.buyerName,
     pageCount: doc.pageCount,
     grossTotalCents: doc.grossTotalCents,
     mode,

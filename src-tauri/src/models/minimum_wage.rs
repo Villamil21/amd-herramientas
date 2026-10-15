@@ -9,6 +9,9 @@ use crate::error::{AppError, AppResult};
 pub struct MinimumWage {
     pub year: i64,
     pub value_pesos: i64,
+    /// Auxilio de transporte mensual del año (pesos enteros). `None` = sin configurar; ausente en backups anteriores.
+    #[serde(default)]
+    pub transport_allowance_pesos: Option<i64>,
     pub updated_at: String,
 }
 
@@ -18,6 +21,13 @@ pub fn validate_minimum_wage(year: i64, value_pesos: i64) -> AppResult<()> {
     }
     if !(1..=1_000_000_000).contains(&value_pesos) {
         return Err(AppError::user("El SMMLV debe ser mayor que cero."));
+    }
+    Ok(())
+}
+
+pub fn validate_transport_allowance(pesos: Option<i64>) -> AppResult<()> {
+    if pesos.is_some_and(|p| !(1..=1_000_000_000).contains(&p)) {
+        return Err(AppError::user("El auxilio de transporte debe ser mayor que cero."));
     }
     Ok(())
 }

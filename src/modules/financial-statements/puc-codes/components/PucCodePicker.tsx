@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, Plus, Search } from "lucide-react";
 import { Button, Input } from "../../../../components/ui";
 import type { PucCode } from "../../../../types/models";
 import { formatInteger } from "../../../../utils/format";
@@ -17,14 +17,17 @@ interface Props {
    */
   suggestions?: PucCode[];
   confirmLabel?: string;
+  /** Ofrece «Crear nueva cuenta PUC» (código personalizado) con lo escrito. */
+  onCreate?: (typed: string) => void;
 }
 
 /**
  * Campo «Código PUC»: busca por código (completo o parte) o por concepto,
  * muestra el concepto exacto de la tabla y pide confirmación. Nunca aplica un
- * código en silencio y solo ofrece códigos finales de 6 dígitos.
+ * código en silencio y solo ofrece códigos asignables: subcuentas oficiales de
+ * 6 dígitos o códigos personalizados.
  */
-export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestions, confirmLabel = "Confirmar código" }: Props) {
+export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestions, confirmLabel = "Confirmar código", onCreate }: Props) {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<PucCode | null>(null);
   const [active, setActive] = useState(0);
@@ -135,14 +138,23 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
           </div>
           {rejected && (
             <div className="field__error" role="alert">
-              No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos.
+              No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos o un código personalizado.
             </div>
           )}
         </div>
       ) : typed ? (
         search.total === 0 ? (
-          <div className="field__error" role="alert">
-            Código PUC no encontrado{search.note ? `: ${search.note}` : "."}
+          <div className="stack stack--sm">
+            <div className="field__error" role="alert">
+              Código PUC no encontrado{search.note ? `: ${search.note}` : "."}
+            </div>
+            {onCreate && (
+              <div>
+                <Button size="sm" icon={<Plus size={14} />} onClick={() => onCreate(query.trim())}>
+                  Crear nueva cuenta PUC
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -169,6 +181,7 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
                     >
                       <span className="puc-results__code">{r.code}</span>
                       <span className="puc-results__concept">{r.concept}</span>
+                      {r.custom && <span className="badge">Personalizado</span>}
                     </li>
                   </Fragment>
                 );
@@ -178,6 +191,13 @@ export function PucCodePicker({ index, onConfirm, onCancel, autoFocus, suggestio
               <span className="field__hint">
                 Se muestran {search.results.length} de {formatInteger(search.total)} códigos. Escribe más para acotar.
               </span>
+            )}
+            {onCreate && (
+              <div>
+                <Button size="sm" variant="ghost" icon={<Plus size={14} />} onClick={() => onCreate(query.trim())}>
+                  Crear nueva cuenta PUC
+                </Button>
+              </div>
             )}
           </>
         )

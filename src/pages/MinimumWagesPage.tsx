@@ -15,11 +15,14 @@ export function MinimumWagesPage() {
   const data = useAsync(() => minimumWageService.list(), []);
   const wages = data.data ?? [];
   const [edits, setEdits] = useState<Record<number, number | null>>({});
+  /** Auxilio de transporte editado por año (null = sin configurar). */
+  const [auxEdits, setAuxEdits] = useState<Record<number, number | null>>({});
   const [newYear, setNewYear] = useState("");
   const [newPesos, setNewPesos] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   const changed = wages.filter((w) => edits[w.year] !== undefined && edits[w.year] !== w.valuePesos);
+  const auxChanged = wages.filter((w) => auxEdits[w.year] !== undefined && auxEdits[w.year] !== w.transportAllowancePesos);
   const invalid = changed.some((w) => !edits[w.year]);
   const yearNumber = /^\d{4}$/.test(newYear.trim()) ? Number(newYear.trim()) : null;
   const duplicate = yearNumber !== null && wages.some((w) => w.year === yearNumber);
@@ -29,8 +32,10 @@ export function MinimumWagesPage() {
     setSaving(true);
     try {
       for (const w of changed) await minimumWageService.update(w.year, edits[w.year]!);
-      toast(changed.length === 1 ? `SMMLV ${changed[0].year} guardado.` : "SMMLV guardados.");
+      for (const w of auxChanged) await minimumWageService.setTransportAllowance(w.year, auxEdits[w.year] || null);
+      toast(changed.length + auxChanged.length === 1 ? "Valor guardado." : "Valores guardados.");
       setEdits({});
+      setAuxEdits({});
       await data.reload();
     } catch (e) {
       toast((e as Error).message, "error");
@@ -82,9 +87,9 @@ export function MinimumWagesPage() {
           <Card
             flush
             title="Valores registrados"
-            description="Configuración local y manual: el SMMLV no se actualiza desde Internet. Lo usa la Calculadora de aportes para Independientes."
+            description="Configuración local y manual: no se actualiza desde Internet. La usan la Calculadora de aportes para Independientes y Estados Financieros → Nómina (auxilio de transporte)."
             actions={
-              <Button variant="primary" icon={<Save size={14} />} onClick={() => void saveEdits()} loading={saving} disabled={changed.length === 0}>
+              <Button variant="primary" icon={<Save size={14} />} onClick={() => void saveEdits()} loading={saving} disabled={changed.length + auxChanged.length === 0}>
                 Guardar cambios
               </Button>
             }
@@ -95,6 +100,7 @@ export function MinimumWagesPage() {
                   <tr>
                     <th>Año</th>
                     <th className="num">Valor SMMLV</th>
+                    <th className="num">Auxilio de transporte</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -106,12 +112,15 @@ export function MinimumWagesPage() {
                         <td className="num" style={{ width: 220 }}>
                           <MoneyInput aria-label={`SMMLV ${w.year}`} className="input--right" value={pesos} onChange={(v) => setEdits((prev) => ({ ...prev, [w.year]: v }))} invalid={!pesos} />
                         </td>
+                        <td className="num" style={{ width: 220 }}>
+                          <MoneyInput aria-label={`Auxilio de transporte ${w.year}`} className="input--right" value={auxEdits[w.year] === undefined ? w.transportAllowancePesos : auxEdits[w.year]} onChange={(v) => setAuxEdits((prev) => ({ ...prev, [w.year]: v }))} />
+                        </td>
                       </tr>
                     );
                   })}
                   {wages.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                      <td colSpan={3} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
                         No hay valores registrados.
                       </td>
                     </tr>

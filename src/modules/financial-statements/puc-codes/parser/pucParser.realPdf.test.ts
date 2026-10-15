@@ -35,6 +35,8 @@ describe.skipIf(files.length === 0)("factura electrónica real", () => {
       expect(doc.products.map((p) => p.row)).toEqual(doc.products.map((_, i) => i + 1));
       if (doc.cufe) expect(doc.cufe).toMatch(/^[0-9a-f]{64,128}$/);
       if (doc.issueDate) expect(doc.issueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // El adquiriente (la empresa) se lee por NIT, sin dígito de verificación.
+      if (process.env.PUC_BUYER_NIT) expect(doc.buyerNit).toBe(process.env.PUC_BUYER_NIT);
       for (const p of doc.products) {
         // Una fila es válida con descripción y precio; si falta algo queda marcada, nunca con un valor inventado.
         if (p.issue) expect(p.priceCents === undefined || p.description === "").toBe(true);

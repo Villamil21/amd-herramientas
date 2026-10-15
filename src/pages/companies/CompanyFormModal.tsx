@@ -6,7 +6,7 @@ import { companyService, getLogoDataUrl } from "../../services/companyService";
 import type { Company, CompanyInput } from "../../types/models";
 
 const EMPTY: CompanyInput = {
-  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, ciiuCode: "", shareholders: [],
+  razonSocial: "", nit: "", direccion: "", ciudad: "", telefono: "", correo: "", infoAdicional: "", logoFile: null, dv: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, ciiuCode: "", legalRepName: "", legalRepDocument: "", shareholders: [],
 };
 
 interface Props {
@@ -163,6 +163,12 @@ export function CompanyFormModal({ open, company, initial, onClose, onSaved }: P
           </Field>
           <Field label="Correo electrónico" error={errors.correo}>
             {(id) => <Input id={id} type="email" value={values.correo} onChange={set("correo")} invalid={!!errors.correo} />}
+          </Field>
+          <Field label="Representante legal" hint="Firma los Estados Financieros como «Representante Legal».">
+            {(id) => <Input id={id} value={values.legalRepName} onChange={set("legalRepName")} />}
+          </Field>
+          <Field label="Documento del representante legal" hint="Ej. CC 1.192.729.629">
+            {(id) => <Input id={id} value={values.legalRepDocument} onChange={set("legalRepDocument")} />}
           </Field>
           <Field label="Información adicional" className="span-2">
             {(id) => <Textarea id={id} value={values.infoAdicional} onChange={set("infoAdicional")} rows={3} />}

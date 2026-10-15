@@ -1,6 +1,6 @@
 import type { PdfDocumentText } from "../../../bank-analysis/shared/pdf/pdfTypes";
 import { buildRows, type TextRow } from "../../../bank-analysis/shared/pdf/rows";
-import { findField, ISSUER_HEADING, parseInvoice, qrField, rowKey, rowText, type PageRows } from "../../../taxes/invoice-vat/parser/invoiceParser";
+import { DETAILS_HEADING, findField, ISSUER_HEADING, normalizeNit, parseInvoice, qrField, rowKey, rowText, type PageRows } from "../../../taxes/invoice-vat/parser/invoiceParser";
 import { NO_TITLE } from "../../../taxes/invoice-vat/services/analysis";
 import { parseIssueDate } from "../../../taxes/withholding/parser/withholdingParser";
 import type { ParsedPucDocument, PucProduct } from "../types";
@@ -19,6 +19,9 @@ import type { ParsedPucDocument, PucProduct } from "../types";
 
 export { NO_TITLE };
 
+const BUYER_HEADING = /^datos del (adquiriente|adquirente|comprador|cliente)/;
+const BUYER_NIT_LABEL = /^(n[uú]mero( de)? documento|nit( del)?( adquiriente| adquirente| comprador| cliente)?|identificaci[oó]n)\s*:/i;
+const BUYER_NAME_LABEL = /^(nombre o raz[oó]n social|raz[oó]n social|nombre( del)?( adquiriente| comprador| cliente)?)\s*:/i;
 const ISSUE_DATE_LABEL = /^fecha( de)? (emisi[oó]n|expedici[oó]n|generaci[oó]n)\s*:/i;
 const CUFE_LABEL = /\b(cufe|cude)\b/;
 const HEX = /^[0-9a-f]+$/i;
@@ -45,6 +48,29 @@ export function readCufe(documentRows: TextRow[], pages: PageRows[]): string | u
   return qr && validCufe(qr) ? qr.toLowerCase() : undefined;
 }
 
+/**
+ * «Datos del Adquiriente / Comprador»: NIT (Número Documento) y nombre. Con
+ * ellos se relaciona la factura con una Empresa guardada (por NIT; el nombre
+ * solo valida). Respaldo del NIT: el texto del QR (NitAdq).
+ */
+export function readBuyer(pages: PageRows[]): { nit?: string; name?: string } {
+  for (const p of pages) {
+    const start = p.rows.findIndex((r) => BUYER_HEADING.test(rowKey(r)));
+    if (start === -1) continue;
+    const section: TextRow[] = [];
+    for (let i = start + 1; i < p.rows.length; i++) {
+      const key = rowKey(p.rows[i]);
+      if (DETAILS_HEADING.test(key) || ISSUER_HEADING.test(key) || /^datos (del|de la|de los) /.test(key)) break;
+      section.push(p.rows[i]);
+    }
+    const nit = findField(section, BUYER_NIT_LABEL);
+    const name = findField(section, BUYER_NAME_LABEL);
+    return { nit: nit ? normalizeNit(nit) || undefined : undefined, name: name || undefined };
+  }
+  const qr = qrField(pages, "NitAdq");
+  return { nit: qr ? normalizeNit(qr) || undefined : undefined };
+}
+
 export function parsePucDocument(doc: PdfDocumentText): ParsedPucDocument {
   const invoice = parseInvoice(doc);
   const pages: PageRows[] = doc.pages.map((p) => ({ page: p.pageNumber, rows: buildRows(p.items) }));
@@ -65,6 +91,7 @@ export function parsePucDocument(doc: PdfDocumentText): ParsedPucDocument {
     return product;
   });
 
+  const buyer = readBuyer(pages);
   return {
     pageCount: invoice.pageCount,
     title: invoice.documentType,
@@ -73,6 +100,8 @@ export function parsePucDocument(doc: PdfDocumentText): ParsedPucDocument {
     issueDate: parseIssueDate(findField(documentRows, ISSUE_DATE_LABEL) ?? qrField(pages, "FecFac")),
     issuerNit: invoice.supplierNit,
     issuerName: invoice.supplierName,
+    buyerNit: buyer.nit ?? (qrField(pages, "NitAdq") ? normalizeNit(qrField(pages, "NitAdq")!) || undefined : undefined),
+    buyerName: buyer.name,
     products,
     grossTotalCents: invoice.grossTotalCents,
   };

@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::company::{Company, CompanyInput, Shareholder};
 use crate::services::time::now_iso;
 
-const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code";
+const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document";
 
 fn map(r: &Row) -> rusqlite::Result<Company> {
     Ok(Company {
@@ -23,6 +23,8 @@ fn map(r: &Row) -> rusqlite::Result<Company> {
         paid_total_shares: r.get(12)?,
         paid_nominal_value: r.get(13)?,
         ciiu_code: r.get(16)?,
+        legal_rep_name: r.get(17)?,
+        legal_rep_document: r.get(18)?,
         shareholders: Vec::new(),
         created_at: r.get(14)?,
         updated_at: r.get(15)?,
@@ -68,9 +70,9 @@ fn replace_shareholders(conn: &Connection, company_id: i64, rows: &[Shareholder]
 pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
     let now = now_iso();
     conn.execute(
-        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15)",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code],
+        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17)",
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code, c.legal_rep_name, c.legal_rep_document],
     )?;
     let id = conn.last_insert_rowid();
     replace_shareholders(conn, id, &c.shareholders)?;
@@ -80,8 +82,8 @@ pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
 /// Inserta conservando id y fechas (restauración de backups).
 pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
     conn.execute(
-        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
-        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code],
+        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"),
+        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code, c.legal_rep_name, c.legal_rep_document],
     )?;
     replace_shareholders(conn, c.id, &c.shareholders)?;
     Ok(())
@@ -90,9 +92,9 @@ pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
 pub fn update(conn: &Connection, id: i64, c: &CompanyInput) -> AppResult<()> {
     let n = conn.execute(
         "UPDATE companies SET razon_social = ?1, nit = ?2, direccion = ?3, ciudad = ?4, telefono = ?5,
-                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16
+                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16, legal_rep_name = ?17, legal_rep_document = ?18
          WHERE id = ?15",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code],
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code, c.legal_rep_name, c.legal_rep_document],
     )?;
     if n == 0 {
         return Err(AppError::user("La empresa no existe o fue eliminada."));
@@ -102,6 +104,11 @@ pub fn update(conn: &Connection, id: i64, c: &CompanyInput) -> AppResult<()> {
 }
 
 pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
+    // Los movimientos contables nunca se borran sin trazabilidad: una empresa con información financiera se conserva.
+    let used: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM fs_batches WHERE company_id = ?1) OR EXISTS(SELECT 1 FROM fs_employees WHERE company_id = ?1) OR EXISTS(SELECT 1 FROM fs_periods WHERE company_id = ?1) OR EXISTS(SELECT 1 FROM fs_opening_drafts WHERE company_id = ?1) OR EXISTS(SELECT 1 FROM fs_bank_accounts WHERE company_id = ?1)", [id], |r| r.get(0))?;
+    if used {
+        return Err(AppError::user("La empresa tiene información en Estados Financieros (movimientos, nómina o periodos) y no se puede eliminar."));
+    }
     conn.execute("DELETE FROM companies WHERE id = ?1", [id])?;
     Ok(())
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { BadgePercent, BookOpenText, Building2, CalendarRange, Database, Download, LayoutGrid, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
+import { BadgePercent, BookOpenText, Building2, CalendarRange, Database, Download, LayoutGrid, ListTree, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
@@ -14,6 +14,7 @@ const DATA_NAV = [
   { key: "withholding-table", label: "Tabla de retenciones", icon: Percent, path: paths.withholdingTable },
   { key: "self-withholding-table", label: "Tabla de Autorretenciones", icon: BadgePercent, path: paths.selfWithholdingTable },
   { key: "puc-table", label: "Tabla de Códigos PUC", icon: BookOpenText, path: paths.pucTable },
+  { key: "fs-catalog", label: "Catálogo de cuentas EEFF", icon: ListTree, path: paths.fsCatalog },
   { key: "minimum-wages", label: "SMMLV por año", icon: CalendarRange, path: paths.minimumWages },
 ];
 const SYSTEM_NAV = [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }];

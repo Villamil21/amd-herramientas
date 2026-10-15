@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.22.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Estados Financieros se amplía: cada fuente (compras, extractos bancarios, nómina, ventas y saldos iniciales) envía sus movimientos contables por empresa y quedan guardados. El nuevo Generador arma el Estado de Situación Financiera y el Estado de Resultados para cualquier rango de fechas.",
+      "«Códigos PUC por factura» ahora se llama «Clasificación contable de compras». La empresa se identifica por el NIT del adquiriente; si el nombre de la factura es muy distinto se pide «Ignorar factura» o «Procesar de todas formas». Botones Exportar Excel, Enviar a Estados Financieros y Enviar y descargar. El historial de códigos PUC usados con cada proveedor empezó de cero.",
+      "Extractos bancarios se movió a Estados Financieros → Extractos bancarios, con los mismos lectores de cada banco. Cada concepto tiene un destino (Enviar a Estados Financieros con su cuenta PUC, o No enviar) y cada cuenta bancaria su cuenta PUC de saldo.",
+      "Nuevos submódulos: Nómina (Aportes en Línea: salario, auxilio de transporte, seguridad social y prestaciones por empleado y área, con retiros, liquidaciones y reingresos), Ventas (Facturación electrónica y Reporte de operaciones), Saldos iniciales y Movimientos contables (auditoría).",
+      "Generador: cobertura mensual por fuente, lista de verificación, ajustes con historial, presentación Banco u OTC (el resultado no cambia), previsualización, PDF de exactamente dos páginas con valores al millar, versiones y cierre / desbloqueo del periodo.",
+      "Datos: nuevo Catálogo de cuentas de Estados Financieros; la Tabla de Códigos PUC permite crear cuentas personalizadas (incluye 7305 — No aplica, excluida de los estados); Empresas tiene representante legal; Firmas indica Contador Público o Contadora Pública; SMMLV por año incluye el auxilio de transporte.",
+      "Si una empresa tiene información en Estados Financieros no se puede eliminar, y el backup incluye toda esta información."
+    ]
+  },
+  {
     "version": "1.21.1",
     "date": "2026-10-14",
     "notes": [

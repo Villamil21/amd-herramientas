@@ -10,6 +10,7 @@ import type { PucIndex } from "../services/pucCatalog";
 import { DOC_CATEGORY_LABEL, type AssignmentMode, type DocAssignment, type DocLine, type DocRow, type ProblemCode, type UnknownTitle } from "../types";
 import { TitleClassifyButtons } from "./PendingPanel";
 import { PucCodePicker } from "./PucCodePicker";
+import { CreatePucCodeModal } from "../../shared/components/CreatePucCodeModal";
 import { ClassificationBadge } from "./StatusBadge";
 
 interface Props {
@@ -38,6 +39,8 @@ interface Props {
   /** Pendientes que quedan además de este documento. */
   remainingPending: number;
   onNextPending: () => void;
+  /** Se creó un código PUC personalizado: recargar la tabla. */
+  onCodesChanged?: () => Promise<unknown> | void;
 }
 
 const assignable = (l: DocLine) => !l.issue;
@@ -47,7 +50,8 @@ const assignable = (l: DocLine) => !l.issue;
  * («un solo código» o «por producto») y sus productos con Código y Concepto
  * PUC. Las asignaciones son del análisis: el PDF no se modifica.
  */
-export function DocumentDetailModal({ row, index, assignment = {}, openProducts, unknownTitle, supplier, onSupplierCreated, suggestions, onAssign, onChanged, onClose, remainingPending, onNextPending }: Props) {
+export function DocumentDetailModal({ row, index, assignment = {}, openProducts, unknownTitle, supplier, onSupplierCreated, suggestions, onAssign, onChanged, onClose, remainingPending, onNextPending, onCodesChanged }: Props) {
+  const [creatingCode, setCreatingCode] = useState<string | null>(null);
   const [showProducts, setShowProducts] = useState(false);
   const [editingCode, setEditingCode] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
@@ -303,6 +307,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
                         suggestions={suggestions}
                         autoFocus
                         onCancel={editingCode ? () => setEditingCode(false) : undefined}
+                        onCreate={setCreatingCode}
                         onConfirm={(code) => {
                           assign(withDocumentCode(assignment, code), code);
                           setEditingCode(false);
@@ -332,6 +337,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
                         suggestions={suggestions}
                         confirmLabel={selectedLines.length > 1 ? `Confirmar para ${selectedLines.length} productos` : "Confirmar código"}
                         onConfirm={applyToSelected}
+                        onCreate={setCreatingCode}
                       />
                     )}
                   </div>
@@ -445,6 +451,16 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
         )}
       </div>
 
+      <CreatePucCodeModal
+        open={creatingCode !== null}
+        initialCode={/^\d+$/.test(creatingCode ?? "") ? creatingCode! : ""}
+        index={index}
+        onClose={() => setCreatingCode(null)}
+        onCreated={async () => {
+          await onCodesChanged?.();
+          setCreatingCode(null);
+        }}
+      />
       <SupplierFormModal
         open={creatingSupplier}
         supplier={null}

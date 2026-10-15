@@ -26,6 +26,9 @@ export interface ParsedPucDocument {
   /** Solo dígitos, sin dígito de verificación. */
   issuerNit: string;
   issuerName: string;
+  /** Adquiriente / comprador: identifica la empresa (por NIT, sin dígito de verificación). */
+  buyerNit?: string;
+  buyerName?: string;
   products: PucProduct[];
   /** Datos Totales → «Total Bruto Factura». */
   grossTotalCents?: number;
@@ -65,6 +68,11 @@ export interface DocAssignment {
   excluded?: boolean;
   /** Coincide con otro por NIT + número, pero el usuario indicó que no es el mismo documento. */
   includeDuplicate?: boolean;
+  /**
+   * El NIT del adquiriente es de una empresa guardada pero el nombre escrito es muy
+   * distinto: «ignore» no se envía a Estados Financieros; «process» se envía igual.
+   */
+  companyDecision?: "ignore" | "process";
 }
 
 export type Assignments = Record<string, DocAssignment>;
@@ -123,6 +131,8 @@ export interface DocRow {
   issueDate?: string;
   issuerNit?: string;
   issuerName?: string;
+  buyerNit?: string;
+  buyerName?: string;
   pageCount?: number;
   grossTotalCents?: number;
   mode?: AssignmentMode;

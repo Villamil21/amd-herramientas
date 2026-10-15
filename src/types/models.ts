@@ -15,6 +15,9 @@ export interface Company {
   paidNominalValue: number | null;
   /** Código CIIU como texto (conserva ceros iniciales: "0111"). Vacío = sin configurar. */
   ciiuCode: string;
+  /** Representante legal (Estados Financieros). El cargo siempre es «Representante Legal». Vacío = sin configurar. */
+  legalRepName: string;
+  legalRepDocument: string;
   shareholders: Shareholder[];
   createdAt: string;
   updatedAt: string;
@@ -35,6 +38,8 @@ export interface CertificateSigner {
   professionalDocument: string;
   /** Identificación personal (ej. "CC 1.192.729.629"). Opcional: "" si no se ha registrado. */
   personalDocument: string;
+  /** Cómo se muestra como contador en los Estados Financieros. "" = sin definir (nunca se deduce del nombre). */
+  accountantTitle: AccountantTitle;
   signatureFile: string;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +48,8 @@ export interface CertificateSigner {
 }
 
 export type CertificateSignerInput = Omit<CertificateSigner, "id" | "createdAt" | "updatedAt" | "signatureAvailable">;
+
+export type AccountantTitle = "" | "Contador Público" | "Contadora Pública";
 
 export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt">;
 
@@ -114,6 +121,8 @@ export interface BackupSummary {
   supplierPucCodes: number | null;
   /** null: backup anterior al SMMLV por año; al restaurarlo se conservan los valores actuales. */
   minimumWages: number | null;
+  /** Movimientos contables de Estados Financieros. null: backup anterior; al restaurarlo se conserva la información actual. */
+  financialStatements: number | null;
 }
 
 /** Tipo de documento de identidad del titular (certificado de ingresos). */
@@ -201,6 +210,8 @@ export type WithholdingRateInput = Pick<WithholdingRate, "retentionType" | "name
 export interface MinimumWage {
   year: number;
   valuePesos: number;
+  /** Auxilio de transporte mensual del año. null: sin configurar. */
+  transportAllowancePesos: number | null;
   updatedAt: string;
 }
 
@@ -238,11 +249,14 @@ export interface DocumentTitleMapping {
 
 export type DocumentTitleMappingInput = Pick<DocumentTitleMapping, "normalizedTitle" | "displayTitle" | "category">;
 
-/** Código del catálogo PUC (tabla maestra de solo lectura). */
+/** Código del catálogo PUC: oficial (solo lectura) o personalizado (creado en la app, global). */
 export interface PucCode {
-  /** 1 dígito (clase), 2 (grupo), 4 (cuenta) o 6 (subcuenta: el único nivel asignable). */
+  /** Oficial: 1 dígito (clase), 2 (grupo), 4 (cuenta) o 6 (subcuenta asignable). Personalizado: 4 a 12 dígitos, asignable. */
   code: string;
   concept: string;
+  custom?: boolean;
+  /** Padre confirmado por el usuario (solo personalizados). */
+  parentCode?: string;
 }
 
 /** Clasificación guardada de un estado de Dropi (global al módulo Dropi). */

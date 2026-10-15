@@ -8,8 +8,10 @@ import { call } from "./tauri";
  * en SQLite contra su registro en Proveedores.
  */
 export const pucService = {
-  /** Todo el catálogo, en el orden del PUC. */
+  /** Todo el catálogo (oficial + personalizados), en el orden del PUC. */
   listCodes: () => call<PucCode[]>("list_puc_codes"),
+  /** Crea un código personalizado global; el concepto y el padre los confirma el usuario. */
+  createCustomCode: (code: string, concept: string, parentCode: string) => call<PucCode>("create_custom_puc_code", { input: { code, concept, parentCode } }),
   listTitles: () => call<DocumentTitleMapping[]>("list_puc_document_titles"),
   saveTitles: (items: DocumentTitleMappingInput[]) => call<void>("save_puc_document_titles", { items }),
   updateTitle: (id: number, category: TitleCategory) => call<void>("update_puc_document_title", { id, category }),
