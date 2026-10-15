@@ -3303,6 +3303,81 @@ button.stat--link {
   color: var(--accent-green-ink);
 }
 
+.fs-coverage__cell.is-partial {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+}
+
+.fs-coverage__cell {
+  position: relative;
+}
+
+/* Punto: en ese mes hay un extracto reemplazado (el historial está en el detalle). */
+.fs-coverage__cell.has-replaced::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  box-shadow: 0 0 0 1.5px var(--color-surface);
+}
+
+/* Mes final sin saldo bancario: el ESF de esa cuenta queda pendiente (aunque haya extracto). */
+.fs-coverage__cell.is-balance-pending {
+  border: 1.5px dashed var(--color-danger);
+}
+
+.fs-coverage__pending {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-danger);
+}
+
+.fs-coverage__count {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.fs-coverage__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fs-coverage-detail th,
+.fs-coverage-detail td {
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+}
+
+.fs-coverage-detail .nowrap {
+  white-space: nowrap;
+}
+
+.fs-coverage__group > td:first-child {
+  font-weight: 600;
+}
+
+.fs-coverage__bank > td:first-child {
+  padding-left: calc(var(--space-4) + 18px);
+}
+
+.fs-coverage__account > td:first-child {
+  padding-left: calc(var(--space-4) + 40px);
+}
+
 .fs-preview {
   display: flex;
   flex-direction: column;

@@ -12,6 +12,7 @@ import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
+import { bankAccountingCents, isDebitPuc } from "../generator/engine";
 
 /** Submódulo donde nace cada origen (para «Abrir origen»). */
 export const SOURCE_PATH: Record<FsSource, string> = {
@@ -266,6 +267,8 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
       <div className="summary-grid">
         {item("Fecha contable", formatIsoDate(m.accountingDate))}
         {item("Valor exacto", formatExactCents(m.amountCents))}
+        {item("Dirección bancaria", m.dc && (m.dc === "D" ? "Salida (disminuye el banco)" : "Entrada (aumenta el banco)"))}
+        {item("Valor contable", m.dc && `${formatExactCents(bankAccountingCents(m.dc, m.amountCents, isDebitPuc(m.pucCode)))} (naturaleza ${isDebitPuc(m.pucCode) ? "débito" : "crédito"} del PUC)`)}
         {item("Código PUC", `${m.pucCode} — ${m.pucConcept}`)}
         {item("Estado", MOVEMENT_STATUS_LABEL[m.status as MovementStatus])}
         {item("Documento", m.documentNumber)}

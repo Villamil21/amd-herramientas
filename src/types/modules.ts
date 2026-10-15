@@ -17,6 +17,8 @@ export interface SubmoduleDef {
   providers?: SubmoduleDef[];
   /** Texto de la pantalla de selección de proveedores (por defecto, el de planillas). */
   providersDescription?: string;
+  /** Prioridad de la tarjeta: menor va primero (0 = siempre primera). Sin definir = orden declarado, después de las prioritarias. */
+  priority?: number;
 }
 
 export interface ModuleDef {

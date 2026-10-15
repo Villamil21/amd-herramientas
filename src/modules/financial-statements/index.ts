@@ -67,6 +67,8 @@ export const financialStatementsModule: ModuleDef = {
     {
       id: "generador",
       name: "Generador de Estados Financieros",
+      // Siempre la primera tarjeta, sin importar cuántos submódulos haya ni su nombre u orden.
+      priority: 0,
       description: "Estado de Situación Financiera y Estado de Resultados: validación, previsualización, PDF y cierre.",
       icon: ChartNoAxesCombined,
       component: lazy(() => import("./generator/GeneratorPage")),

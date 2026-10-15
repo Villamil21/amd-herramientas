@@ -1,7 +1,7 @@
 import { SOURCE_LABEL, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
 import { employeeKey, findAbsences, type Absence } from "../payroll/calc";
-import { monthsBetween } from "../shared/money";
-import { isBalanced, type Statements } from "./engine";
+import { monthsBetween, periodLabel } from "../shared/money";
+import { isBalanced, pendingBankBalances, type BankBalanceStatus, type Statements } from "./engine";
 
 /**
  * Revisión del periodo: fuentes y cobertura mensual, duplicados y la lista de
@@ -25,6 +25,8 @@ export interface CoverageRow {
   missing: string[];
   /** La fuente no tiene nada en el rango (no se considera faltante mes a mes). */
   empty: boolean;
+  /** Solo extractos: el detalle por banco y cuenta del que sale la fila. */
+  bank?: BankCoverage;
 }
 
 /**
@@ -46,12 +48,178 @@ export function coverage(start: string, end: string, movements: Movement[], bala
       const b = batchById.get(batchId);
       if (b && !cell.batches.includes(b)) cell.batches.push(b);
     };
+    if (source === "bank") {
+      // Una sola marca global sería engañosa: el mes está completo solo si TODAS las cuentas lo tienen.
+      const bank = bankCoverage(months, movements, balances, batches);
+      for (const m of months) {
+        const c = bank.cells[m];
+        cells[m] = { loaded: c.total > 0 && c.loaded === c.total, batches: c.batches, records: c.loaded };
+      }
+      // Sin saldo del mes final la fuente bancaria tampoco está completa.
+      const last = months[months.length - 1];
+      if (last && bank.finalBalanceMissing > 0) cells[last] = { ...cells[last], loaded: false };
+      const missing = months.filter((m) => !cells[m].loaded);
+      return { source, label: SOURCE_LABEL[source], cells, missing, empty: bank.banks.length === 0, bank };
+    }
     for (const m of movements) if (m.source === source && m.accountingDate >= start && m.accountingDate <= end) add(m.accountingDate.slice(0, 7), m.batchId, m.status === "active");
-    if (source === "bank") for (const b of balances) if (b.balanceDate >= start && b.balanceDate <= end) add(b.balanceDate.slice(0, 7), b.batchId, b.active);
     const missing = months.filter((m) => !cells[m].loaded);
     return { source, label: SOURCE_LABEL[source], cells, missing, empty: missing.length === months.length };
   });
   return { months, rows };
+}
+
+/** Un extracto enviado (activo, reemplazado o anulado) con lo que el detalle del mes necesita. */
+export interface BankStatementInfo {
+  batch: BatchSummary;
+  bank: string;
+  accountNumber: string;
+  /** Meses AAAA-MM que cubre el periodo del extracto. */
+  months: string[];
+  /** Movimientos originales del extracto (los agrupados por concepto enviados). */
+  movementCount: number;
+  closingBalanceCents: number | null;
+  /** Envíos que este extracto reemplazó. */
+  replaced: BatchSummary[];
+}
+
+/** Mes de una cuenta, banco o del total: cuántas cuentas lo tienen activo y qué extractos lo tocan. */
+export interface BankCell {
+  loaded: number;
+  total: number;
+  statements: BankStatementInfo[];
+  batches: BatchSummary[];
+  /** Algún extracto de ese mes fue reemplazado (el historial sigue visible en el detalle). */
+  hasReplaced: boolean;
+}
+
+export interface BankAccountCoverage {
+  key: string;
+  bank: string;
+  accountNumber: string;
+  cells: Record<string, BankCell>;
+  missing: string[];
+  /** Último mes con extracto activo, en cualquier fecha (no solo el rango). */
+  lastMonth: string | null;
+  /** Falta el saldo del mes final del rango: el ESF de esta cuenta queda pendiente. */
+  finalBalanceMissing: boolean;
+}
+
+export interface BankCoverageGroup {
+  bank: string;
+  accounts: BankAccountCoverage[];
+  cells: Record<string, BankCell>;
+  missingCount: number;
+}
+
+export interface BankCoverage {
+  banks: BankCoverageGroup[];
+  cells: Record<string, BankCell>;
+  /** Pares cuenta + mes sin extracto activo en el rango. */
+  missingCount: number;
+  accountsWithMissing: number;
+  /** Cuentas sin saldo del mes final (pendientes en el ESF). */
+  finalBalanceMissing: number;
+}
+
+/** «••••7491»; sin número, «Sin número de cuenta». */
+export const maskAccount = (accountNumber: string) => {
+  const digits = accountNumber.replace(/\D/g, "");
+  return digits ? `••••${digits.slice(-4)}` : accountNumber.trim() || "Sin número de cuenta";
+};
+
+const accountKey = (bank: string, accountNumber: string) => `${bank.trim()}|${accountNumber.trim()}`;
+
+/** Extractos de la empresa con su banco, cuenta y meses, tomados de lo que quedó registrado al enviar. */
+export function bankStatements(movements: Movement[], balances: BankBalance[], batches: BatchSummary[]): BankStatementInfo[] {
+  const bankBatches = batches.filter((b) => b.source === "bank");
+  return bankBatches.map((batch) => {
+    const own = movements.filter((m) => m.batchId === batch.id);
+    const ownBalances = balances.filter((b) => b.batchId === batch.id);
+    const meta = batch.metadata ?? {};
+    const bank = String(meta.bank ?? own[0]?.bank ?? ownBalances[0]?.bank ?? "").trim() || "Banco sin identificar";
+    const accountNumber = String(meta.accountNumber ?? own[0]?.accountNumber ?? ownBalances[0]?.accountNumber ?? "").trim();
+    const months =
+      batch.periodStart && batch.periodEnd ? monthsBetween(batch.periodStart, batch.periodEnd) : [...new Set([...own.map((m) => m.accountingDate), ...ownBalances.map((b) => b.balanceDate)].map((d) => d.slice(0, 7)))].sort();
+    const movementCount = own.reduce((sum, m) => sum + (typeof m.detail?.count === "number" ? m.detail.count : 1), 0);
+    const balance = [...ownBalances].sort((a, b) => b.balanceDate.localeCompare(a.balanceDate))[0];
+    return { batch, bank, accountNumber, months, movementCount, closingBalanceCents: balance ? balance.balanceCents : null, replaced: bankBatches.filter((b) => b.replacedBy === batch.id) };
+  });
+}
+
+function emptyCell(): BankCell {
+  return { loaded: 0, total: 0, statements: [], batches: [], hasReplaced: false };
+}
+
+function mergeCells(months: string[], parts: Record<string, BankCell>[]): Record<string, BankCell> {
+  return Object.fromEntries(
+    months.map((m) => {
+      const cell = emptyCell();
+      for (const p of parts) {
+        const c = p[m];
+        cell.loaded += c.loaded;
+        cell.total += c.total;
+        cell.statements.push(...c.statements);
+        cell.batches.push(...c.batches);
+        cell.hasReplaced ||= c.hasReplaced;
+      }
+      return [m, cell];
+    }),
+  );
+}
+
+/**
+ * Cobertura de extractos por banco y por cuenta (empresa + banco + número de
+ * cuenta + periodo). Solo aparecen las cuentas que la empresa ha enviado alguna
+ * vez; cada una se espera en todos los meses del rango y solo cuenta el
+ * extracto activo (uno reemplazado o anulado se ve en el detalle, no marca el mes).
+ */
+export function bankCoverage(months: string[], movements: Movement[], balances: BankBalance[], batches: BatchSummary[]): BankCoverage {
+  const statements = bankStatements(movements, balances, batches);
+  const accounts = new Map<string, BankAccountCoverage>();
+  for (const s of statements) {
+    const key = accountKey(s.bank, s.accountNumber);
+    let account = accounts.get(key);
+    if (!account) {
+      account = { key, bank: s.bank, accountNumber: s.accountNumber, cells: Object.fromEntries(months.map((m) => [m, { ...emptyCell(), total: 1 }])), missing: [], lastMonth: null, finalBalanceMissing: false };
+      accounts.set(key, account);
+    }
+    const active = s.batch.status === "active";
+    if (active && s.months.length) {
+      const last = s.months[s.months.length - 1];
+      if (!account.lastMonth || last > account.lastMonth) account.lastMonth = last;
+    }
+    for (const m of s.months) {
+      const cell = account.cells[m];
+      if (!cell) continue;
+      if (active) cell.loaded = 1;
+      if (s.batch.status === "replaced") cell.hasReplaced = true;
+      cell.statements.push(s);
+      cell.batches.push(s.batch);
+    }
+  }
+  // Solo las cuentas con algún envío vigente o reemplazado: una cuenta con todo anulado no se «espera».
+  const live = [...accounts.values()].filter((a) => statements.some((s) => accountKey(s.bank, s.accountNumber) === a.key && s.batch.status !== "voided"));
+  const finalMonth = months[months.length - 1];
+  for (const a of live) {
+    a.missing = months.filter((m) => a.cells[m].loaded === 0);
+    // El mes final da el saldo del ESF: sin un saldo activo de ese mes la cuenta queda pendiente (aunque el extracto exista sin saldo).
+    a.finalBalanceMissing = finalMonth !== undefined && !balances.some((b) => b.active && accountKey(b.bank, b.accountNumber) === a.key && b.balanceDate.slice(0, 7) === finalMonth);
+  }
+  const byBank = new Map<string, BankAccountCoverage[]>();
+  for (const a of live) byBank.set(a.bank, [...(byBank.get(a.bank) ?? []), a]);
+  const banks = [...byBank.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "es", { sensitivity: "base" }))
+    .map(([bank, list]) => {
+      const sorted = list.sort((a, b) => a.accountNumber.localeCompare(b.accountNumber));
+      return { bank, accounts: sorted, cells: mergeCells(months, sorted.map((a) => a.cells)), missingCount: sorted.reduce((n, a) => n + a.missing.length, 0) };
+    });
+  return {
+    banks,
+    cells: mergeCells(months, banks.map((b) => b.cells)),
+    missingCount: banks.reduce((n, b) => n + b.missingCount, 0),
+    accountsWithMissing: live.filter((a) => a.missing.length > 0).length,
+    finalBalanceMissing: live.filter((a) => a.finalBalanceMissing).length,
+  };
 }
 
 export interface DuplicateGroup {
@@ -90,10 +258,20 @@ export interface CheckItem {
   detail?: string;
 }
 
+/** «BBVA ••••7491: no existe saldo final de septiembre 2026. Último saldo disponible: agosto 2026.» */
+export function pendingBalanceText(b: BankBalanceStatus): string {
+  const last = b.lastKnown ? ` Último saldo disponible: ${monthText(b.lastKnown.balanceDate.slice(0, 7))}.` : "";
+  return `${b.bank} ${maskAccount(b.accountNumber)}: no existe saldo final de ${monthText(b.month)}.${last}`;
+}
+
+/** «2026-09» → «septiembre de 2026». */
+export const monthText = (month: string) => periodLabel(month).toLowerCase().replace(" ", " de ");
+
 export function checklist(s: Statements, other: Statements, duplicates: DuplicateGroup[], absences: unknown[], payrollWithoutArea: number): CheckItem[] {
   const balanced = isBalanced(s);
   const sameResult = s.eerr.beforeTax === other.eerr.beforeTax;
-  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult].filter(Boolean).length;
+  const pendingBalances = pendingBankBalances(s);
+  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0].filter(Boolean).length;
   return [
     { id: "balanced", label: "Activo = Pasivo + Patrimonio", ok: balanced },
     { id: "classified", label: "Todos los PUC clasificados o excluidos", ok: s.unclassified.length === 0, detail: s.unclassified.length ? `${s.unclassified.length} sin clasificar` : undefined },
@@ -101,6 +279,12 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
     { id: "payroll", label: "Nómina revisada", ok: payrollWithoutArea === 0, detail: payrollWithoutArea ? `${payrollWithoutArea} empleados sin área` : undefined },
     { id: "liquidations", label: "Sin empleados pendientes de liquidación", ok: absences.length === 0, detail: absences.length ? `${absences.length} pendientes` : undefined },
     { id: "bank", label: "Sin conceptos bancarios pendientes", ok: true, detail: "Un extracto no se envía con conceptos en «Seleccionar»." },
+    {
+      id: "bankBalance",
+      label: "Saldo bancario del mes final",
+      ok: pendingBalances.length === 0,
+      detail: pendingBalances.length ? `Falta saldo bancario del mes final: ${pendingBalances.map((b) => `${b.bank} ${maskAccount(b.accountNumber)}`).join(", ")}` : undefined,
+    },
     { id: "sales", label: "Sin ventas pendientes", ok: true, detail: "Las ventas no se envían con tipos de documento sin clasificar." },
     { id: "duplicates", label: "Sin duplicados activos", ok: duplicates.length === 0, detail: duplicates.length ? `${duplicates.length} documentos en más de una importación` : undefined },
     { id: "eerr", label: "Resultado EERR validado", ok: s.unclassified.length === 0 && Number.isFinite(s.eerr.beforeTax) },

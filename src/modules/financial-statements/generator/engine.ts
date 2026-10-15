@@ -11,7 +11,13 @@ import { estimatedIncomeTax, monthsBetween, roundThousands } from "../shared/mon
  * - La ubicación de cada PUC sale solo del catálogo (nunca del signo, prefijo
  *   o descripción). Un PUC con movimientos y sin destino bloquea.
  * - Valores exactos en centavos; el redondeo al millar es de presentación.
- * - Saldo bancario: la foto más reciente ≤ fecha final de cada cuenta (no se suman meses).
+ * - Signo bancario ≠ signo contable: una salida del banco (D) aumenta una cuenta
+ *   de naturaleza débito (gasto, costo, activo) y una entrada (C) la reduce, así
+ *   que un concepto de gasto vale salidas − entradas (negativo solo si las
+ *   devoluciones superan los cargos).
+ * - Saldo bancario: la foto del MES de la fecha final de cada cuenta (no se suman
+ *   meses). Sin ella la cuenta queda pendiente: el último saldo conocido es solo
+ *   referencia y nunca entra al ESF.
  * - Cuenta por pagar: cuenta mientras no se haya pagado a la fecha final (settlesOn).
  * - Capital social: el capital suscrito de la empresa; la diferencia con el
  *   pagado va a 132505 (A socios).
@@ -24,6 +30,19 @@ export const CAPITAL_RECEIVABLE_PUC = "132505";
 
 /** Secciones de naturaleza débito: una salida del banco (D) las aumenta. */
 const DEBIT_SECTIONS = new Set<FsSectionKey>(["asset_current", "asset_noncurrent", "costs", "admin_expenses", "sales_expenses", "other_expenses"]);
+
+/** Clases PUC de naturaleza débito (activo, gastos, costos, cuentas de orden deudoras). */
+const DEBIT_PUC_CLASSES = new Set(["1", "5", "6", "7", "8"]);
+
+/**
+ * Valor contable de un movimiento bancario (centavos, valor absoluto + dirección):
+ * positivo cuando la dirección coincide con la naturaleza de la cuenta.
+ * Gasto: salida → +, entrada (devolución) → −.
+ */
+export const bankAccountingCents = (dc: "D" | "C", cents: number, debitNature: boolean) => ((dc === "D") === debitNature ? cents : -cents);
+
+/** Naturaleza de un PUC aún sin línea del catálogo: solo para mostrarlo con su signo contable mientras se clasifica. */
+export const isDebitPuc = (pucCode: string) => DEBIT_PUC_CLASSES.has(pucCode.trim().charAt(0));
 
 export interface EngineInput {
   company: Pick<Company, "subscribedTotalShares" | "subscribedNominalValue" | "paidTotalShares" | "paidNominalValue">;
@@ -79,6 +98,19 @@ export interface CryptoSummary {
   monthlyAverageCents: number;
 }
 
+/** Saldo de una cuenta bancaria para el ESF: el del mes final o pendiente. */
+export interface BankBalanceStatus {
+  key: string;
+  bank: string;
+  accountNumber: string;
+  /** AAAA-MM del mes final del periodo. */
+  month: string;
+  /** Saldo del mes final (el que entra al ESF). */
+  balance: BankBalance | null;
+  /** Sin saldo del mes final: el último anterior, solo como referencia (no entra al ESF). */
+  lastKnown: BankBalance | null;
+}
+
 export interface Statements {
   sections: Record<FsSectionKey, SectionValue>;
   esf: { currentAssets: number; nonCurrentAssets: number; assets: number; currentLiabilities: number; nonCurrentLiabilities: number; liabilities: number; equity: number; liabilitiesAndEquity: number; differenceCents: number };
@@ -88,6 +120,8 @@ export interface Statements {
   crypto: CryptoSummary;
   /** Saldo exacto de cada PUC (ESF a la fecha final; EERR en el rango): base de «Valor anterior» de un ajuste. */
   pucBalances: Map<string, number>;
+  /** Una fila por cuenta bancaria con saldos hasta el mes final. */
+  bankBalances: BankBalanceStatus[];
   presentation: Presentation;
 }
 
@@ -123,7 +157,7 @@ export function buildStatements(input: EngineInput): Statements {
     if (!line || !line.isActive) {
       const u = unclassified.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), count: 0, cents: 0, inactiveLine: line ? line.name : undefined };
       u.count++;
-      u.cents += opts.dc === "D" ? -cents : cents;
+      u.cents += opts.dc ? bankAccountingCents(opts.dc, cents, isDebitPuc(pucCode)) : cents;
       unclassified.set(pucCode, u);
       return;
     }
@@ -131,7 +165,7 @@ export function buildStatements(input: EngineInput): Statements {
     if (esf && opts.settlesOn && opts.settlesOn <= end) return; // cuenta por pagar ya pagada a la fecha final
     if (!esf && date !== null && date < start) return; // EERR: solo el rango
     let value = cents;
-    if (opts.dc) value = (opts.dc === "D") === DEBIT_SECTIONS.has(line.section) ? cents : -cents;
+    if (opts.dc) value = bankAccountingCents(opts.dc, cents, DEBIT_SECTIONS.has(line.section));
     const b = bucket(line.id);
     b.cents += value;
     const c = b.byPuc.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), cents: 0, count: 0 };
@@ -157,15 +191,9 @@ export function buildStatements(input: EngineInput): Statements {
     post(mv.pucCode, mv.pucConcept, mv.amountCents, mv.accountingDate, { dc: mv.dc, settlesOn: mv.settlesOn });
   }
 
-  // 2. Saldo bancario: la foto más reciente ≤ fecha final de cada cuenta.
-  const latest = new Map<string, BankBalance>();
-  for (const b of input.bankBalances) {
-    if (!b.active || b.balanceDate > end) continue;
-    const key = `${b.bank}|${b.accountNumber}`;
-    const prev = latest.get(key);
-    if (!prev || b.balanceDate > prev.balanceDate || (b.balanceDate === prev.balanceDate && b.id > prev.id)) latest.set(key, b);
-  }
-  for (const b of latest.values()) post(b.pucCode, "", b.balanceCents, null);
+  // 2. Saldo bancario: la foto del mes final de cada cuenta; sin ella, pendiente (sin respaldo silencioso al mes anterior).
+  const bankBalances = bankBalanceStatus(input.bankBalances, end);
+  for (const b of bankBalances) if (b.balance) post(b.balance.pucCode, "", b.balance.balanceCents, null);
 
   // 3. Capital: suscrito en Capital social; la diferencia con el pagado en 132505.
   const { subscribedTotalShares, subscribedNominalValue, paidTotalShares, paidNominalValue } = input.company;
@@ -265,9 +293,40 @@ export function buildStatements(input: EngineInput): Statements {
     unclassified: [...unclassified.values()].sort((a, b) => (a.pucCode < b.pucCode ? -1 : 1)),
     crypto: { buysCents: crypto.buys, sellsCents: crypto.sells, ownResultCents: ownResult, months, monthlyAverageCents },
     pucBalances,
+    bankBalances,
     presentation,
   };
 }
+
+const newer = (a: BankBalance, b: BankBalance | null) => !b || a.balanceDate > b.balanceDate || (a.balanceDate === b.balanceDate && a.id > b.id);
+
+/**
+ * Saldo de cada cuenta (banco + número) para un ESF con fecha final `end`: el
+ * extracto del MES de la fecha final (si hay varios, el más reciente). Solo se
+ * consideran las cuentas con algún saldo activo hasta ese mes; las que tengan
+ * solo saldos posteriores aún no existían. Los saldos son fotos: nunca se suman.
+ */
+export function bankBalanceStatus(balances: BankBalance[], end: string): BankBalanceStatus[] {
+  const month = end.slice(0, 7);
+  const accounts = new Map<string, BankBalanceStatus>();
+  for (const b of balances) {
+    const m = b.balanceDate.slice(0, 7);
+    if (!b.active || m > month) continue;
+    const key = `${b.bank.trim()}|${b.accountNumber.trim()}`;
+    let a = accounts.get(key);
+    if (!a) accounts.set(key, (a = { key, bank: b.bank.trim(), accountNumber: b.accountNumber.trim(), month, balance: null, lastKnown: null }));
+    if (m === month) {
+      if (newer(b, a.balance)) a.balance = b;
+    } else if (newer(b, a.lastKnown)) a.lastKnown = b;
+  }
+  const list = [...accounts.values()].sort((x, y) => x.bank.localeCompare(y.bank, "es", { sensitivity: "base" }) || x.accountNumber.localeCompare(y.accountNumber));
+  // Con saldo del mes final, el anterior no hace falta ni como referencia.
+  for (const a of list) if (a.balance) a.lastKnown = null;
+  return list;
+}
+
+/** Cuentas sin saldo del mes final (bloquean el periodo). */
+export const pendingBankBalances = (s: Pick<Statements, "bankBalances">) => s.bankBalances.filter((b) => !b.balance);
 
 // ---------------------------------------------------------------------------
 // Filas para mostrar (app, previsualizador y PDF usan las mismas)

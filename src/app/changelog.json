@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.22.2",
+    "date": "2026-10-15",
+    "notes": [
+      "Generador: «Fuentes del periodo y cobertura mensual» separa los extractos por banco y por cuenta. Un mes queda completo solo si todas las cuentas tienen su extracto; clic en un mes muestra cada extracto con su lote, movimientos, estado, reemplazos y saldo final.",
+      "Los gastos bancarios ya no aparecen en negativo solo por ser salidas del banco: un cargo clasificado como gasto suma (salidas − entradas). Solo queda negativo si las devoluciones superan los cargos. Movimientos contables muestra la dirección bancaria y el valor contable.",
+      "El Estado de Situación Financiera usa el saldo bancario del mes de la fecha final. Si una cuenta no tiene ese saldo, ya no se usa el del mes anterior: queda como «Saldo bancario pendiente», bloquea el periodo y se marca en la cobertura mensual.",
+      "Estados Financieros: «Generador de Estados Financieros» es siempre la primera tarjeta."
+    ]
+  },
+  {
     "version": "1.22.1",
     "date": "2026-10-15",
     "notes": [

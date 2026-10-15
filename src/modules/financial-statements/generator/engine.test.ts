@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BankBalance, FsCatalog, FsLine, FsPucMapping, FsSectionKey, Movement } from "../../../types/fs";
 import { formatStatementPesos, roundThousands, estimatedIncomeTax } from "../shared/money";
-import { buildStatements, eerrRows, esfRows, isBalanced, type EngineInput } from "./engine";
+import { checklist, pendingBalanceText } from "./checks";
+import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type EngineInput } from "./engine";
 
 // Catálogo inicial (el mismo de la migración 014).
 const SEED: [number, FsSectionKey, string, FsLine["role"]][] = [
@@ -135,14 +136,46 @@ describe("redondeo y formato", () => {
 });
 
 describe("Estado de Situación Financiera", () => {
-  it("saldo bancario: la foto más reciente ≤ fecha final, nunca la suma de meses", () => {
+  it("saldo bancario: la foto del mes final, nunca la suma de meses", () => {
     const bankBalances = [balance("2026-08-31", 265_740_263, 1), balance("2026-09-30", 310_000_000, 2)];
     const aug = run({ bankBalances, end: "2026-08-31" });
     const sep = run({ bankBalances, end: "2026-09-30" });
     expect(aug.sections.asset_current.totalCents).toBe(26_574_026_300);
     expect(sep.sections.asset_current.totalCents).toBe(31_000_000_000);
+    expect(pendingBankBalances(sep)).toEqual([]);
     // Un lote reemplazado ya no cuenta.
     expect(run({ bankBalances: [balance("2026-08-31", 1, 1), { ...balance("2026-08-31", 9, 2), active: false }] }).esf.currentAssets).toBe(100);
+  });
+
+  it("prueba 1 de saldos: septiembre $100.000.000 y agosto $80.000.000 → usa septiembre", () => {
+    const s = run({ bankBalances: [balance("2026-08-31", 80_000_000, 1), balance("2026-09-30", 100_000_000, 2)], end: "2026-09-30" });
+    expect(s.esf.currentAssets).toBe(10_000_000_000);
+  });
+
+  it("prueba 2 de saldos: solo agosto → septiembre pendiente, agosto solo como referencia", () => {
+    const s = run({ bankBalances: [balance("2026-07-31", 70_000_000, 1), balance("2026-08-31", 80_000_000, 2)], end: "2026-09-30" });
+    expect(s.esf.currentAssets).toBe(0);
+    expect(s.pucBalances.has("111005")).toBe(false);
+    const [pending] = pendingBankBalances(s);
+    expect([pending.month, pending.balance, pending.lastKnown?.balanceDate]).toEqual(["2026-09", null, "2026-08-31"]);
+  });
+
+  it("prueba 3 de saldos: cada cuenta por separado (A con septiembre, B pendiente)", () => {
+    const a = { ...balance("2026-09-30", 100_000_000, 1), bank: "Bancolombia", accountNumber: "1234" };
+    const b = { ...balance("2026-08-31", 80_000_000, 2), accountNumber: "7491" };
+    const s = run({ bankBalances: [a, b], end: "2026-09-30" });
+    expect(s.esf.currentAssets).toBe(10_000_000_000);
+    expect(s.bankBalances.map((x) => [x.bank, x.balance?.balanceCents ?? null])).toEqual([["Bancolombia", 10_000_000_000], ["BBVA", null]]);
+    expect(pendingBankBalances(s).map((x) => x.accountNumber)).toEqual(["7491"]);
+    const item = checklist(s, s, [], [], 0).find((c) => c.id === "bankBalance")!;
+    expect([item.ok, item.detail]).toEqual([false, "Falta saldo bancario del mes final: BBVA ••••7491"]);
+    expect(pendingBalanceText(pendingBankBalances(s)[0])).toBe("BBVA ••••7491: no existe saldo final de septiembre de 2026. Último saldo disponible: agosto de 2026.");
+  });
+
+  it("saldo del mes final aunque la fecha final sea a mitad de mes; una cuenta que aún no existía no se exige", () => {
+    const s = run({ bankBalances: [balance("2026-09-30", 5, 1), { ...balance("2026-10-31", 9, 2), accountNumber: "nueva" }], end: "2026-09-15" });
+    expect(s.esf.currentAssets).toBe(500);
+    expect(s.bankBalances).toHaveLength(1);
   });
 
   it("capital social desde Empresas y la diferencia suscrito − pagado en 132505", () => {
@@ -209,6 +242,31 @@ describe("clasificación", () => {
       ],
     });
     expect([s.eerr.otherExpenses, s.eerr.otherIncome, s.esf.currentLiabilities]).toEqual([2_000_000, 300_000, -5_000_000]);
+  });
+
+  describe("gasto bancario = salidas − entradas", () => {
+    const bank = (pesos: number, dc: "D" | "C", pucCode = "530505") => mv("2026-08-31", pucCode, pesos, { source: "bank", dc, pucConcept: "COMISIONES" });
+    it.each([
+      ["prueba 1: solo cargos", [bank(41_650, "D")], 4_165_000],
+      ["prueba 2: cargo y devolución parcial", [bank(100_000, "D"), bank(30_000, "C")], 7_000_000],
+      ["prueba 3: devolución mayor que los cargos", [bank(20_000, "D"), bank(50_000, "C")], -3_000_000],
+    ])("%s", (_, movements, expected) => {
+      const s = run({ movements });
+      expect(s.eerr.otherExpenses).toBe(expected);
+      // Sin clasificar se muestra con el mismo signo contable (naturaleza débito de la clase 5).
+      const unmapped = run({ movements: movements.map((m) => ({ ...m, pucCode: "530595" })) });
+      expect(unmapped.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["530595", expected]]);
+    });
+
+    it("COMISIONES: dos salidas de $20.825 → +$41.650 en «Códigos PUC sin clasificar»", () => {
+      const s = run({ movements: [mv("2026-08-31", "530595", 41_650, { source: "bank", dc: "D", pucConcept: "COMISIONES", detail: { count: 2 } })] });
+      expect(s.unclassified[0]).toMatchObject({ concept: "COMISIONES", cents: 4_165_000 });
+    });
+
+    it("sin clasificar: una entrada a un PUC de ingreso o pasivo es positiva", () => {
+      const s = run({ movements: [mv("2026-08-31", "421095", 3_000, { source: "bank", dc: "C" }), mv("2026-08-31", "238095", 1_000, { source: "bank", dc: "C" })] });
+      expect(s.unclassified.map((u) => u.cents)).toEqual([100_000, 300_000]);
+    });
   });
 
   it("líneas en cero ocultas; sección vacía muestra su cuenta representativa en 0", () => {

@@ -126,7 +126,8 @@ export function buildBankBatch(companyId: number, statement: AccountingStatement
       description: c.description,
       amountCents: c.totalCents,
       dc: c.dc,
-      detail: { statement: fileName, period: `${statement.periodFrom} a ${statement.periodTo}`, account: statement.accountNumber, count: c.count, movements: c.movements },
+      // Dirección bancaria normalizada (salida/entrada): el signo contable sale de ella y de la cuenta destino, no del signo del extracto.
+      detail: { statement: fileName, period: `${statement.periodFrom} a ${statement.periodTo}`, account: statement.accountNumber, direction: c.dc === "D" ? "outflow" : "inflow", count: c.count, movements: c.movements },
     });
     mappings.push({ bank: statement.bank, concept: c.description, pucCode: d.pucCode });
   }

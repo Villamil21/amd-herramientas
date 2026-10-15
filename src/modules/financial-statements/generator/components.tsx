@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Check, Minus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
 import { Alert, Badge, Button, Field, Input, Loader, Modal, Select, Textarea, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
@@ -9,7 +9,7 @@ import { parseNumericText } from "../../../utils/numbers";
 import type { PucIndex } from "../puc-codes/services/pucCatalog";
 import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate, formatStatementPesos, periodLabel } from "../shared/money";
-import type { CoverageRow } from "./checks";
+import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow } from "./checks";
 import type { LineValue, StatementRow } from "./engine";
 
 /** Estado en la app: valores al millar (como en el PDF) y, al abrir una línea, el exacto y su origen por PUC. */
@@ -80,10 +80,151 @@ export function StatementView({ title, rows, lines }: { title: string; rows: Sta
   );
 }
 
-/** Fuentes del periodo y cobertura mensual: ✓ cargado / — falta. Clic en un mes: sus importaciones. */
-export function CoverageTable({ months, rows }: { months: string[]; rows: CoverageRow[] }) {
-  const [cell, setCell] = useState<{ row: CoverageRow; month: string } | null>(null);
-  const detail = cell ? cell.row.cells[cell.month] : null;
+const monthName = (m: string) => periodLabel(m).split(" ")[0];
+const shortMonth = (m: string) => `${periodLabel(m).slice(0, 3)} ${m.slice(2, 4)}`;
+const plural = (n: number, one: string, many: string) => `${formatInteger(n)} ${n === 1 ? one : many}`;
+
+/** Contexto del detalle de un mes: qué fila se abrió (fuente, extractos, banco o cuenta). */
+type CoverageSelection = { kind: "source"; row: CoverageRow; month: string } | { kind: "bank"; title: string; cell: BankCell; month: string };
+
+/**
+ * Fuentes del periodo y cobertura mensual: ✓ cargado / — falta. Clic en un mes: sus importaciones.
+ * Los extractos se despliegan por banco y, si un banco tiene varias cuentas, por cuenta.
+ */
+export function CoverageTable({ months, rows, companyName }: { months: string[]; rows: CoverageRow[]; companyName: string }) {
+  const [selected, setSelected] = useState<CoverageSelection | null>(null);
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const sourceCells = (r: CoverageRow) =>
+    months.map((m) => {
+      const c = r.cells[m];
+      return (
+        <td key={m} style={{ textAlign: "center" }}>
+          <button type="button" className={`fs-coverage__cell ${c.loaded ? "is-loaded" : ""}`} onClick={() => setSelected({ kind: "source", row: r, month: m })} aria-label={`${r.label} ${periodLabel(m)}: ${c.loaded ? "cargado" : "falta"}`}>
+            {c.loaded ? <Check size={14} /> : <Minus size={14} />}
+          </button>
+        </td>
+      );
+    });
+
+  const finalMonth = months[months.length - 1];
+  /** `balancePending`: la cuenta no tiene saldo del mes final (el ESF queda pendiente). */
+  const bankCells = (title: string, cells: Record<string, BankCell>, balancePending = false) =>
+    months.map((m) => {
+      const c = cells[m];
+      const pendingHere = balancePending && m === finalMonth;
+      const state = c.total > 0 && c.loaded === c.total ? "is-loaded" : c.loaded > 0 ? "is-partial" : "";
+      const label = state === "is-loaded" ? "cargado" : state === "is-partial" ? `${c.loaded} de ${c.total} cuentas` : "falta";
+      return (
+        <td key={m} style={{ textAlign: "center" }}>
+          <button
+            type="button"
+            className={`fs-coverage__cell ${state}${c.hasReplaced ? " has-replaced" : ""}${pendingHere ? " is-balance-pending" : ""}`}
+            onClick={() => setSelected({ kind: "bank", title, cell: c, month: m })}
+            title={pendingHere ? `Saldo del ESF de ${monthText(m)} pendiente` : c.hasReplaced ? "Incluye un extracto reemplazado" : undefined}
+            aria-label={`${title} ${periodLabel(m)}: ${label}${c.hasReplaced ? ", con reemplazo" : ""}${pendingHere ? ", saldo final pendiente" : ""}`}
+          >
+            {state === "is-loaded" ? <Check size={14} /> : state === "is-partial" ? <span className="fs-coverage__count">{c.loaded}/{c.total}</span> : <Minus size={14} />}
+          </button>
+        </td>
+      );
+    });
+
+  const accountStatus = (a: BankAccountCoverage) => (
+    <>
+      <div className="table__secondary">
+        {a.missing.length ? `Faltan: ${a.missing.map(monthName).join(", ")}` : "Cobertura completa"}
+        {a.lastMonth ? ` · Último: ${shortMonth(a.lastMonth)}` : ""}
+      </div>
+      {a.finalBalanceMissing && finalMonth && <div className="fs-coverage__pending">Saldo del ESF de {monthText(finalMonth)} pendiente</div>}
+    </>
+  );
+
+  const chevron = (isOpen: boolean) => (isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />);
+
+  const bankRows = (r: CoverageRow, bank: BankCoverage) => {
+    const isOpen = open.has("bank");
+    const out = [
+      <tr key={r.source} className="fs-coverage__group">
+        <td>
+          {bank.banks.length ? (
+            <button type="button" className="fs-coverage__toggle" onClick={() => toggle("bank")} aria-expanded={isOpen}>
+              {chevron(isOpen)}
+              {r.label}
+            </button>
+          ) : (
+            r.label
+          )}
+          {bank.banks.length > 0 && (
+            <div className="table__secondary">
+              {bank.missingCount === 0
+                ? `${bank.finalBalanceMissing ? "Extractos" : "Completo"} · ${plural(bank.banks.reduce((n, b) => n + b.accounts.length, 0), "cuenta", "cuentas")}`
+                : `${plural(bank.missingCount, "mes pendiente", "meses pendientes")} en ${plural(bank.accountsWithMissing, "cuenta", "cuentas")}`}
+            </div>
+          )}
+          {bank.finalBalanceMissing > 0 && finalMonth && (
+            <div className="fs-coverage__pending">
+              Saldo de {monthText(finalMonth)} pendiente en {plural(bank.finalBalanceMissing, "cuenta", "cuentas")}
+            </div>
+          )}
+        </td>
+        {bank.banks.length ? bankCells(r.label, bank.cells, bank.finalBalanceMissing > 0) : sourceCells(r)}
+      </tr>,
+    ];
+    if (!isOpen) return out;
+    for (const b of bank.banks) {
+      if (b.accounts.length === 1) {
+        const a = b.accounts[0];
+        const title = `${b.bank} ${maskAccount(a.accountNumber)}`;
+        out.push(
+          <tr key={a.key} className="fs-coverage__bank">
+            <td>
+              {b.bank} <span className="mono muted">{maskAccount(a.accountNumber)}</span>
+              {accountStatus(a)}
+            </td>
+            {bankCells(title, a.cells, a.finalBalanceMissing)}
+          </tr>,
+        );
+        continue;
+      }
+      const bankOpen = open.has(`bank:${b.bank}`);
+      out.push(
+        <tr key={b.bank} className="fs-coverage__bank">
+          <td>
+            <button type="button" className="fs-coverage__toggle" onClick={() => toggle(`bank:${b.bank}`)} aria-expanded={bankOpen}>
+              {chevron(bankOpen)}
+              {b.bank}
+            </button>
+            <div className="table__secondary">
+              {plural(b.accounts.length, "cuenta", "cuentas")} · {b.missingCount ? plural(b.missingCount, "mes pendiente", "meses pendientes") : "Cobertura completa"}
+            </div>
+          </td>
+          {bankCells(b.bank, b.cells, b.accounts.some((a) => a.finalBalanceMissing))}
+        </tr>,
+      );
+      if (bankOpen)
+        for (const a of b.accounts)
+          out.push(
+            <tr key={a.key} className="fs-coverage__account">
+              <td>
+                <span className="mono">{maskAccount(a.accountNumber)}</span>
+                {accountStatus(a)}
+              </td>
+              {bankCells(`${b.bank} ${maskAccount(a.accountNumber)}`, a.cells, a.finalBalanceMissing)}
+            </tr>,
+          );
+    }
+    return out;
+  };
+
+  const title = !selected ? "" : selected.kind === "source" ? `${selected.row.label} · ${periodLabel(selected.month)}` : `${companyName} · ${selected.title} · ${periodLabel(selected.month)}`;
   return (
     <>
       <div className="table-wrap">
@@ -93,37 +234,82 @@ export function CoverageTable({ months, rows }: { months: string[]; rows: Covera
               <th>Fuente</th>
               {months.map((m) => (
                 <th key={m} style={{ textAlign: "center" }}>
-                  {periodLabel(m).slice(0, 3)} {m.slice(2, 4)}
+                  {shortMonth(m)}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.source}>
+            {rows.map((r) =>
+              r.bank ? (
+                <Fragment key={r.source}>{bankRows(r, r.bank)}</Fragment>
+              ) : (
+                <tr key={r.source}>
+                  <td>
+                    {r.label}
+                    {!r.empty && r.missing.length > 0 && <div className="table__secondary">Faltan: {r.missing.map(monthName).join(", ")}</div>}
+                  </td>
+                  {sourceCells(r)}
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Modal open={selected !== null} title={title} onClose={() => setSelected(null)} size={selected?.kind === "bank" ? "xl" : "lg"}>
+        {selected?.kind === "source" &&
+          (selected.row.cells[selected.month].batches.length === 0 ? <p className="muted">No hay información de este mes.</p> : <BatchTable batches={selected.row.cells[selected.month].batches} />)}
+        {selected?.kind === "bank" && <BankStatementTable cell={selected.cell} />}
+      </Modal>
+    </>
+  );
+}
+
+/** Extractos de un mes (activos y reemplazados): la cobertura solo cuenta el activo, el historial queda aquí. */
+function BankStatementTable({ cell }: { cell: BankCell }) {
+  if (cell.statements.length === 0) return <p className="muted">No hay extractos de este mes.</p>;
+  const sorted = [...cell.statements].sort((a, b) => a.bank.localeCompare(b.bank) || a.accountNumber.localeCompare(b.accountNumber) || b.batch.id - a.batch.id);
+  return (
+    <div className="stack stack--sm">
+      {cell.total > 1 && (
+        <span className="muted">
+          {cell.loaded} de {cell.total} cuentas con extracto activo este mes.
+        </span>
+      )}
+      <div className="table-wrap">
+        <table className="table fs-coverage-detail">
+          <thead>
+            <tr>
+              <th>Banco</th>
+              <th>Cuenta</th>
+              <th>Periodo</th>
+              <th>Archivo / lote</th>
+              <th>Importado</th>
+              <th style={{ textAlign: "right" }}>Movimientos</th>
+              <th>Estado</th>
+              <th style={{ textAlign: "right" }}>Saldo final</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((s) => (
+              <tr key={s.batch.id}>
+                <td>{s.bank}</td>
+                <td className="mono">{s.accountNumber || "—"}</td>
+                <td className="nowrap">{s.batch.periodStart && s.batch.periodEnd ? `${formatIsoDate(s.batch.periodStart)} a ${formatIsoDate(s.batch.periodEnd)}` : "—"}</td>
                 <td>
-                  {r.label}
-                  {!r.empty && r.missing.length > 0 && <div className="table__secondary">Faltan: {r.missing.map((m) => periodLabel(m).split(" ")[0]).join(", ")}</div>}
+                  #{s.batch.id} · {s.batch.fileName || "—"}
+                  {s.replaced.length > 0 && <div className="table__secondary">Reemplazó {s.replaced.map((b) => `#${b.id}`).join(", ")}</div>}
                 </td>
-                {months.map((m) => {
-                  const c = r.cells[m];
-                  return (
-                    <td key={m} style={{ textAlign: "center" }}>
-                      <button type="button" className={`fs-coverage__cell ${c.loaded ? "is-loaded" : ""}`} onClick={() => setCell({ row: r, month: m })} aria-label={`${r.label} ${periodLabel(m)}: ${c.loaded ? "cargado" : "falta"}`}>
-                        {c.loaded ? <Check size={14} /> : <Minus size={14} />}
-                      </button>
-                    </td>
-                  );
-                })}
+                <td className="nowrap">{formatIsoDate(s.batch.createdAt.slice(0, 10))}</td>
+                <td style={{ textAlign: "right" }}>{formatInteger(s.movementCount)}</td>
+                <td>{s.batch.status === "active" ? <Badge tone="success">Activo</Badge> : s.batch.status === "replaced" ? <Badge tone="warning">Reemplazado{s.batch.replacedBy ? ` por #${s.batch.replacedBy}` : ""}</Badge> : <Badge>Anulado</Badge>}</td>
+                <td className="nowrap" style={{ textAlign: "right" }}>{s.closingBalanceCents === null ? "—" : formatExactCents(s.closingBalanceCents)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Modal open={cell !== null} title={cell ? `${cell.row.label} · ${periodLabel(cell.month)}` : ""} onClose={() => setCell(null)} size="lg">
-        {detail && (detail.batches.length === 0 ? <p className="muted">No hay información de este mes.</p> : <BatchTable batches={detail.batches} />)}
-      </Modal>
-    </>
+    </div>
   );
 }
 

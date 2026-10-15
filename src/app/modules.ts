@@ -26,6 +26,14 @@ export function isAvailable(sub: SubmoduleDef): boolean {
   return Boolean(sub.component) || Boolean(sub.providers?.some(isAvailable));
 }
 
+/** Prioridad de una tarjeta sin `priority` explícita. */
+const DEFAULT_PRIORITY = 1;
+
+/** Submódulos en el orden de las tarjetas: por prioridad explícita y, a igual prioridad, el orden declarado (sort estable). */
+export function orderedSubmodules(module: ModuleDef): SubmoduleDef[] {
+  return [...module.submodules].sort((a, b) => (a.priority ?? DEFAULT_PRIORITY) - (b.priority ?? DEFAULT_PRIORITY));
+}
+
 export function readySubmodules(module: ModuleDef) {
   return module.submodules.filter(isAvailable);
 }

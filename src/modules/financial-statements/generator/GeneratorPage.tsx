@@ -14,9 +14,9 @@ import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, roundThousands } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { activeDuplicates, checklist, coverage, payrollAbsences } from "./checks";
+import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
-import { buildStatements, eerrRows, esfRows, isBalanced, type LineValue, type StatementRow } from "./engine";
+import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
 import { renderStatementsPdf } from "./pdf";
 import { buildSnapshot, pdfModel, type StatementsSnapshot } from "./snapshot";
 
@@ -341,6 +341,15 @@ export default function GeneratorPage() {
               </div>
             </Card>
           )}
+          {pendingBankBalances(s).length > 0 && !closed && (
+            <Alert
+              tone="danger"
+              title="Saldo bancario pendiente"
+              items={pendingBankBalances(s).map((b) => pendingBalanceText(b) + (b.lastKnown ? ` Último saldo conocido: ${formatExactCents(b.lastKnown.balanceCents)} (solo referencia).` : ""))}
+            >
+              El ESF usa el saldo del mes de la fecha final. Estas cuentas no suman al Disponible hasta enviar su extracto de {monthText(end.slice(0, 7))}; el saldo de un mes anterior no se usa como saldo vigente.
+            </Alert>
+          )}
           {review.absences.length > 0 && (
             <Alert tone="danger" title="Empleados pendientes de liquidación" items={review.absences.map((a) => `${a.employee.name}: no aparece en la planilla de ${a.period} (última: ${a.lastSeen}).`)}>
               Resuélvelo en Estados Financieros → Nómina.
@@ -373,8 +382,8 @@ export default function GeneratorPage() {
             </Card>
           )}
 
-          <Card title="Fuentes del periodo y cobertura mensual" description="✓ con información · — sin información. Clic en un mes para ver sus importaciones y reemplazos.">
-            <CoverageTable months={review.coverage.months} rows={review.coverage.rows} />
+          <Card title="Fuentes del periodo y cobertura mensual" description="✓ con información · — sin información · 1/2 cuentas con extracto. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos.">
+            <CoverageTable months={review.coverage.months} rows={review.coverage.rows} companyName={company?.razonSocial ?? ""} />
           </Card>
 
           <Card
