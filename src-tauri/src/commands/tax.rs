@@ -18,8 +18,18 @@ pub fn save_fs_tax_return(db: State<'_, Db>, input: TaxReturnInput) -> AppResult
 }
 
 #[tauri::command]
-pub fn set_fs_tax_return_payment(db: State<'_, Db>, id: i64, payment_date: Option<String>) -> AppResult<()> {
-    db.with(|c| tax::set_payment_date(c, id, payment_date))
+pub fn add_fs_tax_payment(db: State<'_, Db>, return_id: i64, input: TaxPaymentInput) -> AppResult<i64> {
+    db.with(|c| tax::add_payment(c, return_id, &input))
+}
+
+#[tauri::command]
+pub fn update_fs_tax_payment(db: State<'_, Db>, id: i64, input: TaxPaymentInput) -> AppResult<()> {
+    db.with(|c| tax::update_payment(c, id, &input))
+}
+
+#[tauri::command]
+pub fn delete_fs_tax_payment(db: State<'_, Db>, id: i64) -> AppResult<()> {
+    db.with(|c| tax::delete_payment(c, id))
 }
 
 #[tauri::command]

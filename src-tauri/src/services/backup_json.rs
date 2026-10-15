@@ -265,6 +265,7 @@ const FS_TABLES: &[&str] = &[
     "fs_tax_company_settings",
     "fs_tax_returns",
     "fs_tax_return_events",
+    "fs_tax_payments",
     "fs_bank_account_lifecycle",
     "fs_bank_account_events",
     "fs_bank_gmf_rules",
@@ -332,6 +333,10 @@ fn restore_financial_statements(tx: &Connection, data: &FsDump) -> AppResult<()>
                     AppError::user("La información de Estados Financieros del backup está dañada o incompleta.")
                 })?;
         }
+    }
+    // Backup anterior a los pagos parciales: sus fechas de pago pasan a ser un pago por el saldo completo.
+    if !data.contains_key("fs_tax_payments") {
+        crate::database::tax::convert_legacy_payment_dates(tx)?;
     }
     Ok(())
 }

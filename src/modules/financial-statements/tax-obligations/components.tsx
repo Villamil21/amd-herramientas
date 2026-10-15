@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, DateInput, Field, Input, Modal, useToast } from "../../../components/ui";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Alert, Badge, Button, ConfirmDialog, DateInput, Field, Input, Modal, useToast } from "../../../components/ui";
 import { errorMessage } from "../../../services/tauri";
 import { formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
 import { formatDateTimeForDisplay, parseTaxPaymentDate } from "../../../utils/dates";
 import { TAX_FORM_LABEL } from "./parser/taxReturnParser";
-import { anomalies, effectiveValues, periodName, STATUS_LABEL, type TaxStatus } from "./services/effects";
+import { parseNumericText } from "../../../utils/numbers";
+import { anomalies, effectiveValues, paidCents, pendingCents, periodName, STATUS_LABEL, taxStatus, type TaxStatus } from "./services/effects";
 import { draftBlockers, draftInput, withExisting, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
-import { PERIODICITY_LABEL, TAX_LABEL, type TaxReturn, type VatPeriodicity } from "./types";
+import { PERIODICITY_LABEL, TAX_LABEL, type TaxPayment, type TaxReturn, type VatPeriodicity } from "./types";
 
 const STATUS_TONE: Record<TaxStatus, "success" | "warning" | "danger" | "gold" | undefined> = {
   pending: "warning",
+  partial: "warning",
   paid: "success",
   favor: "gold",
   none: undefined,
@@ -182,27 +185,150 @@ export function ImportModal({
 }
 
 // ---------------------------------------------------------------------------
-// Fecha de pago
+// Pagos (totales o parciales)
 // ---------------------------------------------------------------------------
 
-export function PaymentModal({ item: r, onClose, onSaved }: { item: TaxReturn | null; onClose: () => void; onSaved: () => Promise<void> }) {
+const PAYMENT_EXCEEDS = "El pago supera el saldo pendiente de la obligación.";
+
+/**
+ * Total a pagar, pagado y pendiente de una declaración con su historial de
+ * pagos. Se registran, editan y eliminan aquí; Rust bloquea los cambios que
+ * afectan un periodo de Estados Financieros cerrado.
+ */
+export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChanged: () => Promise<void> }) {
+  const toast = useToast();
+  const [form, setForm] = useState<{ editing: TaxPayment | null } | null>(null);
+  const [removing, setRemoving] = useState<TaxPayment | null>(null);
+  const [busy, setBusy] = useState(false);
+  const payable = effectiveValues(r).payable;
+  const paid = paidCents(r);
+  const pending = pendingCents(r);
+  const editable = r.supersededBy === null;
+
+  async function remove() {
+    if (!removing) return;
+    setBusy(true);
+    try {
+      await taxService.deletePayment(removing.id);
+      toast("Pago eliminado.");
+      setRemoving(null);
+      await onChanged();
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack stack--sm">
+      <div className="summary-grid">
+        {item("Total saldo a pagar", formatExactCents(payable))}
+        {item("Total pagado", formatExactCents(paid))}
+        {item("Saldo pendiente", <span className={pending > 0 ? "amount--negative" : undefined}>{formatExactCents(pending)}</span>)}
+        {item("Pagos registrados", String(r.payments.length))}
+      </div>
+      <div className="row row--between" style={{ flexWrap: "wrap" }}>
+        <strong>Pagos</strong>
+        {editable && (
+          <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => setForm({ editing: null })} disabled={pending === 0} title={pending === 0 ? "La obligación ya está pagada." : undefined}>
+            Registrar pago
+          </Button>
+        )}
+      </div>
+      {r.payments.length === 0 ? (
+        <p className="muted">Sin pagos registrados: el saldo completo sigue por pagar.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Fecha de pago</th>
+                <th style={{ textAlign: "right" }}>Valor pagado</th>
+                <th>Referencia / observación</th>
+                {editable && <th />}
+              </tr>
+            </thead>
+            <tbody>
+              {r.payments.map((p) => (
+                <tr key={p.id}>
+                  <td className="nowrap">{formatIsoDate(p.paymentDate)}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>
+                    {formatExactCents(p.amountCents)}
+                  </td>
+                  <td className="selectable">{[p.reference, p.note].filter(Boolean).join(" · ") || <span className="muted">—</span>}</td>
+                  {editable && (
+                    <td className="actions nowrap">
+                      <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={13} />} aria-label="Editar pago" title="Editar pago" onClick={() => setForm({ editing: p })} />
+                      <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={13} />} aria-label="Eliminar pago" title="Eliminar pago" onClick={() => setRemoving(p)} />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <PaymentFormModal item={form ? r : null} editing={form?.editing ?? null} onClose={() => setForm(null)} onSaved={onChanged} />
+      <ConfirmDialog
+        open={removing !== null}
+        title="Eliminar pago"
+        message={removing ? `Se eliminará el pago del ${formatIsoDate(removing.paymentDate)} por ${formatExactCents(removing.amountCents)}. El saldo pendiente se recalcula y los Estados Financieros preparados que cambien quedan para revisión.` : ""}
+        confirmLabel="Eliminar pago"
+        danger
+        loading={busy}
+        onConfirm={() => void remove()}
+        onCancel={() => setRemoving(null)}
+      />
+    </div>
+  );
+}
+
+/** Pagos de una declaración desde la tabla de declaraciones. */
+export function PaymentsModal({ item: r, onClose, onChanged }: { item: TaxReturn | null; onClose: () => void; onChanged: () => Promise<void> }) {
+  return (
+    <Modal open={r !== null} size="lg" title={r ? `Pagos · ${TAX_LABEL[r.taxType]} ${periodName(r)}` : ""} description="Una declaración puede pagarse por partes: a cada fecha de corte solo cuenta el saldo pendiente a esa fecha." onClose={onClose}>
+      {r && <PaymentsPanel item={r} onChanged={onChanged} />}
+    </Modal>
+  );
+}
+
+const centsText = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
+
+function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxReturn | null; editing: TaxPayment | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const toast = useToast();
   const [date, setDate] = useState("");
+  const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDate(r?.paymentDate ?? "");
+    setDate(editing?.paymentDate ?? "");
+    setAmount(editing ? centsText(editing.amountCents) : r ? centsText(pendingCents(r)) : "");
+    setReference(editing?.reference ?? "");
+    setNote(editing?.note ?? "");
     setError(null);
-  }, [r]);
+  }, [r, editing]);
 
-  async function save(value: string | null) {
-    if (!r) return;
+  if (!r) return <Modal open={false} title="" onClose={onClose} />;
+  // Lo que se puede pagar con este pago: el pendiente (más el valor actual si se edita).
+  const available = pendingCents(r) + (editing?.amountCents ?? 0);
+  const value = parseNumericText(amount);
+  const cents = value === null ? null : Math.round(value * 100);
+  const amountError = amount.trim() === "" ? null : cents === null ? "Valor no válido." : cents <= 0 ? "El valor del pago debe ser mayor que cero." : cents > available ? PAYMENT_EXCEEDS : null;
+  const unchanged = editing !== null && editing.paymentDate === date && editing.amountCents === cents && editing.reference === reference.trim() && editing.note === note.trim();
+
+  async function save() {
+    if (cents === null) return;
     setSaving(true);
     setError(null);
     try {
-      await taxService.setPayment(r.id, value);
-      toast(value ? "Fecha de pago registrada." : "Fecha de pago quitada.");
+      const input = { paymentDate: date, amountCents: cents, reference: reference.trim(), note: note.trim() };
+      if (editing) await taxService.updatePayment(editing.id, input);
+      else await taxService.addPayment(r!.id, input);
+      toast(editing ? "Pago actualizado." : "Pago registrado.");
       await onSaved();
       onClose();
     } catch (e) {
@@ -214,32 +340,37 @@ export function PaymentModal({ item: r, onClose, onSaved }: { item: TaxReturn | 
 
   return (
     <Modal
-      open={r !== null}
-      title={r ? `Fecha de pago · ${TAX_LABEL[r.taxType]} ${periodName(r)}` : ""}
-      description="Desde esta fecha la obligación deja de ser cuenta por pagar en los Estados Financieros. La fecha de presentación o de firma no es la fecha de pago."
+      open
+      title={editing ? "Editar pago" : "Registrar pago"}
+      description="Desde la fecha de pago ese valor deja de ser cuenta por pagar en los Estados Financieros. La fecha de presentación o de firma no es la fecha de pago."
       onClose={onClose}
       locked={saving}
       footer={
         <>
-          {r?.paymentDate && (
-            <Button variant="ghost" onClick={() => void save(null)} disabled={saving}>
-              Quitar fecha de pago
-            </Button>
-          )}
           <Button variant="ghost" onClick={onClose} disabled={saving}>
             Cancelar
           </Button>
-          <Button variant="primary" onClick={() => void save(date)} loading={saving} disabled={!isIsoDate(date) || date === r?.paymentDate}>
+          <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!isIsoDate(date) || cents === null || amountError !== null || unchanged}>
             Guardar
           </Button>
         </>
       }
     >
       <div className="stack">
-        {r && <span>Saldo a pagar: {formatExactCents(r.payableCents)}</span>}
-        <Field label="Fecha de pago" required>
-          {(id) => <DateInput id={id} value={date} onChange={setDate} parse={parseTaxPaymentDate} placeholder="DD/MM/AAAA o AAAAMMDD" errorText="Fecha inválida. Usa DD/MM/AAAA o AAAAMMDD (ej. 20260429)." />}
-        </Field>
+        <span>
+          Saldo pendiente: <strong>{formatExactCents(pendingCents(r))}</strong>
+          {editing && <span className="muted"> (sin contar este pago: {formatExactCents(available)})</span>}
+        </span>
+        <div className="form-grid">
+          <Field label="Fecha de pago" required>
+            {(id) => <DateInput id={id} value={date} onChange={setDate} parse={parseTaxPaymentDate} placeholder="DD/MM/AAAA o AAAAMMDD" errorText="Fecha inválida. Usa DD/MM/AAAA o AAAAMMDD (ej. 20260429)." />}
+          </Field>
+          <Field label="Valor pagado" required error={amountError ?? undefined}>
+            {(id) => <Input id={id} className="input--right" inputMode="decimal" value={amount} invalid={amountError !== null} placeholder="5.000.000" onChange={(e) => setAmount(e.target.value)} />}
+          </Field>
+          <Field label="Referencia / comprobante">{(id) => <Input id={id} value={reference} maxLength={200} onChange={(e) => setReference(e.target.value)} />}</Field>
+          <Field label="Observación">{(id) => <Input id={id} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />}</Field>
+        </div>
         {error && <Alert tone="danger">{error}</Alert>}
       </div>
     </Modal>
@@ -327,7 +458,7 @@ export function ReturnDetailModal({
           {r.taxType === "vat" && item("Periodicidad", PERIODICITY_LABEL[r.periodicity])}
           {item("Formulario anterior", r.previousFormNumber)}
           {item("Fecha de presentación", d.presentedOn ? formatIsoDate(d.presentedOn) : null)}
-          {item("Fecha de pago", r.paymentDate ? formatIsoDate(r.paymentDate) : r.payableCents > 0 ? "Sin registrar (sigue por pagar)" : null)}
+          {item("Estado", <StatusBadge status={taxStatus(r, vatPeriodicity)} />)}
           {item("Año", `${r.year}${d.yearSource === "presentation" ? " (deducido de la presentación)" : d.yearSource === "manual" ? " (escrito por el usuario)" : ""}`)}
         </div>
 
@@ -376,6 +507,8 @@ export function ReturnDetailModal({
             {both && item("Valor que cuenta", `A pagar ${formatExactCents(eff.payable)} · A favor ${formatExactCents(eff.favor)}`)}
           </div>
         )}
+
+        {eff.payable > 0 && <PaymentsPanel item={r} onChanged={onChanged} />}
 
         {values.length > 0 && (
           <details>

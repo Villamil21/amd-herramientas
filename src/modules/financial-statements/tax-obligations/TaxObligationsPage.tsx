@@ -9,16 +9,16 @@ import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import { formatAccountingCents, formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { ImportModal, PaymentModal, ReturnDetailModal, StatusBadge } from "./components";
+import { ImportModal, PaymentsModal, ReturnDetailModal, StatusBadge } from "./components";
 import { parseTaxReturn, TAX_FORM_LABEL, TaxReturnError } from "./parser/taxReturnParser";
-import { anomalies, periodName, taxEffects, taxStatus } from "./services/effects";
+import { anomalies, effectiveValues, paidCents, pendingCents, periodName, taxEffects, taxStatus } from "./services/effects";
 import { buildDraft, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
 import { PERIODICITY_LABEL, PUC_KEYS_BY_TAX, TAX_LABEL, TAX_PUC_ITEMS, type TaxReturn, type TaxType, type VatPeriodicity } from "./types";
 
 const DESCRIPTION: Record<TaxType, string> = {
-  withholding: "Declaraciones mensuales (Formulario 350). El valor es «Total retenciones más sanciones»: es cuenta por pagar desde el fin del mes declarado hasta su fecha de pago.",
-  vat: "Declaraciones bimestrales o cuatrimestrales (Formulario 300). El saldo a pagar es cuenta por pagar hasta su fecha de pago; el saldo a favor es una foto del último periodo terminado (nunca se suman periodos).",
+  withholding: "Declaraciones mensuales (Formulario 350). El valor es «Total retenciones más sanciones»: es cuenta por pagar desde el fin del mes declarado por el saldo que siga pendiente (admite pagos parciales).",
+  vat: "Declaraciones bimestrales o cuatrimestrales (Formulario 300). El saldo a pagar es cuenta por pagar por lo que siga pendiente (admite pagos parciales); el saldo a favor es una foto del último periodo terminado (nunca se suman periodos).",
   income: "Declaraciones anuales (Formulario 110). Saldo a pagar y a favor, anticipo para el año siguiente y resultado fiscal para «Resultados de ejercicios anteriores». El patrimonio declarado es solo informativo.",
 };
 
@@ -191,7 +191,12 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                           Resultado fiscal
                         </th>
                       )}
-                      <th>Fecha de pago</th>
+                      <th className="nowrap" style={{ textAlign: "right" }}>
+                        Pagado
+                      </th>
+                      <th className="nowrap" style={{ textAlign: "right" }}>
+                        Saldo pendiente
+                      </th>
                       <th>Estado</th>
                       <th />
                     </tr>
@@ -199,6 +204,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                   <tbody>
                     {own.map((r) => {
                       const status = taxStatus(r, vatPeriodicity);
+                      const payable = effectiveValues(r).payable;
                       return (
                         <tr key={r.id} className={status === "superseded" ? "muted" : status === "review" ? "row-attention--blocking" : undefined}>
                           <td className="nowrap">
@@ -216,7 +222,13 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                               {formatAccountingCents((r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0))}
                             </td>
                           )}
-                          <td className="nowrap">{r.paymentDate ? formatIsoDate(r.paymentDate) : "—"}</td>
+                          <td className="nowrap" style={{ textAlign: "right" }}>
+                            {payable > 0 ? formatExactCents(paidCents(r)) : "—"}
+                            {r.payments.length > 0 && <div className="table__secondary">{r.payments.length === 1 ? `1 pago · ${formatIsoDate(r.payments[0].paymentDate)}` : `${r.payments.length} pagos · último ${formatIsoDate(r.payments[r.payments.length - 1].paymentDate)}`}</div>}
+                          </td>
+                          <td className="nowrap" style={{ textAlign: "right" }}>
+                            {payable > 0 ? formatExactCents(pendingCents(r)) : "—"}
+                          </td>
                           <td>
                             <StatusBadge status={status} />
                             {status === "review" && <div className="table__secondary">{anomalies(r, vatPeriodicity)[0]}</div>}
@@ -225,9 +237,9 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                             <Button size="sm" icon={<Eye size={14} />} onClick={() => setDetail(r)}>
                               Detalle
                             </Button>
-                            {r.payableCents > 0 && r.supersededBy === null && (
+                            {payable > 0 && r.supersededBy === null && (
                               <Button size="sm" icon={<CalendarCheck size={14} />} onClick={() => setPaying(r)}>
-                                {r.paymentDate ? "Cambiar pago" : "Registrar pago"}
+                                Pagos
                               </Button>
                             )}
                           </td>
@@ -302,7 +314,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
         onChanged={() => load(companyId)}
         onPeriodicity={(p) => void changePeriodicity(p)}
       />
-      <PaymentModal item={paying} onClose={() => setPaying(null)} onSaved={() => load(companyId)} />
+      <PaymentsModal item={paying && fresh(paying.id)} onClose={() => setPaying(null)} onChanged={() => load(companyId)} />
       <PucSettingsModal
         open={settingsOpen}
         title="Cuentas PUC de obligaciones tributarias"

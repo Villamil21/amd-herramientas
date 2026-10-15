@@ -5,7 +5,9 @@
 //! - Una declaración pertenece a una sola empresa (su NIT debe coincidir).
 //! - Una segunda declaración del mismo impuesto y periodo solo entra como
 //!   corrección explícita: la anterior queda «Reemplazada», nunca se borra.
-//! - La fecha de pago se registra a mano (nunca se deduce de la presentación).
+//! - Los pagos se registran a mano (nunca se deducen de la presentación): una
+//!   declaración con saldo a pagar puede tener 0, 1 o varios pagos y su suma
+//!   nunca supera el saldo a pagar. El valor de la declaración no cambia.
 //! - Una declaración afecta el ESF de toda fecha de corte posterior al fin de
 //!   su periodo: si alguno de esos periodos de Estados Financieros está cerrado
 //!   el cambio se bloquea; los «Cuadrado» o con PDF pasan a «Requiere nueva revisión».
@@ -14,13 +16,15 @@ use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
+use crate::models::clean;
 use crate::models::tax::*;
 use crate::services::time::now_iso;
 
-pub const REVIEW_TAX_CHANGE: &str = "Este periodo había sido conciliado, pero cambió una declaración tributaria (o su fecha de pago) que afecta su fecha de corte.";
+pub const REVIEW_TAX_CHANGE: &str = "Este periodo había sido conciliado, pero cambió una declaración tributaria (o sus pagos) que afecta su fecha de corte.";
+pub const PAYMENT_EXCEEDS: &str = "El pago supera el saldo pendiente de la obligación.";
 pub const CLOSED_TAX_PERIOD: &str = "Este cambio afecta un periodo de Estados Financieros cerrado.\nDesbloquea el periodo desde Generador de Estados Financieros.";
 
-const COLUMNS: &str = "id, company_id, tax_type, year, period, periodicity, period_start, period_end, form_number, previous_form_number, is_correction, superseded_by, payable_cents, favor_cents, payment_date, resolution, nit, company_name, file_name, income_ordinary_cents, income_loss_cents, advance_next_cents, advance_target_year, detail, created_at, updated_at";
+const COLUMNS: &str = "id, company_id, tax_type, year, period, periodicity, period_start, period_end, form_number, previous_form_number, is_correction, superseded_by, payable_cents, favor_cents, resolution, nit, company_name, file_name, income_ordinary_cents, income_loss_cents, advance_next_cents, advance_target_year, detail, created_at, updated_at";
 
 fn map_return(r: &Row) -> rusqlite::Result<TaxReturn> {
     Ok(TaxReturn {
@@ -38,19 +42,19 @@ fn map_return(r: &Row) -> rusqlite::Result<TaxReturn> {
         superseded_by: r.get(11)?,
         payable_cents: r.get(12)?,
         favor_cents: r.get(13)?,
-        payment_date: r.get(14)?,
-        resolution: r.get(15)?,
-        nit: r.get(16)?,
-        company_name: r.get(17)?,
-        file_name: r.get(18)?,
-        income_ordinary_cents: r.get(19)?,
-        income_loss_cents: r.get(20)?,
-        advance_next_cents: r.get(21)?,
-        advance_target_year: r.get(22)?,
-        detail: serde_json::from_str(&r.get::<_, String>(23)?).unwrap_or(Value::Null),
-        created_at: r.get(24)?,
-        updated_at: r.get(25)?,
+        resolution: r.get(14)?,
+        nit: r.get(15)?,
+        company_name: r.get(16)?,
+        file_name: r.get(17)?,
+        income_ordinary_cents: r.get(18)?,
+        income_loss_cents: r.get(19)?,
+        advance_next_cents: r.get(20)?,
+        advance_target_year: r.get(21)?,
+        detail: serde_json::from_str(&r.get::<_, String>(22)?).unwrap_or(Value::Null),
+        created_at: r.get(23)?,
+        updated_at: r.get(24)?,
         events: vec![],
+        payments: vec![],
     })
 }
 
@@ -74,7 +78,41 @@ pub fn list(conn: &Connection, company_id: i64) -> AppResult<Vec<TaxReturn>> {
             r.events.push(e);
         }
     }
+    let payments: Vec<TaxPayment> = conn
+        .prepare(&format!("SELECT {PAYMENT_COLUMNS} FROM fs_tax_payments p JOIN fs_tax_returns t ON t.id = p.return_id WHERE t.company_id = ?1 ORDER BY p.payment_date, p.id"))?
+        .query_map([company_id], map_payment)?
+        .collect::<Result<_, _>>()?;
+    for p in payments {
+        if let Some(r) = returns.iter_mut().find(|r| r.id == p.return_id) {
+            r.payments.push(p);
+        }
+    }
     Ok(returns)
+}
+
+const PAYMENT_COLUMNS: &str = "p.id, p.return_id, p.payment_date, p.amount_cents, p.note, p.reference, p.created_at, p.updated_at";
+
+fn map_payment(r: &Row) -> rusqlite::Result<TaxPayment> {
+    Ok(TaxPayment { id: r.get(0)?, return_id: r.get(1)?, payment_date: r.get(2)?, amount_cents: r.get(3)?, note: r.get(4)?, reference: r.get(5)?, created_at: r.get(6)?, updated_at: r.get(7)? })
+}
+
+fn get_payment(conn: &Connection, id: i64) -> AppResult<TaxPayment> {
+    conn.query_row(&format!("SELECT {PAYMENT_COLUMNS} FROM fs_tax_payments p WHERE p.id = ?1"), [id], map_payment)
+        .optional()?
+        .ok_or_else(|| AppError::user("El pago no existe."))
+}
+
+/// Pagos de fechas anteriores a 018 (o de un backup anterior): cada fecha de pago es un pago por el saldo completo.
+pub fn convert_legacy_payment_dates(conn: &Connection) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO fs_tax_payments (return_id, payment_date, amount_cents, note, created_at, updated_at)
+         SELECT t.id, t.payment_date, t.payable_cents, 'Fecha de pago registrada antes de los pagos parciales', t.updated_at, t.updated_at
+         FROM fs_tax_returns t
+         WHERE t.payment_date IS NOT NULL AND t.payable_cents > 0 AND t.resolution <> 'favor'
+           AND NOT EXISTS (SELECT 1 FROM fs_tax_payments p WHERE p.return_id = t.id)",
+        [],
+    )?;
+    Ok(())
 }
 
 fn event(tx: &Transaction, return_id: i64, action: &str, note: &str) -> AppResult<()> {
@@ -206,44 +244,129 @@ pub fn save(conn: &mut Connection, input: &TaxReturnInput) -> AppResult<i64> {
     Ok(id)
 }
 
-/// Registra, cambia o quita la fecha de pago. Solo afecta los cortes entre la fecha anterior y la nueva.
-pub fn set_payment_date(conn: &mut Connection, id: i64, payment_date: Option<String>) -> AppResult<()> {
-    let r = get(conn, id)?;
-    let date = payment_date.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
-    if let Some(d) = &date {
-        if !is_iso_date(d) {
-            return Err(AppError::user("La fecha de pago no es válida."));
-        }
-        if d.as_str() < r.period_start.as_str() {
-            return Err(AppError::user("La fecha de pago no puede ser anterior al inicio del periodo declarado."));
-        }
+// ---------------------------------------------------------------------------
+// Pagos (totales o parciales)
+// ---------------------------------------------------------------------------
+
+/// Saldo a pagar que vale (si la declaración trae ambos y se resolvió «a favor», no hay nada que pagar).
+fn effective_payable(r: &TaxReturn) -> i64 {
+    if r.resolution == "favor" {
+        0
+    } else {
+        r.payable_cents
     }
-    if date == r.payment_date {
+}
+
+/// «$ 5.000.000,00» para el historial.
+fn money(cents: i64) -> String {
+    let pesos = (cents / 100).to_string();
+    let mut grouped = String::new();
+    for (i, c) in pesos.chars().enumerate() {
+        if i > 0 && (pesos.len() - i) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(c);
+    }
+    format!("$ {grouped},{:02}", cents % 100)
+}
+
+fn paid_except(conn: &Connection, return_id: i64, except: Option<i64>) -> AppResult<i64> {
+    Ok(conn.query_row("SELECT COALESCE(SUM(amount_cents), 0) FROM fs_tax_payments WHERE return_id = ?1 AND id IS NOT ?2", params![return_id, except], |r| r.get(0))?)
+}
+
+/// Valida un pago nuevo o editado (`except` = el pago que se edita) y devuelve la entrada limpia.
+fn validated_payment(conn: &Connection, r: &TaxReturn, input: &TaxPaymentInput, except: Option<i64>) -> AppResult<TaxPaymentInput> {
+    if r.superseded_by.is_some() {
+        return Err(AppError::user("La declaración fue reemplazada por una corrección: registra los pagos en la corrección."));
+    }
+    let payable = effective_payable(r);
+    if payable <= 0 {
+        return Err(AppError::user("Esta declaración no tiene saldo a pagar: los saldos a favor no llevan pagos."));
+    }
+    let date = input.payment_date.trim().to_string();
+    if !is_iso_date(&date) {
+        return Err(AppError::user("La fecha de pago no es válida."));
+    }
+    if date.as_str() < r.period_start.as_str() {
+        return Err(AppError::user("La fecha de pago no puede ser anterior al inicio del periodo declarado."));
+    }
+    if input.amount_cents <= 0 {
+        return Err(AppError::user("El valor del pago debe ser mayor que cero."));
+    }
+    if paid_except(conn, r.id, except)? + input.amount_cents > payable {
+        return Err(AppError::user(PAYMENT_EXCEEDS));
+    }
+    Ok(TaxPaymentInput { payment_date: date, amount_cents: input.amount_cents, note: clean(&input.note, 500), reference: clean(&input.reference, 200) })
+}
+
+/// Cortes que cambian con un pago de esa fecha: desde la fecha (nunca antes del fin del periodo) en adelante.
+fn from_date(r: &TaxReturn, date: &str) -> String {
+    if date < r.period_end.as_str() {
+        r.period_end.clone()
+    } else {
+        date.to_string()
+    }
+}
+
+pub fn add_payment(conn: &mut Connection, return_id: i64, input: &TaxPaymentInput) -> AppResult<i64> {
+    let r = get(conn, return_id)?;
+    let p = validated_payment(conn, &r, input, None)?;
+    let from = from_date(&r, &p.payment_date);
+    ensure_open(conn, r.company_id, &from, None)?;
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    tx.execute(
+        "INSERT INTO fs_tax_payments (return_id, payment_date, amount_cents, note, reference, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        params![return_id, p.payment_date, p.amount_cents, p.note, p.reference, now],
+    )?;
+    let id = tx.last_insert_rowid();
+    event(&tx, return_id, "payment", &format!("Pago registrado: {} por {}", p.payment_date, money(p.amount_cents)))?;
+    invalidate(&tx, r.company_id, &from, None)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Corrige la fecha y/o el valor de un pago. Si solo cambia la fecha, se afectan los cortes entre la anterior y la nueva.
+pub fn update_payment(conn: &mut Connection, id: i64, input: &TaxPaymentInput) -> AppResult<()> {
+    let old = get_payment(conn, id)?;
+    let r = get(conn, old.return_id)?;
+    let p = validated_payment(conn, &r, input, Some(id))?;
+    if p.payment_date == old.payment_date && p.amount_cents == old.amount_cents && p.note == old.note && p.reference == old.reference {
         return Ok(());
     }
-    // Cortes afectados: desde la fecha más temprana (nunca antes del fin del periodo) hasta la más tardía (sin fecha = sin límite).
-    let (a, b) = (r.payment_date.clone(), date.clone());
-    let low = match (&a, &b) {
-        (Some(x), Some(y)) => x.min(y).clone(),
-        (Some(x), None) | (None, Some(x)) => x.clone(),
-        (None, None) => unreachable!(),
-    };
-    let from = if low < r.period_end { r.period_end.clone() } else { low };
-    let until = match (&a, &b) {
-        (Some(x), Some(y)) => Some(x.max(y).clone()),
-        _ => None,
-    };
-    ensure_open(conn, r.company_id, &from, until.as_deref())?;
+    let affects = p.payment_date != old.payment_date || p.amount_cents != old.amount_cents;
+    let from = from_date(&r, old.payment_date.as_str().min(p.payment_date.as_str()));
+    let until = if p.amount_cents == old.amount_cents { Some(old.payment_date.clone().max(p.payment_date.clone())) } else { None };
+    if affects {
+        ensure_open(conn, r.company_id, &from, until.as_deref())?;
+    }
     let tx = conn.transaction()?;
-    tx.execute("UPDATE fs_tax_returns SET payment_date = ?1, updated_at = ?2 WHERE id = ?3", params![date, now_iso(), id])?;
-    let note = match (&a, &b) {
-        (None, Some(d)) => format!("Pagada el {d}"),
-        (Some(old), Some(d)) => format!("Fecha de pago cambiada de {old} a {d}"),
-        (Some(old), None) => format!("Se quitó la fecha de pago ({old})"),
-        (None, None) => String::new(),
+    tx.execute(
+        "UPDATE fs_tax_payments SET payment_date = ?1, amount_cents = ?2, note = ?3, reference = ?4, updated_at = ?5 WHERE id = ?6",
+        params![p.payment_date, p.amount_cents, p.note, p.reference, now_iso(), id],
+    )?;
+    let note = if affects {
+        format!("Pago editado: {} por {} → {} por {}", old.payment_date, money(old.amount_cents), p.payment_date, money(p.amount_cents))
+    } else {
+        format!("Pago del {} por {}: se editó la observación o la referencia", p.payment_date, money(p.amount_cents))
     };
-    event(&tx, id, "payment", &note)?;
-    invalidate(&tx, r.company_id, &from, until.as_deref())?;
+    event(&tx, r.id, "payment", &note)?;
+    if affects {
+        invalidate(&tx, r.company_id, &from, until.as_deref())?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_payment(conn: &mut Connection, id: i64) -> AppResult<()> {
+    let p = get_payment(conn, id)?;
+    let r = get(conn, p.return_id)?;
+    let from = from_date(&r, &p.payment_date);
+    ensure_open(conn, r.company_id, &from, None)?;
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM fs_tax_payments WHERE id = ?1", [id])?;
+    event(&tx, r.id, "payment", &format!("Pago eliminado: {} por {}", p.payment_date, money(p.amount_cents)))?;
+    invalidate(&tx, r.company_id, &from, None)?;
     tx.commit()?;
     Ok(())
 }
@@ -256,6 +379,9 @@ pub fn set_resolution(conn: &mut Connection, id: i64, resolution: &str) -> AppRe
     let r = get(conn, id)?;
     if r.resolution == resolution {
         return Ok(());
+    }
+    if resolution == "favor" && paid_except(conn, id, None)? > 0 {
+        return Err(AppError::user("La declaración tiene pagos registrados: elimínalos antes de indicar que vale el saldo a favor."));
     }
     ensure_open(conn, r.company_id, &r.period_end, None)?;
     let tx = conn.transaction()?;
@@ -386,22 +512,83 @@ mod tests {
         assert!(old.events.iter().any(|e| e.action == "superseded"), "la anterior conserva su historial");
     }
 
+    fn pay(date: &str, cents: i64) -> TaxPaymentInput {
+        TaxPaymentInput { payment_date: date.into(), amount_cents: cents, ..Default::default() }
+    }
+
     #[test]
-    fn payment_date_is_traced_and_respects_closed_periods() {
+    fn partial_payments_never_exceed_the_payable_and_are_traced() {
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let id = save(&mut conn, &withholding(a, 9, "1", 1_000_000_000)).unwrap();
+        // Dos pagos el mismo día son válidos: cada uno con su identificador.
+        let p1 = add_payment(&mut conn, id, &pay("2026-10-15", 200_000_000)).unwrap();
+        let p2 = add_payment(&mut conn, id, &pay("2026-10-15", 300_000_000)).unwrap();
+        assert_ne!(p1, p2);
+        add_payment(&mut conn, id, &pay("2026-11-05", 300_000_000)).unwrap();
+        // Pendiente $2.000.000: un pago de $3.000.000 se bloquea.
+        assert_eq!(add_payment(&mut conn, id, &pay("2026-11-20", 300_000_000)).unwrap_err().0, PAYMENT_EXCEEDS);
+        assert!(add_payment(&mut conn, id, &pay("2026-11-20", 0)).unwrap_err().0.contains("mayor que cero"));
+        assert!(add_payment(&mut conn, id, &pay("2026-08-01", 100)).unwrap_err().0.contains("anterior al inicio"));
+        // Editar respeta el mismo tope (sin contar el propio pago).
+        assert_eq!(update_payment(&mut conn, p1, &pay("2026-10-15", 500_000_000)).unwrap_err().0, PAYMENT_EXCEEDS);
+        update_payment(&mut conn, p1, &pay("2026-10-15", 400_000_000)).unwrap();
+        let r = &list(&conn, a).unwrap()[0];
+        assert_eq!(r.payable_cents, 1_000_000_000, "el valor de la declaración nunca cambia");
+        assert_eq!(r.payments.iter().map(|p| p.amount_cents).sum::<i64>(), 1_000_000_000);
+        assert!(r.events.iter().any(|e| e.note == "Pago editado: 2026-10-15 por $ 2.000.000,00 → 2026-10-15 por $ 4.000.000,00"));
+        delete_payment(&mut conn, p2).unwrap();
+        let r = &list(&conn, a).unwrap()[0];
+        assert_eq!((r.payments.len(), r.events.last().unwrap().note.as_str()), (2, "Pago eliminado: 2026-10-15 por $ 3.000.000,00"));
+    }
+
+    #[test]
+    fn payments_invalidate_open_cuts_and_respect_closed_periods() {
         let mut conn = db();
         let a = company(&conn, "901748281");
         let id = save(&mut conn, &withholding(a, 9, "1", 62_400_000)).unwrap();
+        let ready_aug = period(&conn, a, "2026-01-01", "2026-08-31", "ready");
         let ready_sep = period(&conn, a, "2026-01-01", "2026-09-30", "ready");
         let ready_oct = period(&conn, a, "2026-01-01", "2026-10-31", "ready");
-        let ready_aug = period(&conn, a, "2026-01-01", "2026-08-31", "ready");
-        set_payment_date(&mut conn, id, Some("2026-10-15".into())).unwrap();
-        // Con pago el 15/10 solo cambia el corte de octubre (en septiembre seguía pendiente: igual que antes).
+        let p = add_payment(&mut conn, id, &pay("2026-10-15", 30_000_000)).unwrap();
+        // Un pago del 15/10 solo cambia los cortes desde esa fecha.
         assert_eq!((status(&conn, ready_aug), status(&conn, ready_sep), status(&conn, ready_oct)), ("ready".into(), "ready".into(), "needs_review".into()));
-        let r = &list(&conn, a).unwrap()[0];
-        assert_eq!((r.payment_date.as_deref(), r.events.last().unwrap().note.as_str()), (Some("2026-10-15"), "Pagada el 2026-10-15"));
         period(&conn, a, "2026-01-01", "2026-12-31", "closed");
-        assert!(set_payment_date(&mut conn, id, None).unwrap_err().0.contains("cerrado"));
-        assert!(set_payment_date(&mut conn, id, Some("2026-08-01".into())).unwrap_err().0.contains("anterior al inicio"));
+        assert!(update_payment(&mut conn, p, &pay("2026-10-15", 20_000_000)).unwrap_err().0.contains("cerrado"));
+        assert!(delete_payment(&mut conn, p).unwrap_err().0.contains("cerrado"));
+        assert!(add_payment(&mut conn, id, &pay("2026-11-01", 1)).unwrap_err().0.contains("cerrado"));
+        // Solo la observación: no afecta ningún corte, se permite.
+        update_payment(&mut conn, p, &TaxPaymentInput { note: "Banco".into(), ..pay("2026-10-15", 30_000_000) }).unwrap();
+    }
+
+    #[test]
+    fn favor_balances_and_superseded_returns_take_no_payments() {
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let favor = save(&mut conn, &TaxReturnInput { payable_cents: 0, favor_cents: 500, ..withholding(a, 8, "1", 0) }).unwrap();
+        assert!(add_payment(&mut conn, favor, &pay("2026-09-10", 100)).unwrap_err().0.contains("saldos a favor"));
+        let both = save(&mut conn, &TaxReturnInput { favor_cents: 500, ..withholding(a, 9, "2", 1_000) }).unwrap();
+        add_payment(&mut conn, both, &pay("2026-10-10", 100)).unwrap();
+        assert!(set_resolution(&mut conn, both, "favor").unwrap_err().0.contains("pagos registrados"));
+        let fixed = save(&mut conn, &TaxReturnInput { replaces_id: Some(both), ..withholding(a, 9, "3", 2_000) }).unwrap();
+        assert!(add_payment(&mut conn, both, &pay("2026-10-11", 100)).unwrap_err().0.contains("reemplazada"));
+        add_payment(&mut conn, fixed, &pay("2026-10-11", 2_000)).unwrap();
+    }
+
+    #[test]
+    fn legacy_payment_dates_become_one_full_payment() {
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let id = save(&mut conn, &withholding(a, 9, "1", 62_400_000)).unwrap();
+        let favor = save(&mut conn, &TaxReturnInput { favor_cents: 1, ..withholding(a, 10, "2", 5) }).unwrap();
+        conn.execute("UPDATE fs_tax_returns SET payment_date = '2026-10-15'", []).unwrap();
+        conn.execute("UPDATE fs_tax_returns SET resolution = 'favor' WHERE id = ?1", [favor]).unwrap();
+        convert_legacy_payment_dates(&conn).unwrap();
+        convert_legacy_payment_dates(&conn).unwrap();
+        let all = list(&conn, a).unwrap();
+        let r = all.iter().find(|r| r.id == id).unwrap();
+        assert_eq!(r.payments.iter().map(|p| (p.payment_date.as_str(), p.amount_cents)).collect::<Vec<_>>(), vec![("2026-10-15", 62_400_000)]);
+        assert!(all.iter().find(|r| r.id == favor).unwrap().payments.is_empty());
     }
 
     #[test]

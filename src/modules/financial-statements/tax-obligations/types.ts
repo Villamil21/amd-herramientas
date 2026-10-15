@@ -30,7 +30,6 @@ export interface TaxReturn {
   supersededBy: number | null;
   payableCents: number;
   favorCents: number;
-  paymentDate: string | null;
   resolution: TaxResolution;
   nit: string;
   companyName: string;
@@ -45,6 +44,8 @@ export interface TaxReturn {
   createdAt: string;
   updatedAt: string;
   events: TaxReturnEvent[];
+  /** Pagos registrados (0, 1 o varios), ordenados por fecha. */
+  payments: TaxPayment[];
 }
 
 export interface TaxReturnDetail {
@@ -56,6 +57,26 @@ export interface TaxReturnDetail {
   equity?: { key: string; label: string; cents: number | null; casilla: string | null }[];
   warnings?: string[];
   nameMismatchConfirmed?: boolean;
+}
+
+/** Pago total o parcial de una declaración con saldo a pagar. */
+export interface TaxPayment {
+  id: number;
+  returnId: number;
+  /** AAAA-MM-DD. */
+  paymentDate: string;
+  amountCents: number;
+  note: string;
+  reference: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxPaymentInput {
+  paymentDate: string;
+  amountCents: number;
+  note: string;
+  reference: string;
 }
 
 export interface TaxReturnEvent {

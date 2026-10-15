@@ -22,6 +22,31 @@ pub struct TaxReturnEvent {
     pub created_at: String,
 }
 
+/// Pago (total o parcial) de una declaración con saldo a pagar.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxPayment {
+    pub id: i64,
+    pub return_id: i64,
+    pub payment_date: String,
+    pub amount_cents: i64,
+    pub note: String,
+    pub reference: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxPaymentInput {
+    pub payment_date: String,
+    pub amount_cents: i64,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub reference: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxReturn {
@@ -39,7 +64,6 @@ pub struct TaxReturn {
     pub superseded_by: Option<i64>,
     pub payable_cents: i64,
     pub favor_cents: i64,
-    pub payment_date: Option<String>,
     pub resolution: String,
     pub nit: String,
     pub company_name: String,
@@ -52,6 +76,8 @@ pub struct TaxReturn {
     pub created_at: String,
     pub updated_at: String,
     pub events: Vec<TaxReturnEvent>,
+    /// Pagos registrados (0, 1 o varios), por fecha.
+    pub payments: Vec<TaxPayment>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

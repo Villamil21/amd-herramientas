@@ -11,7 +11,7 @@ import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate, formatStatementPesos, periodLabel } from "../shared/money";
 import { navigate, paths } from "../../../app/router";
 import { StatusBadge as TaxStatusBadge } from "../tax-obligations/components";
-import { periodName, taxStatus } from "../tax-obligations/services/effects";
+import { paidCents, pendingCents, periodName, taxStatus } from "../tax-obligations/services/effects";
 import { PERIODICITY_LABEL, type TaxReturn, type VatPeriodicity } from "../tax-obligations/types";
 import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow, type TaxCoverage } from "./checks";
 import type { LineValue, StatementRow } from "./engine";
@@ -105,6 +105,7 @@ export function CoverageTable({
   rows,
   companyName,
   tax,
+  cut,
   companyId,
   onLifecycleChanged,
 }: {
@@ -112,6 +113,8 @@ export function CoverageTable({
   rows: CoverageRow[];
   companyName: string;
   tax?: TaxCoverage;
+  /** Fecha de corte del periodo: estado y pagos de las declaraciones a esa fecha. */
+  cut?: string;
   companyId?: number | null;
   onLifecycleChanged?: () => void | Promise<unknown>;
 }) {
@@ -386,7 +389,7 @@ export function CoverageTable({
         {selected?.kind === "source" &&
           (selected.row.cells[selected.month].batches.length === 0 ? <p className="muted">No hay información de este mes.</p> : <BatchTable batches={selected.row.cells[selected.month].batches} />)}
         {selected?.kind === "bank" && <BankStatementTable cell={selected.cell} />}
-        {selected?.kind === "tax" && <TaxReturnsTable returns={selected.returns} vatPeriodicity={tax?.vatPeriodicity ?? null} path={selected.taxPath} />}
+        {selected?.kind === "tax" && <TaxReturnsTable returns={selected.returns} vatPeriodicity={tax?.vatPeriodicity ?? null} path={selected.taxPath} cut={cut} />}
       </Modal>
       {companyId != null && onLifecycleChanged && (
         <BankLifecycleModal
@@ -405,7 +408,7 @@ export function CoverageTable({
 }
 
 /** Declaraciones de una celda de la cobertura tributaria, con acceso al submódulo. */
-function TaxReturnsTable({ returns, vatPeriodicity, path }: { returns: TaxReturn[]; vatPeriodicity: VatPeriodicity | null; path: string }) {
+function TaxReturnsTable({ returns, vatPeriodicity, path, cut }: { returns: TaxReturn[]; vatPeriodicity: VatPeriodicity | null; path: string; cut?: string }) {
   return (
     <div className="stack stack--sm">
       {returns.length === 0 ? (
@@ -419,7 +422,8 @@ function TaxReturnsTable({ returns, vatPeriodicity, path }: { returns: TaxReturn
                 <th>Formulario</th>
                 <th style={{ textAlign: "right" }}>Saldo a pagar</th>
                 <th style={{ textAlign: "right" }}>Saldo a favor</th>
-                <th>Fecha de pago</th>
+                <th style={{ textAlign: "right" }}>{cut ? "Pagado al corte" : "Pagado"}</th>
+                <th style={{ textAlign: "right" }}>{cut ? "Pendiente al corte" : "Pendiente"}</th>
                 <th>Estado</th>
               </tr>
             </thead>
@@ -430,9 +434,10 @@ function TaxReturnsTable({ returns, vatPeriodicity, path }: { returns: TaxReturn
                   <td className="mono">{r.formNumber || "—"}</td>
                   <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(r.payableCents)}</td>
                   <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(r.favorCents)}</td>
-                  <td className="nowrap">{r.paymentDate ? formatIsoDate(r.paymentDate) : "—"}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(paidCents(r, cut))}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(pendingCents(r, cut))}</td>
                   <td>
-                    <TaxStatusBadge status={taxStatus(r, vatPeriodicity)} />
+                    <TaxStatusBadge status={taxStatus(r, vatPeriodicity, cut)} />
                   </td>
                 </tr>
               ))}

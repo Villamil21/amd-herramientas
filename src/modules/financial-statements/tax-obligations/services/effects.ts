@@ -7,9 +7,10 @@ import { PERIODICITY_LABEL, SHORT_TAX_LABEL, TAX_PUC, type TaxPeriodicity, type 
  * las declaraciones guardadas y no se crean movimientos contables.
  *
  * - Retefuente / IVA / Renta por pagar: declaraciones cuyo periodo terminó al
- *   corte y que no estaban pagadas al corte (fecha de pago > corte o sin fecha).
- *   La Retefuente pendiente de un año anterior al del corte se presenta como
- *   pasivo NO corriente (el PUC no cambia: solo su ubicación en el ESF).
+ *   corte, por su SALDO PENDIENTE al corte (saldo a pagar − pagos con fecha ≤
+ *   corte; una declaración puede pagarse por partes). La Retefuente pendiente
+ *   de un año anterior al del corte se presenta como pasivo NO corriente (el
+ *   PUC no cambia: solo su ubicación en el ESF).
  * - Saldo a favor de IVA y de Renta: FOTO de la declaración del último periodo
  *   terminado al corte (la siguiente ya incorpora el saldo anterior: nunca se suman).
  * - Anticipo de renta: solo el de la declaración del año anterior al corte.
@@ -65,10 +66,11 @@ export function lastEndedPeriod(periodicity: TaxPeriodicity, cut: string): { yea
 // Estado y anomalías
 // ---------------------------------------------------------------------------
 
-export type TaxStatus = "pending" | "paid" | "favor" | "none" | "review" | "superseded";
+export type TaxStatus = "pending" | "partial" | "paid" | "favor" | "none" | "review" | "superseded";
 
 export const STATUS_LABEL: Record<TaxStatus, string> = {
   pending: "Pendiente de pago",
+  partial: "Pago parcial",
   paid: "Pagado",
   favor: "Saldo a favor",
   none: "Sin saldo",
@@ -95,11 +97,25 @@ export function effectiveValues(r: TaxReturn): { payable: number; favor: number 
   return { payable: r.payableCents, favor: r.favorCents };
 }
 
-export function taxStatus(r: TaxReturn, vatPeriodicity: VatPeriodicity | null): TaxStatus {
+/** Pagos con fecha ≤ corte (sin corte: todos los registrados). */
+export function paidCents(r: Pick<TaxReturn, "payments">, cut?: string): number {
+  return r.payments.reduce((s, p) => (cut === undefined || p.paymentDate <= cut ? s + p.amountCents : s), 0);
+}
+
+/** Saldo a pagar − pagos hasta el corte. Nunca reemplaza el valor de la declaración. */
+export function pendingCents(r: TaxReturn, cut?: string): number {
+  return Math.max(0, effectiveValues(r).payable - paidCents(r, cut));
+}
+
+/** Estado de la declaración (a la fecha de corte si se indica; si no, con todos los pagos registrados). */
+export function taxStatus(r: TaxReturn, vatPeriodicity: VatPeriodicity | null, cut?: string): TaxStatus {
   if (r.supersededBy !== null) return "superseded";
   if (anomalies(r, vatPeriodicity).length) return "review";
   const v = effectiveValues(r);
-  if (v.payable > 0) return r.paymentDate ? "paid" : "pending";
+  if (v.payable > 0) {
+    if (pendingCents(r, cut) === 0) return "paid";
+    return paidCents(r, cut) > 0 ? "partial" : "pending";
+  }
   if (v.favor > 0) return "favor";
   return "none";
 }
@@ -154,8 +170,6 @@ const PUC_LABEL: Record<TaxPucKey, string> = {
   [TAX_PUC.priorResults]: "Resultados de ejercicios anteriores",
 };
 
-const unpaidAt = (r: TaxReturn, cut: string) => !r.paymentDate || r.paymentDate > cut;
-
 export function taxEffects(input: TaxInput, cut: string): TaxEffects {
   const effects: TaxEffect[] = [];
   const issues: TaxIssue[] = [];
@@ -177,7 +191,7 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
       });
   };
 
-  // Por pagar: cada declaración terminada al corte y sin pagar al corte.
+  // Por pagar: el saldo pendiente al corte de cada declaración terminada al corte.
   const cutYear = Number(cut.slice(0, 4));
   const payables: [TaxType, TaxEffectKind, TaxPucKey][] = [
     ["withholding", "withholding_payable", TAX_PUC.withholdingPayable],
@@ -185,11 +199,12 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
     ["income", "income_payable", TAX_PUC.incomePayable],
   ];
   for (const [type, kind, key] of payables)
-    for (const r of usable.filter((x) => x.taxType === type && unpaidAt(x, cut)).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd))) {
-      const { payable } = effectiveValues(r);
-      // Retefuente: el año de la obligación frente al del corte decide corriente / no corriente.
+    for (const r of usable.filter((x) => x.taxType === type).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd))) {
+      const pending = pendingCents(r, cut);
+      // Retefuente: el año de la obligación frente al del corte decide corriente / no corriente (sobre el saldo pendiente).
       const noncurrent = type === "withholding" && r.year < cutYear;
-      if (payable > 0) add(kind, key, `${SHORT_TAX_LABEL[type]} por pagar ${periodName(r)}${noncurrent ? " (no corriente)" : ""}`, payable, [r], noncurrent);
+      const partial = pending > 0 && pending < effectiveValues(r).payable;
+      if (pending > 0) add(kind, key, `${SHORT_TAX_LABEL[type]} por pagar ${periodName(r)}${partial ? " (saldo pendiente)" : ""}${noncurrent ? " (no corriente)" : ""}`, pending, [r], noncurrent);
     }
 
   // Saldo a favor de IVA: foto del último periodo terminado según la periodicidad de la empresa.

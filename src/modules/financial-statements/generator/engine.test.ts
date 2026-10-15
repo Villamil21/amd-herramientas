@@ -315,9 +315,10 @@ describe("reporte de operaciones: Banco y OTC", () => {
 });
 
 describe("obligaciones tributarias en el ESF", () => {
-  const base = { companyId: 1, previousFormNumber: "", isCorrection: false, supersededBy: null, favorCents: 0, resolution: "", nit: "", companyName: "", fileName: "", detail: {}, createdAt: "", updatedAt: "", events: [] as TaxReturn["events"] };
-  const retefuente = { ...base, id: 1, taxType: "withholding", year: 2026, period: 9, periodicity: "monthly", periodStart: "2026-09-01", periodEnd: "2026-09-30", formNumber: "1", payableCents: 62_400_000, paymentDate: "2026-10-15", incomeOrdinaryCents: null, incomeLossCents: null, advanceNextCents: null, advanceTargetYear: null } as TaxReturn;
-  const renta = { ...base, id: 2, taxType: "income", year: 2025, period: null, periodicity: "annual", periodStart: "2025-01-01", periodEnd: "2025-12-31", formNumber: "2", payableCents: 0, paymentDate: null, incomeOrdinaryCents: 1_966_200_000, incomeLossCents: 0, advanceNextCents: 0, advanceTargetYear: 2026 } as TaxReturn;
+  const base = { companyId: 1, previousFormNumber: "", isCorrection: false, supersededBy: null, favorCents: 0, resolution: "", nit: "", companyName: "", fileName: "", detail: {}, createdAt: "", updatedAt: "", events: [] as TaxReturn["events"], payments: [] as TaxReturn["payments"] };
+  const paidOn = (paymentDate: string, amountCents: number): TaxReturn["payments"] => [{ id: amountCents, returnId: 0, paymentDate, amountCents, note: "", reference: "", createdAt: "", updatedAt: "" }];
+  const retefuente = { ...base, id: 1, taxType: "withholding", year: 2026, period: 9, periodicity: "monthly", periodStart: "2026-09-01", periodEnd: "2026-09-30", formNumber: "1", payableCents: 62_400_000, payments: paidOn("2026-10-15", 62_400_000), incomeOrdinaryCents: null, incomeLossCents: null, advanceNextCents: null, advanceTargetYear: null } as TaxReturn;
+  const renta = { ...base, id: 2, taxType: "income", year: 2025, period: null, periodicity: "annual", periodStart: "2025-01-01", periodEnd: "2025-12-31", formNumber: "2", payableCents: 0, incomeOrdinaryCents: 1_966_200_000, incomeLossCents: 0, advanceNextCents: 0, advanceTargetYear: 2026 } as TaxReturn;
   const puc = new Map([[TAX_PUC.withholdingPayable, "236540"], [TAX_PUC.priorResults, "370505"]]);
   const tax = { returns: [retefuente, renta], puc, vatPeriodicity: null };
   const mappings = [...MAPPINGS, map("236540", 6)];
@@ -334,7 +335,7 @@ describe("obligaciones tributarias en el ESF", () => {
   describe("prueba obligatoria — Retefuente corriente / no corriente según el año", () => {
     const ret = (id: number, year: number, period: number, paymentDate: string | null) => {
       const month = String(period).padStart(2, "0");
-      return { ...retefuente, id, year, period, periodStart: `${year}-${month}-01`, periodEnd: `${year}-${month}-28`, formNumber: String(id), payableCents: 100_000_000, paymentDate };
+      return { ...retefuente, id, year, period, periodStart: `${year}-${month}-01`, periodEnd: `${year}-${month}-28`, formNumber: String(id), payableCents: 100_000_000, payments: paymentDate ? paidOn(paymentDate, 100_000_000) : [] };
     };
     const runWith = (returns: TaxReturn[]) => run({ tax: { ...tax, returns }, mappings, end: "2026-08-31" });
 

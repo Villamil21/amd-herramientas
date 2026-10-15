@@ -435,6 +435,7 @@ export default function GeneratorPage() {
               rows={review.coverage.rows}
               companyName={company?.razonSocial ?? ""}
               tax={review.tax}
+              cut={end}
               companyId={companyId}
               onLifecycleChanged={loadLedger}
             />

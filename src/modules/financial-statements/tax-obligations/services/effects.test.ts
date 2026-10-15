@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TAX_PUC, type TaxPeriodicity, type TaxReturn, type TaxType } from "../types";
-import { anomalies, lastEndedPeriod, periodName, periodRange, taxEffects, taxStatus, type TaxInput } from "./effects";
+import { TAX_PUC, type TaxPayment, type TaxPeriodicity, type TaxReturn, type TaxType } from "../types";
+import { anomalies, lastEndedPeriod, paidCents, pendingCents, periodName, periodRange, taxEffects, taxStatus, type TaxInput } from "./effects";
 
 let nextId = 1;
 function ret(taxType: TaxType, year: number, period: number | null, periodicity: TaxPeriodicity, extra: Partial<TaxReturn> = {}): TaxReturn {
@@ -20,7 +20,7 @@ function ret(taxType: TaxType, year: number, period: number | null, periodicity:
     supersededBy: null,
     payableCents: 0,
     favorCents: 0,
-    paymentDate: null,
+    payments: [],
     resolution: "",
     nit: "",
     companyName: "",
@@ -36,6 +36,9 @@ function ret(taxType: TaxType, year: number, period: number | null, periodicity:
     ...extra,
   };
 }
+
+let nextPaymentId = 1;
+const payment = (paymentDate: string, amountCents: number): TaxPayment => ({ id: nextPaymentId++, returnId: 0, paymentDate, amountCents, note: "", reference: "", createdAt: "", updatedAt: "" });
 
 const PUC = new Map<string, string>(Object.values(TAX_PUC).map((k, i) => [k, String(240000 + i)]));
 const run = (returns: TaxReturn[], cut: string, extra: Partial<TaxInput> = {}) => taxEffects({ returns, puc: PUC, vatPeriodicity: "bimonthly", ...extra }, cut);
@@ -60,15 +63,15 @@ describe("periodos", () => {
 });
 
 describe("prueba obligatoria — Retefuente", () => {
-  const r = ret("withholding", 2026, 9, "monthly", { payableCents: pesos(624_000), paymentDate: "2026-10-15" });
+  const r = ret("withholding", 2026, 9, "monthly", { payableCents: pesos(624_000), payments: [payment("2026-10-15", pesos(624_000))] });
   it("agosto: no aparece · septiembre: CxP $624.000 · octubre: $0", () => {
     expect(total(run([r], "2026-08-31"), "withholding_payable")).toBe(0);
     expect(total(run([r], "2026-09-30"), "withholding_payable")).toBe(pesos(624_000));
     expect(total(run([r], "2026-10-31"), "withholding_payable")).toBe(0);
   });
   it("sin fecha de pago sigue como cuenta por pagar; la presentación no es pago", () => {
-    expect(total(run([{ ...r, paymentDate: null, detail: { presentedOn: "2026-10-05" } }], "2026-12-31"), "withholding_payable")).toBe(pesos(624_000));
-    expect(taxStatus({ ...r, paymentDate: null }, null)).toBe("pending");
+    expect(total(run([{ ...r, payments: [], detail: { presentedOn: "2026-10-05" } }], "2026-12-31"), "withholding_payable")).toBe(pesos(624_000));
+    expect(taxStatus({ ...r, payments: [] }, null)).toBe("pending");
     expect(taxStatus(r, null)).toBe("paid");
   });
 });
@@ -89,13 +92,13 @@ describe("prueba obligatoria — IVA saldo a favor (foto, nunca suma)", () => {
 });
 
 describe("prueba obligatoria — IVA saldo a pagar", () => {
-  const p4 = ret("vat", 2026, 4, "bimonthly", { payableCents: pesos(5_000_000), paymentDate: "2026-09-15" });
+  const p4 = ret("vat", 2026, 4, "bimonthly", { payableCents: pesos(5_000_000), payments: [payment("2026-09-15", pesos(5_000_000))] });
   it("agosto: CxP $5.000.000 · septiembre: $0", () => {
     expect(total(run([p4], "2026-08-31"), "vat_payable")).toBe(pesos(5_000_000));
     expect(total(run([p4], "2026-09-30"), "vat_payable")).toBe(0);
   });
   it("con saldo a pagar y a favor a la vez requiere revisión y no se envía hasta resolverla", () => {
-    const both = { ...p4, paymentDate: null, favorCents: pesos(1_000) };
+    const both = { ...p4, payments: [], favorCents: pesos(1_000) };
     const s = run([both], "2026-08-31");
     expect(s.effects).toEqual([]);
     expect(s.issues[0]).toMatchObject({ level: "blocking" });
@@ -130,7 +133,7 @@ describe("prueba obligatoria — resultados de ejercicios anteriores", () => {
     expect(total(run(returns, "2026-12-31"), "prior_results")).toBe(pesos(24_720_000 + 9_857_000 - 5_000_000));
   });
   it("renta por pagar mientras no se pague y saldo a favor como foto de la última declaración", () => {
-    const dr = [ret("income", 2024, null, "annual", { favorCents: pesos(3_000) }), ret("income", 2025, null, "annual", { payableCents: pesos(2_391_000), paymentDate: "2026-05-11" })];
+    const dr = [ret("income", 2024, null, "annual", { favorCents: pesos(3_000) }), ret("income", 2025, null, "annual", { payableCents: pesos(2_391_000), payments: [payment("2026-05-11", pesos(2_391_000))] })];
     const s = run(dr, "2025-12-31");
     expect([total(s, "income_payable"), total(s, "income_favor")]).toEqual([pesos(2_391_000), 0]);
     expect(total(run(dr, "2026-06-30"), "income_payable")).toBe(0);
@@ -147,5 +150,48 @@ describe("correcciones y PUC", () => {
     const s = run([fix], "2026-09-30", { puc: new Map() });
     expect(s.effects[0].pucCode).toBeNull();
     expect(s.issues[0]).toMatchObject({ level: "blocking", message: expect.stringContaining("Retención en la fuente por pagar") });
+  });
+});
+
+describe("prueba obligatoria — pagos parciales de una misma declaración", () => {
+  it("caso 1: dos pagos → pendiente $10M / $5M / $0 y Pendiente / Pago parcial / Pagado", () => {
+    const r = ret("withholding", 2026, 9, "monthly", { payableCents: pesos(10_000_000), payments: [payment("2026-10-15", pesos(5_000_000)), payment("2026-11-20", pesos(5_000_000))] });
+    const cuts = ["2026-09-30", "2026-10-31", "2026-11-30"];
+    expect(cuts.map((c) => pendingCents(r, c))).toEqual([pesos(10_000_000), pesos(5_000_000), 0]);
+    expect(cuts.map((c) => total(run([r], c), "withholding_payable"))).toEqual([pesos(10_000_000), pesos(5_000_000), 0]);
+    expect(cuts.map((c) => taxStatus(r, null, c))).toEqual(["pending", "partial", "paid"]);
+    expect(r.payableCents).toBe(pesos(10_000_000));
+    expect(run([r], "2026-10-31").effects[0].label).toContain("saldo pendiente");
+  });
+
+  it("caso 2: tres pagos → al 31/10 pagado $5M y pendiente $4M; al 30/11 pendiente $0", () => {
+    const r = ret("vat", 2026, 4, "bimonthly", { payableCents: pesos(9_000_000), payments: [payment("2026-10-01", pesos(3_000_000)), payment("2026-10-15", pesos(2_000_000)), payment("2026-11-05", pesos(4_000_000))] });
+    expect([paidCents(r, "2026-10-31"), pendingCents(r, "2026-10-31")]).toEqual([pesos(5_000_000), pesos(4_000_000)]);
+    expect(total(run([r], "2026-10-31"), "vat_payable")).toBe(pesos(4_000_000));
+    expect(pendingCents(r, "2026-11-30")).toBe(0);
+    expect(taxStatus(r, "bimonthly")).toBe("paid");
+  });
+
+  it("caso 4: editar un pago de $5M a $4M recalcula el saldo pendiente", () => {
+    const r = ret("withholding", 2026, 9, "monthly", { payableCents: pesos(10_000_000), payments: [payment("2026-10-15", pesos(4_000_000))] });
+    expect(pendingCents(r, "2026-10-31")).toBe(pesos(6_000_000));
+    expect(total(run([r], "2026-10-31"), "withholding_payable")).toBe(pesos(6_000_000));
+  });
+
+  it("dos pagos en la misma fecha son válidos y se suman", () => {
+    const r = ret("withholding", 2026, 9, "monthly", { payableCents: pesos(10_000_000), payments: [payment("2026-10-15", pesos(2_000_000)), payment("2026-10-15", pesos(3_000_000))] });
+    expect(pendingCents(r, "2026-10-15")).toBe(pesos(5_000_000));
+    expect(pendingCents(r, "2026-10-14")).toBe(pesos(10_000_000));
+  });
+
+  it("Retefuente de un año anterior: el no corriente es solo el saldo pendiente", () => {
+    const r = ret("withholding", 2025, 12, "monthly", { payableCents: pesos(10_000_000), payments: [payment("2026-01-20", pesos(4_000_000))] });
+    const s = run([r], "2026-06-30");
+    expect(s.effects).toEqual([expect.objectContaining({ kind: "withholding_payable", cents: pesos(6_000_000), noncurrent: true })]);
+  });
+
+  it("Requiere revisión sigue teniendo prioridad sobre el pago parcial", () => {
+    const r = ret("vat", 2026, 4, "bimonthly", { payableCents: pesos(5_000_000), favorCents: pesos(1_000), payments: [payment("2026-09-15", pesos(1_000_000))] });
+    expect(taxStatus(r, "bimonthly")).toBe("review");
   });
 });

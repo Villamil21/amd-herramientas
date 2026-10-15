@@ -164,13 +164,15 @@ export default function OpeningBalancesPage() {
             }
           >
             <div className="table-wrap">
-              <table className="table">
+              <table className="table fs-opening-table">
                 <thead>
                   <tr>
                     <th>Código PUC</th>
                     <th>Concepto</th>
                     <th>Ubicación en los estados</th>
-                    <th style={{ textAlign: "right", width: 200 }}>Valor</th>
+                    <th className="fs-opening-table__value" style={{ textAlign: "right" }}>
+                      Valor
+                    </th>
                     <th />
                   </tr>
                 </thead>
@@ -188,7 +190,7 @@ export default function OpeningBalancesPage() {
                           {!r.pucCode ? (
                             "—"
                           ) : m ? (
-                            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setClassifying(r.pucCode)}>
+                            <button type="button" className="btn btn--ghost btn--sm fs-opening-table__location" onClick={() => setClassifying(r.pucCode)}>
                               {m.excluded ? "No afecta Estados Financieros" : line ? lineLabel(line) : "—"}
                             </button>
                           ) : (
@@ -197,7 +199,7 @@ export default function OpeningBalancesPage() {
                             </Button>
                           )}
                         </td>
-                        <td>
+                        <td className="fs-opening-table__value">
                           <Input className="input--right" value={r.text} invalid={r.text.trim() !== "" && r.cents === null} placeholder="-2.000.000" onChange={(e) => update(i, { text: e.target.value })} />
                         </td>
                         <td className="actions">

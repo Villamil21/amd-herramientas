@@ -1,5 +1,24 @@
 [
   {
+    "version": "1.27.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Obligaciones tributarias (Retención en la fuente, IVA y Renta): una declaración con saldo a pagar puede pagarse por partes. Cada pago guarda fecha y valor, y opcionalmente referencia/comprobante y observación; se permiten varios pagos el mismo día.",
+      "El detalle y el nuevo botón «Pagos» muestran Total saldo a pagar, Total pagado, Saldo pendiente y la lista de pagos, con Registrar, Editar y Eliminar. La fecha acepta DD/MM/AAAA o AAAAMMDD. Un pago que supere el saldo pendiente se bloquea; los saldos a favor no llevan pagos.",
+      "Nuevo estado «Pago parcial» (además de «Pendiente de pago» y «Pagado»). La tabla de declaraciones muestra lo pagado y el saldo pendiente.",
+      "El Generador de Estados Financieros toma solo el saldo pendiente a la fecha de corte (los pagos posteriores no cuentan). La Retefuente de un año anterior va al pasivo no corriente solo por su saldo pendiente. Cambiar un pago queda bloqueado si afecta un periodo cerrado y marca para revisión los periodos preparados afectados.",
+      "Las fechas de pago ya registradas se conservan como un pago por el valor total. Al corregir una declaración, los pagos de la anterior no se trasladan: se registran en la corrección.",
+      "Saldos iniciales: la columna «Valor» ya no queda reducida a unos pocos píxeles; el importe se ve completo y, en ventanas estrechas, la tabla se desplaza horizontalmente."
+    ]
+  },
+  {
+    "version": "1.27.0",
+    "date": "2026-10-15",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.26.0",
     "date": "2026-10-15",
     "notes": [
