@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BookCheck, ChartNoAxesCombined, ClipboardList, FileChartColumn, Landmark, ListTree, Receipt, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, ChartNoAxesCombined, ClipboardList, FileChartColumn, Landmark, ListTree, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
 
@@ -55,6 +55,18 @@ export const financialStatementsModule: ModuleDef = {
       providers: [
         { id: "facturacion-electronica", name: "Facturación electrónica", description: "Excel de facturación electrónica (DIAN).", icon: Receipt, component: lazy(() => import("./sales/EInvoiceSalesPage")) },
         { id: "reporte-de-operaciones", name: "Reporte de operaciones", description: "Reporte de operaciones TPSV (compra y venta de cripto).", icon: Landmark, component: lazy(() => import("./sales/TpsvSalesPage")) },
+      ],
+    },
+    {
+      id: "obligaciones-tributarias",
+      name: "Obligaciones tributarias",
+      description: "Declaraciones DIAN de Retención en la fuente, IVA y Renta por empresa, con su fecha de pago y su efecto en los Estados Financieros.",
+      icon: Scale,
+      providersDescription: "Selecciona el impuesto.",
+      providers: [
+        { id: "retencion-en-la-fuente", name: "Retención en la fuente", description: "Formulario 350 (mensual).", icon: Scale, component: lazy(() => import("./tax-obligations/TaxObligationsPage").then((m) => ({ default: m.WithholdingReturnsPage }))) },
+        { id: "iva", name: "IVA", description: "Formulario 300 (bimestral o cuatrimestral).", icon: Scale, component: lazy(() => import("./tax-obligations/TaxObligationsPage").then((m) => ({ default: m.VatReturnsPage }))) },
+        { id: "renta", name: "Renta", description: "Formulario 110 (anual).", icon: Scale, component: lazy(() => import("./tax-obligations/TaxObligationsPage").then((m) => ({ default: m.IncomeReturnsPage }))) },
       ],
     },
     {

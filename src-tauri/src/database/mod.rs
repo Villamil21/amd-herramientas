@@ -11,6 +11,7 @@ pub mod puc;
 pub mod self_withholding;
 pub mod signers;
 pub mod suppliers;
+pub mod tax;
 pub mod vat_titles;
 pub mod withholding;
 

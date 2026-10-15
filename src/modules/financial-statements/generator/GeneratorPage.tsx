@@ -14,7 +14,9 @@ import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, roundThousands } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText } from "./checks";
+import { taxService } from "../tax-obligations/services/taxService";
+import type { TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
 import { renderStatementsPdf } from "./pdf";
@@ -28,6 +30,8 @@ interface Ledger {
   employees: Employee[];
   payrollRows: PayrollRow[];
   periods: Period[];
+  taxReturns: TaxReturn[];
+  vatPeriodicity: VatPeriodicity | null;
 }
 
 const REVIEW_CHANGED = "Los valores cambiaron después de la última validación (movimientos, catálogo, mapeos o datos de la empresa).";
@@ -67,7 +71,7 @@ export default function GeneratorPage() {
   const loadLedger = useCallback(async () => {
     if (companyId === null) return setLedger(null);
     try {
-      const [movements, balances, batches, adjustments, employees, payrollRows, periods] = await Promise.all([
+      const [movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, taxSettings] = await Promise.all([
         fsService.movements(companyId),
         fsService.bankBalances(companyId),
         fsService.batches(companyId),
@@ -75,8 +79,10 @@ export default function GeneratorPage() {
         fsService.employees(companyId),
         fsService.payrollRows(companyId),
         fsService.periods(companyId),
+        taxService.list(companyId),
+        taxService.settings(companyId),
       ]);
-      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods });
+      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, vatPeriodicity: taxSettings.vatPeriodicity });
     } catch (e) {
       toast(errorMessage(e), "error");
     }
@@ -103,9 +109,10 @@ export default function GeneratorPage() {
 
   const statements = useMemo(() => {
     if (!ledger || !data.catalog || !company || !rangeOk || !presentation) return null;
-    const input = { company, catalog: data.catalog, mappings: data.mappings, movements: ledger.movements, bankBalances: ledger.balances, pucConcepts: data.index.concepts, start, end };
+    const tax = { returns: ledger.taxReturns, puc: data.settingsMap, vatPeriodicity: ledger.vatPeriodicity };
+    const input = { company, catalog: data.catalog, mappings: data.mappings, movements: ledger.movements, bankBalances: ledger.balances, pucConcepts: data.index.concepts, start, end, tax };
     return { current: buildStatements({ ...input, presentation }), other: buildStatements({ ...input, presentation: presentation === "bank" ? "otc" : "bank" }) };
-  }, [ledger, data.catalog, data.mappings, data.index, company, start, end, rangeOk, presentation]);
+  }, [ledger, data.catalog, data.mappings, data.index, data.settingsMap, company, start, end, rangeOk, presentation]);
 
   const s = statements?.current ?? null;
   const rows = useMemo(() => (s ? { esf: esfRows(s), eerr: eerrRows(s) } : null), [s]);
@@ -124,7 +131,8 @@ export default function GeneratorPage() {
       const e = ledger.employees.find((x) => x.id === r.employeeId);
       return !e || !areaFor(e, r.period);
     }).length;
-    return { coverage: coverage(start, end, ledger.movements, ledger.balances, ledger.batches), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
+    const cov = coverage(start, end, ledger.movements, ledger.balances, ledger.batches);
+    return { coverage: cov, tax: taxCoverage(cov.months, ledger.taxReturns, ledger.vatPeriodicity, end), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
   }, [ledger, start, end, rangeOk]);
 
   const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea) : []), [statements, review]);
@@ -350,6 +358,15 @@ export default function GeneratorPage() {
               El ESF usa el saldo del mes de la fecha final. Estas cuentas no suman al Disponible hasta enviar su extracto de {monthText(end.slice(0, 7))}; el saldo de un mes anterior no se usa como saldo vigente.
             </Alert>
           )}
+          {s.tax.issues.length > 0 && !closed && (
+            <Alert
+              tone={s.tax.issues.some((i) => i.level === "blocking") ? "danger" : "warning"}
+              title="Obligaciones tributarias"
+              items={s.tax.issues.map((i) => i.message)}
+            >
+              Resuélvelo en Estados Financieros → Obligaciones tributarias.
+            </Alert>
+          )}
           {review.absences.length > 0 && (
             <Alert tone="danger" title="Empleados pendientes de liquidación" items={review.absences.map((a) => `${a.employee.name}: no aparece en la planilla de ${a.period} (última: ${a.lastSeen}).`)}>
               Resuélvelo en Estados Financieros → Nómina.
@@ -383,7 +400,7 @@ export default function GeneratorPage() {
           )}
 
           <Card title="Fuentes del periodo y cobertura mensual" description="✓ con información · — sin información · 1/2 cuentas con extracto. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos.">
-            <CoverageTable months={review.coverage.months} rows={review.coverage.rows} companyName={company?.razonSocial ?? ""} />
+            <CoverageTable months={review.coverage.months} rows={review.coverage.rows} companyName={company?.razonSocial ?? ""} tax={review.tax} />
           </Card>
 
           <Card

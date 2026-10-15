@@ -48,6 +48,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration { version: 13, name: "minimum_wages", sql: include_str!("../../migrations/013_minimum_wages.sql"), rebuilds_tables: false },
     Migration { version: 14, name: "financial_statements", sql: include_str!("../../migrations/014_financial_statements.sql"), rebuilds_tables: false },
+    Migration { version: 15, name: "tax_obligations", sql: include_str!("../../migrations/015_tax_obligations.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

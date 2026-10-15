@@ -1,6 +1,8 @@
 import { SOURCE_LABEL, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
 import { employeeKey, findAbsences, type Absence } from "../payroll/calc";
 import { monthsBetween, periodLabel } from "../shared/money";
+import { periodsPerYear } from "../tax-obligations/services/effects";
+import type { TaxPeriodicity, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
 import { isBalanced, pendingBankBalances, type BankBalanceStatus, type Statements } from "./engine";
 
 /**
@@ -222,6 +224,44 @@ export function bankCoverage(months: string[], movements: Movement[], balances: 
   };
 }
 
+/**
+ * Cobertura de obligaciones tributarias, cada impuesto con su propia
+ * periodicidad: Retefuente por mes, IVA por periodo (bimestral o
+ * cuatrimestral, sin convertirlo en meses) y Renta por año gravable.
+ * Solo cuentan las declaraciones vigentes (no las reemplazadas).
+ */
+export interface TaxCoverage {
+  vatPeriodicity: VatPeriodicity | null;
+  withholding: Record<string, TaxReturn[]>;
+  vat: { periodicity: TaxPeriodicity | null; periods: { key: string; year: number; period: number; months: string[]; returns: TaxReturn[] }[] };
+  income: { year: number; returns: TaxReturn[] }[];
+  counts: { withholding: number; vat: number; income: number };
+}
+
+export function taxCoverage(months: string[], returns: TaxReturn[], vatPeriodicity: VatPeriodicity | null, end: string): TaxCoverage {
+  const live = returns.filter((r) => r.supersededBy === null);
+  const withholding = Object.fromEntries(months.map((m) => [m, live.filter((r) => r.taxType === "withholding" && r.periodStart.slice(0, 7) === m)]));
+  const vatReturns = live.filter((r) => r.taxType === "vat");
+  const periodicity = vatPeriodicity ?? vatReturns[vatReturns.length - 1]?.periodicity ?? null;
+  const periods: TaxCoverage["vat"]["periods"] = [];
+  if (periodicity && periodicity !== "annual" && periodicity !== "monthly") {
+    const size = 12 / periodsPerYear(periodicity);
+    for (const m of months) {
+      const year = Number(m.slice(0, 4));
+      const period = Math.floor((Number(m.slice(5, 7)) - 1) / size) + 1;
+      const key = `${year}-${period}`;
+      let p = periods.find((x) => x.key === key);
+      if (!p) periods.push((p = { key, year, period, months: [], returns: vatReturns.filter((r) => r.year === year && r.period === period && r.periodicity === periodicity) }));
+      p.months.push(m);
+    }
+  }
+  const incomeReturns = live.filter((r) => r.taxType === "income");
+  const years = incomeReturns.map((r) => r.year);
+  const income: TaxCoverage["income"] = [];
+  if (years.length) for (let y = Math.min(...years); y <= Math.max(...years, Number(end.slice(0, 4)) - 1); y++) income.push({ year: y, returns: incomeReturns.filter((r) => r.year === y) });
+  return { vatPeriodicity, withholding, vat: { periodicity, periods }, income, counts: { withholding: returns.filter((r) => r.taxType === "withholding").length, vat: vatReturns.length, income: incomeReturns.length } };
+}
+
 export interface DuplicateGroup {
   source: FsSource;
   documentId: string;
@@ -271,7 +311,8 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
   const balanced = isBalanced(s);
   const sameResult = s.eerr.beforeTax === other.eerr.beforeTax;
   const pendingBalances = pendingBankBalances(s);
-  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0].filter(Boolean).length;
+  const taxBlocking = s.tax.issues.filter((i) => i.level === "blocking");
+  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0, taxBlocking.length > 0].filter(Boolean).length;
   return [
     { id: "balanced", label: "Activo = Pasivo + Patrimonio", ok: balanced },
     { id: "classified", label: "Todos los PUC clasificados o excluidos", ok: s.unclassified.length === 0, detail: s.unclassified.length ? `${s.unclassified.length} sin clasificar` : undefined },
@@ -284,6 +325,12 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
       label: "Saldo bancario del mes final",
       ok: pendingBalances.length === 0,
       detail: pendingBalances.length ? `Falta saldo bancario del mes final: ${pendingBalances.map((b) => `${b.bank} ${maskAccount(b.accountNumber)}`).join(", ")}` : undefined,
+    },
+    {
+      id: "tax",
+      label: "Obligaciones tributarias revisadas",
+      ok: taxBlocking.length === 0,
+      detail: taxBlocking.length ? `${taxBlocking.length} ${taxBlocking.length === 1 ? "pendiente" : "pendientes"}: ${taxBlocking[0].message}` : undefined,
     },
     { id: "sales", label: "Sin ventas pendientes", ok: true, detail: "Las ventas no se envían con tipos de documento sin clasificar." },
     { id: "duplicates", label: "Sin duplicados activos", ok: duplicates.length === 0, detail: duplicates.length ? `${duplicates.length} documentos en más de una importación` : undefined },

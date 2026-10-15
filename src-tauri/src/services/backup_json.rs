@@ -260,6 +260,9 @@ const FS_TABLES: &[&str] = &[
     "fs_periods",
     "fs_period_events",
     "fs_statement_versions",
+    "fs_tax_company_settings",
+    "fs_tax_returns",
+    "fs_tax_return_events",
 ];
 
 type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;

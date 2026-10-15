@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BankBalance, FsCatalog, FsLine, FsPucMapping, FsSectionKey, Movement } from "../../../types/fs";
 import { formatStatementPesos, roundThousands, estimatedIncomeTax } from "../shared/money";
+import { TAX_PUC, type TaxReturn } from "../tax-obligations/types";
 import { checklist, pendingBalanceText } from "./checks";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type EngineInput } from "./engine";
 
@@ -310,5 +311,29 @@ describe("reporte de operaciones: Banco y OTC", () => {
     const otc = run({ movements: all, end: "2026-04-30", presentation: "otc" });
     expect(bank.eerr.beforeTax).toBe(otc.eerr.beforeTax);
     expect(bank.eerr.beforeTax).toBe(90_000 + 100_000 - 2_500);
+  });
+});
+
+describe("obligaciones tributarias en el ESF", () => {
+  const base = { companyId: 1, previousFormNumber: "", isCorrection: false, supersededBy: null, favorCents: 0, resolution: "", nit: "", companyName: "", fileName: "", detail: {}, createdAt: "", updatedAt: "", events: [] as TaxReturn["events"] };
+  const retefuente = { ...base, id: 1, taxType: "withholding", year: 2026, period: 9, periodicity: "monthly", periodStart: "2026-09-01", periodEnd: "2026-09-30", formNumber: "1", payableCents: 62_400_000, paymentDate: "2026-10-15", incomeOrdinaryCents: null, incomeLossCents: null, advanceNextCents: null, advanceTargetYear: null } as TaxReturn;
+  const renta = { ...base, id: 2, taxType: "income", year: 2025, period: null, periodicity: "annual", periodStart: "2025-01-01", periodEnd: "2025-12-31", formNumber: "2", payableCents: 0, paymentDate: null, incomeOrdinaryCents: 1_966_200_000, incomeLossCents: 0, advanceNextCents: 0, advanceTargetYear: 2026 } as TaxReturn;
+  const puc = new Map([[TAX_PUC.withholdingPayable, "236540"], [TAX_PUC.priorResults, "370505"]]);
+  const tax = { returns: [retefuente, renta], puc, vatPeriodicity: null };
+  const mappings = [...MAPPINGS, map("236540", 6)];
+
+  it("la retefuente por pagar entra al pasivo hasta su pago y el resultado fiscal a ejercicios anteriores", () => {
+    const sep = run({ tax, mappings, end: "2026-09-30" });
+    expect(sep.esf.currentLiabilities).toBe(62_400_000);
+    expect(sep.sections.equity.lines.find((l) => l.line.id === 17)!.cents).toBe(1_966_200_000);
+    expect(checklist(sep, sep, [], [], 0).find((c) => c.id === "tax")!.ok).toBe(true);
+    expect(run({ tax, mappings, end: "2026-10-31" }).esf.currentLiabilities).toBe(0);
+    expect(run({ tax, mappings, end: "2026-08-31" }).esf.currentLiabilities).toBe(0);
+  });
+
+  it("sin la cuenta PUC configurada no se envía y bloquea la lista de verificación", () => {
+    const s = run({ tax: { ...tax, puc: new Map() }, mappings, end: "2026-09-30" });
+    expect(s.esf.currentLiabilities).toBe(0);
+    expect(checklist(s, s, [], [], 0).find((c) => c.id === "tax")!.ok).toBe(false);
   });
 });

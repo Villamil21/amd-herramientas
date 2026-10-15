@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BankBalance, BatchSummary, Movement } from "../../../types/fs";
-import { activeDuplicates, bankCoverage, coverage, maskAccount } from "./checks";
+import type { TaxReturn } from "../tax-obligations/types";
+import { activeDuplicates, bankCoverage, coverage, maskAccount, taxCoverage } from "./checks";
 
 const mv = (id: number, date: string, batchId: number, extra: Partial<Movement> = {}) =>
   ({ id, companyId: 1, batchId, accountingDate: date, source: "purchases", documentId: `d${id}`, status: "active", amountCents: 1, pucCode: "513595" }) as Movement & typeof extra;
@@ -101,5 +102,26 @@ describe("cobertura de extractos por banco y cuenta", () => {
 describe("duplicados activos", () => {
   it("detecta un documento activo en dos importaciones", () => {
     expect(activeDuplicates([mv(1, "2026-01-01", 1), { ...mv(2, "2026-01-01", 2), documentId: "d1" }, { ...mv(3, "2026-01-01", 3), documentId: "d1", status: "replaced" }])).toEqual([{ source: "purchases", documentId: "d1", batchIds: [1, 2] }]);
+  });
+});
+
+describe("cobertura de obligaciones tributarias", () => {
+  const r = (id: number, taxType: TaxReturn["taxType"], year: number, period: number | null, periodicity: TaxReturn["periodicity"], periodStart: string, extra: Partial<TaxReturn> = {}) =>
+    ({ id, taxType, year, period, periodicity, periodStart, supersededBy: null, ...extra }) as TaxReturn;
+  const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
+
+  it("Retefuente por mes, IVA por periodo (sin partirlo en meses) y Renta por año", () => {
+    const returns = [
+      r(1, "withholding", 2026, 9, "monthly", "2026-09-01"),
+      r(2, "withholding", 2026, 8, "monthly", "2026-08-01", { supersededBy: 9 }),
+      r(3, "vat", 2026, 4, "bimonthly", "2026-07-01"),
+      r(4, "income", 2023, null, "annual", "2023-01-01"),
+      r(5, "income", 2025, null, "annual", "2025-01-01"),
+    ];
+    const t = taxCoverage(months, returns, "bimonthly", "2026-09-30");
+    expect(months.filter((m) => t.withholding[m].length)).toEqual(["2026-09"]);
+    expect(t.vat.periods.map((p) => [p.period, p.months.length, p.returns.length])).toEqual([[1, 2, 0], [2, 2, 0], [3, 2, 0], [4, 2, 1], [5, 1, 0]]);
+    expect(t.income.map((y) => [y.year, y.returns.length])).toEqual([[2023, 1], [2024, 0], [2025, 1]]);
+    expect(taxCoverage(months, returns, "four_monthly", "2026-09-30").vat.periods.map((p) => p.months.length)).toEqual([4, 4, 1]);
   });
 });

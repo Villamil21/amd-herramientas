@@ -9,7 +9,11 @@ import { parseNumericText } from "../../../utils/numbers";
 import type { PucIndex } from "../puc-codes/services/pucCatalog";
 import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate, formatStatementPesos, periodLabel } from "../shared/money";
-import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow } from "./checks";
+import { navigate, paths } from "../../../app/router";
+import { StatusBadge as TaxStatusBadge } from "../tax-obligations/components";
+import { periodName, taxStatus } from "../tax-obligations/services/effects";
+import { PERIODICITY_LABEL, type TaxReturn, type VatPeriodicity } from "../tax-obligations/types";
+import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow, type TaxCoverage } from "./checks";
 import type { LineValue, StatementRow } from "./engine";
 
 /** Estado en la app: valores al millar (como en el PDF) y, al abrir una línea, el exacto y su origen por PUC. */
@@ -85,13 +89,16 @@ const shortMonth = (m: string) => `${periodLabel(m).slice(0, 3)} ${m.slice(2, 4)
 const plural = (n: number, one: string, many: string) => `${formatInteger(n)} ${n === 1 ? one : many}`;
 
 /** Contexto del detalle de un mes: qué fila se abrió (fuente, extractos, banco o cuenta). */
-type CoverageSelection = { kind: "source"; row: CoverageRow; month: string } | { kind: "bank"; title: string; cell: BankCell; month: string };
+type CoverageSelection =
+  | { kind: "source"; row: CoverageRow; month: string }
+  | { kind: "bank"; title: string; cell: BankCell; month: string }
+  | { kind: "tax"; title: string; returns: TaxReturn[]; taxPath: string };
 
 /**
  * Fuentes del periodo y cobertura mensual: ✓ cargado / — falta. Clic en un mes: sus importaciones.
  * Los extractos se despliegan por banco y, si un banco tiene varias cuentas, por cuenta.
  */
-export function CoverageTable({ months, rows, companyName }: { months: string[]; rows: CoverageRow[]; companyName: string }) {
+export function CoverageTable({ months, rows, companyName, tax }: { months: string[]; rows: CoverageRow[]; companyName: string; tax?: TaxCoverage }) {
   const [selected, setSelected] = useState<CoverageSelection | null>(null);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const toggle = (key: string) =>
@@ -224,7 +231,80 @@ export function CoverageTable({ months, rows, companyName }: { months: string[];
     return out;
   };
 
-  const title = !selected ? "" : selected.kind === "source" ? `${selected.row.label} · ${periodLabel(selected.month)}` : `${companyName} · ${selected.title} · ${periodLabel(selected.month)}`;
+  const title = !selected ? "" : selected.kind === "source" ? `${selected.row.label} · ${periodLabel(selected.month)}` : selected.kind === "tax" ? `${companyName} · ${selected.title}` : `${companyName} · ${selected.title} · ${periodLabel(selected.month)}`;
+
+  /** Obligaciones tributarias: cada impuesto con su periodicidad (mes, periodo de IVA, año). */
+  const taxRows = (t: TaxCoverage) => {
+    const isOpen = open.has("tax");
+    const total = t.counts.withholding + t.counts.vat + t.counts.income;
+    const pick = (title: string, returns: TaxReturn[], provider: string) => setSelected({ kind: "tax", title, returns, taxPath: paths.provider("estados-financieros", "obligaciones-tributarias", provider) });
+    const mark = (ok: boolean, label: string, onClick: () => void, extra = "") => (
+      <button type="button" className={`fs-coverage__cell fs-coverage__cell--wide ${ok ? "is-loaded" : ""}`} onClick={onClick} aria-label={`${label}: ${ok ? "declarada" : "sin declaración"}`}>
+        {extra}
+        {ok ? <Check size={14} /> : <Minus size={14} />}
+      </button>
+    );
+    const out = [
+      <tr key="tax" className="fs-coverage__group">
+        <td>
+          <button type="button" className="fs-coverage__toggle" onClick={() => toggle("tax")} aria-expanded={isOpen}>
+            {chevron(isOpen)}
+            Obligaciones tributarias
+          </button>
+          <div className="table__secondary">{total ? `Retefuente ${t.counts.withholding} · IVA ${t.counts.vat} · Renta ${t.counts.income}` : "Sin declaraciones registradas"}</div>
+        </td>
+        <td colSpan={months.length} className="muted" style={{ textAlign: "center" }}>
+          {isOpen ? "" : "Retefuente por mes · IVA por periodo · Renta por año"}
+        </td>
+      </tr>,
+    ];
+    if (!isOpen) return out;
+    out.push(
+      <tr key="tax-withholding" className="fs-coverage__bank">
+        <td>Retención en la fuente</td>
+        {months.map((m) => (
+          <td key={m} style={{ textAlign: "center" }}>
+            {mark(t.withholding[m].length > 0, `Retefuente ${periodLabel(m)}`, () => pick(`Retención en la fuente · ${periodLabel(m)}`, t.withholding[m], "retencion-en-la-fuente"))}
+          </td>
+        ))}
+      </tr>,
+      <tr key="tax-vat" className="fs-coverage__bank">
+        <td>
+          IVA
+          <div className="table__secondary">{t.vat.periodicity ? PERIODICITY_LABEL[t.vat.periodicity] : "Periodicidad sin configurar"}</div>
+        </td>
+        {t.vat.periods.length === 0 ? (
+          <td colSpan={months.length} className="muted" style={{ textAlign: "center" }}>
+            Configura la periodicidad de IVA de la empresa en Obligaciones tributarias → IVA.
+          </td>
+        ) : (
+          t.vat.periods.map((p) => {
+            const name = periodName({ taxType: "vat", year: p.year, period: p.period, periodicity: t.vat.periodicity! });
+            return (
+              <td key={p.key} colSpan={p.months.length} style={{ textAlign: "center" }}>
+                {mark(p.returns.length > 0, `IVA ${name}`, () => pick(`IVA · ${name}`, p.returns, "iva"), `P${p.period} `)}
+              </td>
+            );
+          })
+        )}
+      </tr>,
+      <tr key="tax-income" className="fs-coverage__bank">
+        <td>Renta</td>
+        <td colSpan={months.length}>
+          {t.income.length === 0 ? (
+            <span className="muted">Sin declaraciones de renta.</span>
+          ) : (
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+              {t.income.map((y) => (
+                <span key={y.year}>{mark(y.returns.length > 0, `Renta ${y.year}`, () => pick(`Renta · año gravable ${y.year}`, y.returns, "renta"), `${y.year} `)}</span>
+              ))}
+            </div>
+          )}
+        </td>
+      </tr>,
+    );
+    return out;
+  };
   return (
     <>
       <div className="table-wrap">
@@ -253,6 +333,7 @@ export function CoverageTable({ months, rows, companyName }: { months: string[];
                 </tr>
               ),
             )}
+            {tax && taxRows(tax)}
           </tbody>
         </table>
       </div>
@@ -260,8 +341,54 @@ export function CoverageTable({ months, rows, companyName }: { months: string[];
         {selected?.kind === "source" &&
           (selected.row.cells[selected.month].batches.length === 0 ? <p className="muted">No hay información de este mes.</p> : <BatchTable batches={selected.row.cells[selected.month].batches} />)}
         {selected?.kind === "bank" && <BankStatementTable cell={selected.cell} />}
+        {selected?.kind === "tax" && <TaxReturnsTable returns={selected.returns} vatPeriodicity={tax?.vatPeriodicity ?? null} path={selected.taxPath} />}
       </Modal>
     </>
+  );
+}
+
+/** Declaraciones de una celda de la cobertura tributaria, con acceso al submódulo. */
+function TaxReturnsTable({ returns, vatPeriodicity, path }: { returns: TaxReturn[]; vatPeriodicity: VatPeriodicity | null; path: string }) {
+  return (
+    <div className="stack stack--sm">
+      {returns.length === 0 ? (
+        <p className="muted">No hay declaración registrada.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Formulario</th>
+                <th style={{ textAlign: "right" }}>Saldo a pagar</th>
+                <th style={{ textAlign: "right" }}>Saldo a favor</th>
+                <th>Fecha de pago</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {returns.map((r) => (
+                <tr key={r.id}>
+                  <td className="nowrap">{periodName(r)}</td>
+                  <td className="mono">{r.formNumber || "—"}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(r.payableCents)}</td>
+                  <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(r.favorCents)}</td>
+                  <td className="nowrap">{r.paymentDate ? formatIsoDate(r.paymentDate) : "—"}</td>
+                  <td>
+                    <TaxStatusBadge status={taxStatus(r, vatPeriodicity)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div>
+        <Button size="sm" onClick={() => navigate(path)}>
+          Abrir Obligaciones tributarias
+        </Button>
+      </div>
+    </div>
   );
 }
 

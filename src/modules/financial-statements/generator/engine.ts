@@ -1,6 +1,7 @@
 import type { Company } from "../../../types/models";
 import { EERR_SECTIONS, ESF_SECTIONS, SECTION_LABEL, type BankBalance, type FsCatalog, type FsLine, type FsPucMapping, type FsSectionKey, type Movement, type Presentation } from "../../../types/fs";
 import { estimatedIncomeTax, monthsBetween, roundThousands } from "../shared/money";
+import { taxEffects, type TaxEffects, type TaxInput } from "../tax-obligations/services/effects";
 
 /**
  * Motor de los Estados Financieros: consolida los movimientos de UNA empresa
@@ -19,6 +20,9 @@ import { estimatedIncomeTax, monthsBetween, roundThousands } from "../shared/mon
  *   meses). Sin ella la cuenta queda pendiente: el último saldo conocido es solo
  *   referencia y nunca entra al ESF.
  * - Cuenta por pagar: cuenta mientras no se haya pagado a la fecha final (settlesOn).
+ * - Obligaciones tributarias: el efecto de las declaraciones guardadas a la
+ *   fecha final (por pagar, saldos a favor como foto, anticipo del año y
+ *   resultados fiscales de años anteriores); ver tax-obligations/services/effects.
  * - Capital social: el capital suscrito de la empresa; la diferencia con el
  *   pagado va a 132505 (A socios).
  * - Reporte de operaciones (cripto): resultado propio = ventas − compras. Banco:
@@ -55,6 +59,8 @@ export interface EngineInput {
   start: string;
   end: string;
   presentation: Presentation;
+  /** Declaraciones tributarias de la empresa (Obligaciones tributarias). */
+  tax?: TaxInput;
 }
 
 export interface Contribution {
@@ -122,6 +128,8 @@ export interface Statements {
   pucBalances: Map<string, number>;
   /** Una fila por cuenta bancaria con saldos hasta el mes final. */
   bankBalances: BankBalanceStatus[];
+  /** Efecto de las obligaciones tributarias a la fecha final y lo que falta resolver. */
+  tax: TaxEffects;
   presentation: Presentation;
 }
 
@@ -194,6 +202,10 @@ export function buildStatements(input: EngineInput): Statements {
   // 2. Saldo bancario: la foto del mes final de cada cuenta; sin ella, pendiente (sin respaldo silencioso al mes anterior).
   const bankBalances = bankBalanceStatus(input.bankBalances, end);
   for (const b of bankBalances) if (b.balance) post(b.balance.pucCode, "", b.balance.balanceCents, null);
+
+  // 2b. Obligaciones tributarias a la fecha final (sin PUC configurado no se envían: bloquea en la lista de verificación).
+  const tax = input.tax ? taxEffects(input.tax, end) : { effects: [], issues: [] };
+  for (const e of tax.effects) if (e.pucCode) post(e.pucCode, "", e.cents, null);
 
   // 3. Capital: suscrito en Capital social; la diferencia con el pagado en 132505.
   const { subscribedTotalShares, subscribedNominalValue, paidTotalShares, paidNominalValue } = input.company;
@@ -294,6 +306,7 @@ export function buildStatements(input: EngineInput): Statements {
     crypto: { buysCents: crypto.buys, sellsCents: crypto.sells, ownResultCents: ownResult, months, monthlyAverageCents },
     pucBalances,
     bankBalances,
+    tax,
     presentation,
   };
 }

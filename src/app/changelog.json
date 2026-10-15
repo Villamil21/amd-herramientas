@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.23.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Nuevo submódulo Estados Financieros → Obligaciones tributarias, con Retención en la fuente (Formulario 350), IVA (Formulario 300) y Renta (Formulario 110). Las declaraciones se importan una vez por empresa y quedan guardadas.",
+      "La declaración se relaciona con la empresa por NIT. Los valores se leen por el nombre del concepto (Total retenciones más sanciones, Total saldo a pagar, Total saldo a favor, Renta líquida ordinaria, Pérdida líquida, Anticipo para el año siguiente) y se validan contra la casilla de cada versión del formulario. Un formulario repetido no se duplica y una corrección reemplaza a la anterior sin borrar su historial.",
+      "La fecha de pago se registra a mano (la fecha de presentación no es pago). Retefuente, IVA y Renta por pagar son cuentas por pagar hasta esa fecha; el saldo a favor de IVA es la foto del último periodo terminado (nunca se suman periodos); el anticipo de renta cuenta solo en el año siguiente; los resultados fiscales de años anteriores alimentan «Resultados de ejercicios anteriores». El patrimonio declarado en Renta es solo informativo.",
+      "IVA bimestral o cuatrimestral según la periodicidad configurada para cada empresa. Las cuentas PUC de cada concepto son configurables.",
+      "Generador: nueva fuente «Obligaciones tributarias» en la cobertura (Retefuente por mes, IVA por periodo, Renta por año) y nueva verificación «Obligaciones tributarias revisadas»."
+    ]
+  },
+  {
     "version": "1.22.2",
     "date": "2026-10-15",
     "notes": [

@@ -3326,6 +3326,16 @@ button.stat--link {
   box-shadow: 0 0 0 1.5px var(--color-surface);
 }
 
+/* Celda con texto (periodo de IVA «P4», año de renta). */
+.fs-coverage__cell--wide {
+  width: auto;
+  min-width: 26px;
+  padding: 0 8px;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Mes final sin saldo bancario: el ESF de esa cuenta queda pendiente (aunque haya extracto). */
 .fs-coverage__cell.is-balance-pending {
   border: 1.5px dashed var(--color-danger);

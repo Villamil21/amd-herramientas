@@ -8,6 +8,7 @@ pub mod puc;
 pub mod self_withholding;
 pub mod signer;
 pub mod supplier;
+pub mod tax;
 pub mod withholding;
 
 /// Recorta y limita la longitud de un texto proveniente del frontend.

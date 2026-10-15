@@ -16,6 +16,7 @@ pub mod self_withholding;
 pub mod statements;
 pub mod signers;
 pub mod suppliers;
+pub mod tax;
 pub mod withholding;
 
 use std::path::PathBuf;
