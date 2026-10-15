@@ -3,6 +3,8 @@
  * centésimas de punto (4 % → 400) y la base UVT en centésimas de UVT (2 → 200).
  */
 
+import { formatDateForDisplay } from "../../../../utils/dates";
+
 /** a × b / d redondeado a la unidad, mitad hacia arriba (lejos de cero). Sin redondeo bancario. */
 export function mulDivRound(a: number, b: number, d: number): number {
   const n = BigInt(Math.round(a)) * BigInt(Math.round(b));
@@ -70,4 +72,4 @@ const MONTHS = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", 
 export const periodLabel = (key: string) => `${MONTHS[Number(key.slice(5, 7)) - 1] ?? key} ${key.slice(0, 4)}`;
 
 /** "2026-01-31" → "31/01/2026". */
-export const formatDate = (iso?: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "—");
+export const formatDate = (iso?: string) => formatDateForDisplay(iso);

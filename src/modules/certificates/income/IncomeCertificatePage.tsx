@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, FileDown, FileText, FolderOpen, Plus, Settings2 } from "lucide-react";
-import { Alert, Button, Card, Field, Input, Loader, PageHeader, Select, useToast } from "../../../components/ui";
+import { Alert, Button, Card, DateInput, Field, Input, Loader, PageHeader, Select, useToast } from "../../../components/ui";
 import { useAsync } from "../../../hooks/useAsync";
 import { fileService } from "../../../services/fileService";
 import { identityDocumentService } from "../../../services/identityDocumentService";
@@ -294,7 +294,7 @@ export default function IncomeCertificatePage() {
                   {(id) => <Input id={id} inputMode="decimal" maxLength={24} value={form.copEquivalent} placeholder="Ej. 3.302.018" onChange={(e) => set("copEquivalent", e.target.value)} />}
                 </Field>
                 <Field label="Fecha de referencia de la tasa" required>
-                  {(id) => <Input id={id} type="date" value={form.exchangeRateReferenceDate} onChange={(e) => set("exchangeRateReferenceDate", e.target.value)} />}
+                  {(id) => <DateInput id={id} value={form.exchangeRateReferenceDate} onChange={(v) => set("exchangeRateReferenceDate", v)} />}
                 </Field>
               </>
             )}

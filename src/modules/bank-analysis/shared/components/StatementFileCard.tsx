@@ -3,6 +3,7 @@ import { FileText, FolderOpen, Upload } from "lucide-react";
 import { Alert, Button, Card, useToast } from "../../../../components/ui";
 import { fileService } from "../../../../services/fileService";
 import type { ImportState } from "../useStatementImport";
+import { formatDateForDisplay } from "../../../../utils/dates";
 
 interface Props {
   state: ImportState<unknown>;
@@ -72,14 +73,14 @@ export function StatementFileCard({ state, details, picking, busy, exportedPath,
   );
 }
 
-/** "· Cuenta 431-00102-2 · 2026/02/01 a 2026/02/28" con lo que se haya extraído. */
+/** "· Cuenta 431-00102-2 · 01/02/2026 a 28/02/2026" con lo que se haya extraído. */
 export function AccountDetails({ accountNumber, periodFrom, periodTo }: { accountNumber?: string; periodFrom?: string; periodTo?: string }) {
   return (
     <>
       {accountNumber && <span>· Cuenta {accountNumber}</span>}
       {periodFrom && periodTo && (
         <span>
-          · {periodFrom} a {periodTo}
+          · {formatDateForDisplay(periodFrom)} a {formatDateForDisplay(periodTo)}
         </span>
       )}
     </>

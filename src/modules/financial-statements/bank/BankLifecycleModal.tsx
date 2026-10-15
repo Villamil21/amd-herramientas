@@ -4,6 +4,7 @@ import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import type { BankAccountLifecycle, BankLifecycleAction } from "../../../types/fs";
 import { periodLabel } from "../shared/money";
+import { formatDateTimeForDisplay } from "../../../utils/dates";
 
 const ACTION_LABEL: Record<BankLifecycleAction, string> = {
   opened: "Apertura confirmada",
@@ -115,7 +116,7 @@ export function BankLifecycleModal({ open, companyId, bank, accountNumber, title
                     {e.action === "edited" && e.previous ? ` · antes: apertura ${monthOrDash(e.previous.openedPeriod)}, cierre ${monthOrDash(e.previous.closedPeriod)}` : ""}
                     {e.note ? ` · «${e.note}»` : ""}
                   </span>
-                  <span className="muted">{e.createdAt.replace("T", " ").slice(0, 16)}</span>
+                  <span className="muted">{formatDateTimeForDisplay(e.createdAt)}</span>
                 </li>
               ))}
             </ul>

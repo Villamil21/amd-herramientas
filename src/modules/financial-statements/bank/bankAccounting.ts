@@ -1,5 +1,6 @@
 import type { BankAccountLifecycle, BatchInput, BatchSummary, GmfRule, MovementInput } from "../../../types/fs";
 import { lastDayOfMonth, slashToIso } from "../shared/money";
+import { formatDateForDisplay } from "../../../utils/dates";
 
 /**
  * Capa contable de los extractos bancarios. Cada banco conserva su lector y su
@@ -281,7 +282,7 @@ export function buildBankBatch(
       amountCents: c.totalCents,
       dc: c.dc,
       // Dirección bancaria normalizada (salida/entrada): el signo contable sale de ella y de la cuenta destino, no del signo del extracto.
-      detail: { statement: fileName, period: `${statement.periodFrom} a ${statement.periodTo}`, account: statement.accountNumber, direction: c.dc === "D" ? "outflow" : "inflow", count: c.count, movements: c.movements },
+      detail: { statement: fileName, period: `${formatDateForDisplay(statement.periodFrom)} a ${formatDateForDisplay(statement.periodTo)}`, account: statement.accountNumber, direction: c.dc === "D" ? "outflow" : "inflow", count: c.count, movements: c.movements },
     });
     mappings.push({ bank: statement.bank, concept: c.description, pucCode: d.pucCode });
   }
@@ -305,7 +306,7 @@ export function buildBankBatch(
       dc: value > 0 ? "D" : "C",
       detail: {
         statement: fileName,
-        period: `${statement.periodFrom} a ${statement.periodTo}`,
+        period: `${formatDateForDisplay(statement.periodFrom)} a ${formatDateForDisplay(statement.periodTo)}`,
         account: statement.accountNumber,
         direction: value > 0 ? "outflow" : "inflow",
         count: g.concepts.reduce((s, c) => s + c.count, 0),
@@ -318,7 +319,7 @@ export function buildBankBatch(
     companyId,
     source: "bank",
     fileName,
-    periodLabel: `${statement.bank} ${statement.accountNumber ?? ""} · ${statement.periodFrom} a ${statement.periodTo}`,
+    periodLabel: `${statement.bank} ${statement.accountNumber ?? ""} · ${formatDateForDisplay(statement.periodFrom)} a ${formatDateForDisplay(statement.periodTo)}`,
     periodStart: statement.periodFrom,
     periodEnd: statement.periodTo,
     dedupeKey: statementDedupeKey(statement),

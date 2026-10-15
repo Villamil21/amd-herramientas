@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Eye, FileDown, Lock, Pencil, Plus, Unlock, XCircle } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
-import { Alert, Badge, Button, Card, ConfirmDialog, Field, Input, Modal, PageHeader, Select, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, Card, ConfirmDialog, DateInput, Field, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
 import { fsService } from "../../../services/fsService";
 import { signerService } from "../../../services/signerService";
@@ -34,6 +34,7 @@ import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } f
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
 import { renderStatementsPdf } from "./pdf";
 import { buildSnapshot, pdfModel, type StatementsSnapshot } from "./snapshot";
+import { formatDateTimeForDisplay } from "../../../utils/dates";
 
 interface Ledger {
   movements: Movement[];
@@ -239,9 +240,9 @@ export default function GeneratorPage() {
       <Card>
         <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
           <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
-          <Field label="Fecha inicial" required>{(id) => <Input id={id} type="date" value={start} onChange={(e) => setStart(e.target.value)} />}</Field>
+          <Field label="Fecha inicial" required>{(id) => <DateInput id={id} value={start} onChange={setStart} />}</Field>
           <Field label="Fecha final" required error={start && end && start > end ? "Debe ser posterior a la inicial." : null}>
-            {(id) => <Input id={id} type="date" value={end} onChange={(e) => setEnd(e.target.value)} />}
+            {(id) => <DateInput id={id} value={end} onChange={setEnd} />}
           </Field>
           <Field label="Presentación" required hint="Solo interna: no aparece en el PDF.">
             {(id) => (
@@ -512,7 +513,7 @@ export default function GeneratorPage() {
                       <tr key={v.id}>
                         <td>Versión {v.version}</td>
                         <td>{v.fileName}</td>
-                        <td>{v.generatedAt.replace("T", " ").slice(0, 16)}</td>
+                        <td>{formatDateTimeForDisplay(v.generatedAt)}</td>
                         <td className="actions">
                           <Button size="sm" icon={<FileDown size={14} />} onClick={() => void openPreview(v.snapshot as StatementsSnapshot, true)}>
                             Regenerar

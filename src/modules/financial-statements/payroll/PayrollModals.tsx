@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Field, Input, Modal, Select, Textarea, useToast } from "../../../components/ui";
+import { Alert, Button, DateInput, Field, Input, Modal, Select, Textarea, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import { AREA_LABEL, type Area, type Employee } from "../../../types/fs";
 import { areaFor } from "./calc";
-import { formatExactCents, lastDayOfMonth, periodLabel } from "../shared/money";
+import { formatExactCents, lastDayOfMonth, periodLabel, todayIso } from "../shared/money";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../utils/dates";
 
 function useSave(onDone: () => void | Promise<unknown>) {
   const toast = useToast();
@@ -57,7 +58,7 @@ export function EmployeeFormModal({ open, companyId, docType, docNumber, name, p
             {(id) => <Input id={id} value={values.name} onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))} />}
           </Field>
           <Field label="Fecha de ingreso" required hint="Escríbela tal como figura en el contrato.">
-            {(id) => <Input id={id} type="date" value={values.hireDate} onChange={(e) => setValues((v) => ({ ...v, hireDate: e.target.value }))} />}
+            {(id) => <DateInput id={id} value={values.hireDate} onChange={(hireDate) => setValues((v) => ({ ...v, hireDate }))} />}
           </Field>
           <Field label="Área contable" required hint={`Vigente desde ${periodLabel(period)}.`}>
             {(id) => (
@@ -82,11 +83,11 @@ export function RehireModal({ employee, onClose, onSaved }: { employee: Employee
   const last = employee?.employments[employee.employments.length - 1];
   const save = () => employee && void run(() => fsService.addEmployment(employee.id, hireDate), "Reingreso registrado.");
   return (
-    <Modal open={employee !== null} title="Reingreso" description={employee ? `${employee.name} (${employee.docType} ${employee.docNumber}) fue liquidado el ${last?.endDate}. Se abrirá la vinculación #${(last?.number ?? 0) + 1}.` : ""} onClose={onClose} locked={saving} footer={footer(saving, onClose, save, "Registrar reingreso", !/^\d{4}-\d{2}-\d{2}$/.test(hireDate))}>
+    <Modal open={employee !== null} title="Reingreso" description={employee ? `${employee.name} (${employee.docType} ${employee.docNumber}) fue liquidado el ${formatDateForDisplay(last?.endDate)}. Se abrirá la vinculación #${(last?.number ?? 0) + 1}.` : ""} onClose={onClose} locked={saving} footer={footer(saving, onClose, save, "Registrar reingreso", !/^\d{4}-\d{2}-\d{2}$/.test(hireDate))}>
       <div className="stack">
         {error && <Alert tone="danger">{error}</Alert>}
         <Field label="Fecha de reingreso" required>
-          {(id) => <Input id={id} type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} />}
+          {(id) => <DateInput id={id} value={hireDate} onChange={setHireDate} />}
         </Field>
       </div>
     </Modal>
@@ -115,7 +116,7 @@ export function LiquidationModal({ employee, lastPeriod, onClose, onSaved }: { e
     <Modal
       open={employee !== null}
       title="Registrar liquidación"
-      description={employee ? `${employee.name} · ${employee.docType} ${employee.docNumber} · Vinculación #${employment?.number ?? "—"} desde ${employment?.hireDate ?? "—"}` : ""}
+      description={employee ? `${employee.name} · ${employee.docType} ${employee.docNumber} · Vinculación #${employment?.number ?? "—"} desde ${formatDateForDisplay(employment?.hireDate)}` : ""}
       onClose={onClose}
       locked={saving}
       footer={footer(saving, onClose, save, "Registrar liquidación", !employment || !/^\d{4}-\d{2}-\d{2}$/.test(date))}
@@ -123,7 +124,7 @@ export function LiquidationModal({ employee, lastPeriod, onClose, onSaved }: { e
       <div className="stack">
         {error && <Alert tone="danger">{error}</Alert>}
         <div className="form-grid">
-          <Field label="Fecha de liquidación" required>{(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+          <Field label="Fecha de liquidación" required>{(id) => <DateInput id={id} value={date} onChange={setDate} />}</Field>
           <Field label="Último periodo trabajado">{(id) => <Input id={id} value={periodLabel(lastPeriod)} disabled />}</Field>
           <Field label="Motivo / observación" className="span-2">{(id) => <Textarea id={id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
         </div>
@@ -183,7 +184,7 @@ export function AreaChangeModal({ employee, period, onClose, onSaved }: { employ
 const FIELD_LABEL: Record<string, string> = { docType: "Tipo de documento", docNumber: "Número", name: "Nombre", hireDate: "Fecha de ingreso", area: "Área", areaFrom: "Área desde" };
 
 const fieldValue = (key: string, value: unknown) =>
-  value === null || value === undefined || value === "" ? "—" : key === "area" ? (AREA_LABEL[value as Area] ?? String(value)) : key === "areaFrom" ? periodLabel(String(value)) : String(value);
+  value === null || value === undefined || value === "" ? "—" : key === "area" ? (AREA_LABEL[value as Area] ?? String(value)) : key === "areaFrom" ? periodLabel(String(value)) : key === "hireDate" ? formatDateForDisplay(String(value)) : String(value);
 
 /**
  * «Editar empleado»: corrige la ficha sin eliminarla. Un cambio de área no
@@ -196,7 +197,7 @@ export function EmployeeEditModal({ employee, period, onClose, onSaved }: { empl
   const employment = employee?.employments[employee.employments.length - 1];
   useEffect(() => {
     if (!employee) return;
-    const from = period || new Date().toISOString().slice(0, 7);
+    const from = period || todayIso().slice(0, 7);
     setValues({ docType: employee.docType, docNumber: employee.docNumber, name: employee.name, hireDate: employment?.hireDate ?? "", area: areaFor(employee, from) ?? "", areaFrom: from });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee, period]);
@@ -240,8 +241,8 @@ export function EmployeeEditModal({ employee, period, onClose, onSaved }: { empl
           <Field label="Nombre" required className="span-2">
             {(id) => <Input id={id} value={values.name} onChange={set("name")} />}
           </Field>
-          <Field label="Fecha de ingreso" required hint={employment ? `Vinculación #${employment.number}${employment.endDate ? ` (liquidada el ${employment.endDate})` : " vigente"}.` : undefined}>
-            {(id) => <Input id={id} type="date" value={values.hireDate} onChange={set("hireDate")} />}
+          <Field label="Fecha de ingreso" required hint={employment ? `Vinculación #${employment.number}${employment.endDate ? ` (liquidada el ${formatDateForDisplay(employment.endDate)})` : " vigente"}.` : undefined}>
+            {(id) => <DateInput id={id} value={values.hireDate} onChange={(v) => set("hireDate")({ target: { value: v } })} />}
           </Field>
           <span />
           <Field label="Área contable" required hint={currentArea ? `Vigente en ${periodLabel(values.areaFrom)}: ${AREA_LABEL[currentArea]}.` : undefined}>
@@ -277,7 +278,7 @@ export function EmployeeEditModal({ employee, period, onClose, onSaved }: { empl
                         .join(" · ")}
                       {e.next?.areaFrom ? ` (desde ${fieldValue("areaFrom", e.next.areaFrom)})` : ""}
                     </span>
-                    <span className="muted">{e.createdAt.replace("T", " ").slice(0, 16)}</span>
+                    <span className="muted">{formatDateTimeForDisplay(e.createdAt)}</span>
                   </li>
                 ))}
               </ul>

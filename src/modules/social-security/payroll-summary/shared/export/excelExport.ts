@@ -1,5 +1,6 @@
 import { saveExcelSheets, type ExportSheet } from "../../../../bank-analysis/shared/excelExportService";
 import type { PayrollSummary } from "../types";
+import { formatDateForDisplay } from "../../../../../utils/dates";
 
 const PROVIDER_NAME: Record<PayrollSummary["provider"], string> = { "aportes-en-linea": "AportesEnLinea" };
 
@@ -19,7 +20,7 @@ export function buildPayrollSheets(s: PayrollSummary): ExportSheet[] {
       { header: "Intereses de Mora", kind: "pesos" },
       { header: "Cantidad de Empleados", kind: "integer" },
     ],
-    rows: [[s.period, s.paymentDate, s.paymentAmount, s.totalContributions, s.lateInterest, s.employeeCount]],
+    rows: [[s.period, formatDateForDisplay(s.paymentDate), s.paymentAmount, s.totalContributions, s.lateInterest, s.employeeCount]],
   };
 
   const employees: ExportSheet = {

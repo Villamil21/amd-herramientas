@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
-import { Alert, Button, Card, Field, Input, PageHeader, useToast } from "../../../components/ui";
+import { Alert, Button, Card, DateInput, Field, Input, PageHeader, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import type { BatchInput } from "../../../types/fs";
@@ -118,7 +118,7 @@ export default function OpeningBalancesPage() {
         <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
           <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
           <Field label="Fecha" required>
-            {(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
+            {(id) => <DateInput id={id} value={date} onChange={setDate} />}
           </Field>
           {dates.length > 0 && (
             <div className="row" style={{ flexWrap: "wrap" }}>

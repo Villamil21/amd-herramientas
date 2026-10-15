@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarCheck, Eye, FileUp, Settings2 } from "lucide-react";
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Select, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, Card, DateInput, EmptyState, Field, PageHeader, Select, useToast } from "../../../components/ui";
 import { extractPdfText } from "../../bank-analysis/shared/pdf/pdfExtractor";
 import { statementService } from "../../bank-analysis/shared/statementService";
 import { errorMessage } from "../../../services/tauri";
@@ -243,7 +243,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
           <Card
             title="Efecto en Estados Financieros"
             description="Lo que el Generador incluye de este impuesto con esa fecha de corte (ESF). Se recalcula siempre desde las declaraciones guardadas."
-            actions={<Field label="Fecha de corte">{(id) => <Input id={id} type="date" value={cut} onChange={(e) => setCut(e.target.value)} />}</Field>}
+            actions={<Field label="Fecha de corte">{(id) => <DateInput id={id} value={cut} onChange={setCut} />}</Field>}
           >
             <div className="stack">
               {ownIssues.map((i, n) => (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCcw } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, Card, DateInput, EmptyState, Field, Input, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { useDebounced } from "../../../hooks/useDebounced";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
@@ -13,6 +13,7 @@ import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { bankAccountingCents, isDebitPuc } from "../generator/engine";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../utils/dates";
 
 /** Submódulo donde nace cada origen (para «Abrir origen»). */
 export const SOURCE_PATH: Record<FsSource, string> = {
@@ -105,8 +106,8 @@ export default function MovementsPage() {
           <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
           {companyId !== null && (
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
-              <Field label="Desde">{(id) => <Input id={id} type="date" value={filters.from} onChange={set("from")} />}</Field>
-              <Field label="Hasta">{(id) => <Input id={id} type="date" value={filters.to} onChange={set("to")} />}</Field>
+              <Field label="Desde">{(id) => <DateInput id={id} value={filters.from} onChange={(v) => set("from")({ target: { value: v } })} />}</Field>
+              <Field label="Hasta">{(id) => <DateInput id={id} value={filters.to} onChange={(v) => set("to")({ target: { value: v } })} />}</Field>
               <Field label="Periodo">{(id) => <Input id={id} type="month" value={filters.period} onChange={set("period")} />}</Field>
               <Field label="Origen">
                 {(id) => (
@@ -279,11 +280,11 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
         {item("Banco / cuenta", m.bank && `${m.bank} ${m.accountNumber}`)}
         {item("Paga la cuenta por pagar el", m.settlesOn && formatIsoDate(m.settlesOn))}
         {item("Concepto interno", m.conceptKey)}
-        {item("Registrado", m.createdAt.replace("T", " ").slice(0, 19))}
+        {item("Registrado", formatDateTimeForDisplay(m.createdAt, { seconds: true }))}
       </div>
       {batch && (
         <Alert tone="info" title={`Importación #${batch.id} · ${SOURCE_LABEL[batch.source]}`}>
-          {[batch.fileName, batch.periodLabel].filter(Boolean).join(" · ")} · {formatInteger(batch.recordCount)} registros · {batch.createdAt.slice(0, 10)} · {batch.status === "active" ? "Activa" : batch.status === "replaced" ? `Reemplazada${batch.replacedBy ? ` por la importación #${batch.replacedBy}` : ""}` : "Anulada"}
+          {[batch.fileName, batch.periodLabel].filter(Boolean).join(" · ")} · {formatInteger(batch.recordCount)} registros · {formatDateForDisplay(batch.createdAt)} · {batch.status === "active" ? "Activa" : batch.status === "replaced" ? `Reemplazada${batch.replacedBy ? ` por la importación #${batch.replacedBy}` : ""}` : "Anulada"}
         </Alert>
       )}
       {original.length > 0 && (
@@ -299,7 +300,7 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
             <tbody>
               {original.map((o, i) => (
                 <tr key={i}>
-                  <td>{o.date}</td>
+                  <td>{formatDateForDisplay(o.date)}</td>
                   <td>{o.description}</td>
                   <td className="nowrap" style={{ textAlign: "right" }}>{formatExactCents(o.amountCents)}</td>
                 </tr>
@@ -321,7 +322,7 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
           El extracto se conserva al 100 %; la otra mitad no se envía a ninguna cuenta.
         </Alert>
       )}
-      {Array.isArray(detail.reclassified) && <Alert tone="warning" title="Reclasificado" items={(detail.reclassified as { from: string; to: string; at: string }[]).map((r) => `${r.from} → ${r.to} (${r.at.slice(0, 10)})`)} />}
+      {Array.isArray(detail.reclassified) && <Alert tone="warning" title="Reclasificado" items={(detail.reclassified as { from: string; to: string; at: string }[]).map((r) => `${r.from} → ${r.to} (${formatDateForDisplay(r.at)})`)} />}
     </div>
   );
 }

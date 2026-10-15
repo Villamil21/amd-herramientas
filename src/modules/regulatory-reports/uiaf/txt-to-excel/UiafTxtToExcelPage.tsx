@@ -14,6 +14,7 @@ import { analyzeUiafTxt } from "./services/analysis";
 import { exportUiafExcel } from "./services/excelExport";
 import { pickUiafTxt } from "./services/uiafFileService";
 import type { UiafAnalysis } from "./types";
+import { formatDateForDisplay } from "../../../../utils/dates";
 
 const LABELS = { pick: "Seleccionar archivo TXT", pickAnother: "Seleccionar otro TXT", analyzing: "Analizando archivo…" };
 
@@ -98,7 +99,7 @@ export default function UiafTxtToExcelPage() {
               <span>· {analysis.validation.valid ? "Archivo válido" : "Archivo con inconsistencias"}</span>
               {header && (
                 <span>
-                  · Entidad {header.entityCode} · Corte {header.reportDate}
+                  · Entidad {header.entityCode} · Corte {formatDateForDisplay(header.reportDate)}
                 </span>
               )}
             </>

@@ -51,9 +51,9 @@ export function formatDateLong(d: SimpleDate): string {
   return `${pad(d.day)}-${MONTHS_ES[d.month - 1]}-${d.year}`;
 }
 
-/** 30-04-2026 */
+/** 30/04/2026 */
 export function formatDateShort(d: SimpleDate): string {
-  return `${pad(d.day)}-${pad(d.month)}-${d.year}`;
+  return `${pad(d.day)}/${pad(d.month)}/${d.year}`;
 }
 
 /** 2026-04 */
@@ -61,10 +61,10 @@ export function formatYearMonth(d: SimpleDate): string {
   return `${d.year}-${pad(d.month)}`;
 }
 
-/** Fecha y hora local en formato AAAA-MM-DD HH:mm:ss. */
+/** Fecha y hora local en formato DD/MM/AAAA HH:mm:ss. */
 export function formatDateTime(date: Date): string {
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ` +
     `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   );
 }
@@ -79,4 +79,86 @@ export interface Period {
 export function taxablePeriod(min: SimpleDate, max: SimpleDate): Period {
   const start = { year: min.year, month: min.month, day: 1 };
   return { start, end: max, label: `${formatDateLong(start)} A ${formatDateLong(max)}` };
+}
+
+// ---------------------------------------------------------------------------
+// Regla única de fechas de la aplicación
+//   Persistencia / lógica interna → AAAA-MM-DD (ISO)
+//   Interfaz para el usuario      → DD/MM/AAAA
+// ---------------------------------------------------------------------------
+
+const MONTHS_LOWER_ES = MONTHS_ES.map((m) => m.toLowerCase());
+
+/** Fecha civil → «AAAA-MM-DD». */
+export const toIsoDate = (d: SimpleDate) => `${pad(d.year, 4)}-${pad(d.month)}-${pad(d.day)}`;
+
+/** «AAAA-MM-DD» válido y existente → fecha civil (sin pasar por Date ni zonas horarias). */
+export function fromIsoDate(iso: string | null | undefined): SimpleDate | null {
+  const m = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+  return m ? valid(+m[1], +m[2], +m[3]) : null;
+}
+
+/**
+ * Cualquier fecha técnica → «DD/MM/AAAA» para mostrar.
+ * - «AAAA-MM-DD» o «AAAA/MM/DD» (con hora opcional, que se conserva tal cual).
+ * - Marca de tiempo con zona («…T14:35:00Z» o con desfase): se muestra la fecha y hora LOCAL,
+ *   para no correr el día por la conversión UTC.
+ * Lo que no se reconoce se devuelve sin cambios; vacío → `fallback`.
+ */
+export function formatDateForDisplay(value: string | null | undefined, fallback = "—"): string {
+  const text = value?.trim();
+  if (!text) return fallback;
+  if (/T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/.test(text)) {
+    const d = new Date(text);
+    if (!Number.isNaN(d.getTime())) return formatLocalDate(d);
+  }
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](.*))?$/.exec(text);
+  if (!m) return text;
+  const time = m[4]?.trim();
+  return `${pad(+m[3])}/${pad(+m[2])}/${m[1]}${time ? ` ${time}` : ""}`;
+}
+
+/** Marca de tiempo con zona → «DD/MM/AAAA HH:mm» (o «HH:mm:ss») en hora local. */
+export function formatDateTimeForDisplay(value: string | Date | null | undefined, { seconds = false, fallback = "—" } = {}): string {
+  if (!value) return fallback;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return typeof value === "string" ? formatDateForDisplay(value, fallback) : fallback;
+  return `${formatLocalDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}${seconds ? `:${pad(d.getSeconds())}` : ""}`;
+}
+
+/** Día local de un `Date` → «DD/MM/AAAA». */
+export const formatLocalDate = (d: Date) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+
+/** «AAAA-MM-DD» → valor para un campo de fecha («DD/MM/AAAA»; vacío si no es una fecha). */
+export const formatDateForInput = (iso: string | null | undefined) => (fromIsoDate(iso) ? formatDateForDisplay(iso) : "");
+
+/**
+ * Texto escrito por el usuario «DD/MM/AAAA» → «AAAA-MM-DD», o null si no es una fecha real.
+ * Siempre día primero: «05/10/2026» es el 5 de octubre. Acepta «/», «-» o «.» y día/mes de un dígito.
+ */
+export function parseDisplayDate(value: string | null | undefined): string | null {
+  const m = value ? /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(value.trim()) : null;
+  const d = m ? valid(+m[3], +m[2], +m[1]) : null;
+  return d ? toIsoDate(d) : null;
+}
+
+/**
+ * Excepción solo para la fecha de pago de impuestos (Obligaciones tributarias):
+ * además de «DD/MM/AAAA» acepta 8 dígitos pegados, que se leen SIEMPRE como AAAAMMDD
+ * («20260429» → «2026-04-29»). No usar en el resto de la aplicación.
+ */
+export function parseTaxPaymentDate(value: string | null | undefined): string | null {
+  const text = value?.trim() ?? "";
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(text);
+  if (m) {
+    const d = valid(+m[1], +m[2], +m[3]);
+    return d ? toIsoDate(d) : null;
+  }
+  return parseDisplayDate(text);
+}
+
+/** «2026-09-30» → «30 de septiembre de 2026». */
+export function formatDateText(iso: string | null | undefined, fallback = "—"): string {
+  const d = fromIsoDate(iso);
+  return d ? `${d.day} de ${MONTHS_LOWER_ES[d.month - 1]} de ${d.year}` : fallback;
 }

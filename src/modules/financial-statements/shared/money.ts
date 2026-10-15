@@ -6,6 +6,8 @@
  * redondean (nunca se suman cifras ya redondeadas).
  */
 
+import { formatDateForDisplay } from "../../../utils/dates";
+
 /** Centavos → pesos redondeados al millar (mitad hacia afuera: 3.566.500 → 3.567.000; −3.566.500 → −3.567.000). */
 export function roundThousands(cents: number): number {
   const thousands = Math.abs(cents) / 100_000;
@@ -77,8 +79,8 @@ export const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio
 /** «2026-08» → «Agosto 2026». */
 export const periodLabel = (period: string) => `${MONTH_NAMES[Number(period.slice(5, 7)) - 1]} ${period.slice(0, 4)}`;
 
-/** «2026-08-31» → «31/08/2026». */
-export const formatIsoDate = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+/** «2026-08-31» → «31/08/2026» (regla única de la aplicación, ver utils/dates). */
+export const formatIsoDate = (iso: string) => formatDateForDisplay(iso);
 
 /** «2026-01-01» → «01 ENERO 2026» (encabezado de los estados). */
 export const statementDate = (iso: string) => `${iso.slice(8, 10)} ${MONTH_NAMES[Number(iso.slice(5, 7)) - 1].toUpperCase()} ${iso.slice(0, 4)}`;

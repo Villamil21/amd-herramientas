@@ -6,6 +6,7 @@ import { errorMessage } from "../../../../services/tauri";
 import type { BatchInput, BatchSummary } from "../../../../types/fs";
 import { formatInteger } from "../../../../utils/format";
 import { formatExactCents } from "../money";
+import { formatDateForDisplay } from "../../../../utils/dates";
 
 interface Props {
   /** Arma el envío; null si no hay nada que enviar. */
@@ -149,7 +150,7 @@ export function SendToFs({
                       <td>{[b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"}</td>
                       <td>{formatInteger(b.recordCount)}</td>
                       <td style={{ textAlign: "right" }}>{formatExactCents(b.totalCents)}</td>
-                      <td>{b.createdAt.slice(0, 10)}</td>
+                      <td>{formatDateForDisplay(b.createdAt)}</td>
                     </tr>
                   ))}
                 </tbody>

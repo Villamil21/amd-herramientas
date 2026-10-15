@@ -520,7 +520,7 @@ describe("exportación", () => {
     const s = parseAportesEnLinea(planilla(EMPS));
     const [summary, employees] = buildPayrollSheets(s);
     expect(summary.columns.map((c) => c.header)).toEqual(["Periodo", "Fecha", "Pago", "Total Aportes", "Intereses de Mora", "Cantidad de Empleados"]);
-    expect(summary.rows).toEqual([["2026-03", "2026/04/20", 1_268_500, 1_260_500, 8_000, 3]]);
+    expect(summary.rows).toEqual([["2026-03", "20/04/2026", 1_268_500, 1_260_500, 8_000, 3]]);
     expect(employees.columns.map((c) => c.header)).toEqual(["Empleado", "Nombre", "Pensión Días", "Pensión IBC", "Pensión Aporte", "Salud Aporte", "CCF Aporte", "Riesgos Aporte", "Total Aportes"]);
     expect(employees.rows[0]).toEqual(["CC 1192816998", "ANGARITA LOPEZ RONALDO", 30, 1_750_905, 280_200, 70_100, 70_100, 9_200, 429_600]);
     expect(employees.rows).toHaveLength(3);

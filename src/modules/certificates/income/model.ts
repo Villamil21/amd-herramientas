@@ -19,7 +19,7 @@ export type IncomeCertificateForm = {
   currency: string;
   monthlyIncome: string;
   copEquivalent: string;
-  /** yyyy-mm-dd (input type="date"). */
+  /** AAAA-MM-DD (valor interno del DateInput). */
   exchangeRateReferenceDate: string;
   issueCity: string;
 };

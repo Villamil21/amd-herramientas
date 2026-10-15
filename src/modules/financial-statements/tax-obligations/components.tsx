@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, Field, Input, Modal, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, DateInput, Field, Input, Modal, useToast } from "../../../components/ui";
 import { errorMessage } from "../../../services/tauri";
 import { formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
+import { formatDateTimeForDisplay, parseTaxPaymentDate } from "../../../utils/dates";
 import { TAX_FORM_LABEL } from "./parser/taxReturnParser";
 import { anomalies, effectiveValues, periodName, STATUS_LABEL, type TaxStatus } from "./services/effects";
 import { draftBlockers, draftInput, withExisting, type ImportDraft } from "./services/importDraft";
@@ -237,7 +238,7 @@ export function PaymentModal({ item: r, onClose, onSaved }: { item: TaxReturn | 
       <div className="stack">
         {r && <span>Saldo a pagar: {formatExactCents(r.payableCents)}</span>}
         <Field label="Fecha de pago" required>
-          {(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
+          {(id) => <DateInput id={id} value={date} onChange={setDate} parse={parseTaxPaymentDate} placeholder="DD/MM/AAAA o AAAAMMDD" errorText="Fecha inválida. Usa DD/MM/AAAA o AAAAMMDD (ej. 20260429)." />}
         </Field>
         {error && <Alert tone="danger">{error}</Alert>}
       </div>
@@ -412,7 +413,7 @@ export function ReturnDetailModal({
           <strong>Historial</strong>
           {r.events.map((e) => (
             <span key={e.id} className="muted">
-              {e.createdAt.replace("T", " ").slice(0, 16)} · {EVENT_LABEL[e.action] ?? e.action}
+              {formatDateTimeForDisplay(e.createdAt)} · {EVENT_LABEL[e.action] ?? e.action}
               {e.note ? ` · ${e.note}` : ""}
             </span>
           ))}

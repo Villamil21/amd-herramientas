@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.26.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Todas las fechas de la aplicación se muestran y se escriben como DD/MM/AAAA (30/09/2026), sin importar el idioma configurado en el Mac. Antes algunos campos mostraban el orden estadounidense MM/DD/AAAA.",
+      "Nuevo campo de fecha con calendario en español en el Generador de Estados Financieros, saldos iniciales, ajustes, filtros de movimientos, nómina (ingreso, reingreso, liquidación), obligaciones tributarias y certificado de ingresos. Lo escrito se interpreta siempre día primero: 05/10/2026 es el 5 de octubre.",
+      "Obligaciones tributarias → Fecha de pago (Retención en la fuente, IVA y Renta): además de DD/MM/AAAA, se puede pegar la fecha compacta AAAAMMDD (20260429 → 29/04/2026). Las fechas inexistentes se rechazan.",
+      "Fechas de importación, historiales y versiones se muestran con el día y la hora locales: ya no aparecen con el día siguiente cuando se registran después de las 7 p. m.",
+      "Periodos de extractos, fecha de pago de la planilla (pantalla y Excel), corte UIAF, fechas de Dropi y de retención en ventas, y la fecha de generación del certificado de retención pasan a DD/MM/AAAA. Los datos guardados no cambian (siguen en AAAA-MM-DD internamente)."
+    ]
+  },
+  {
     "version": "1.25.0",
     "date": "2026-10-15",
     "notes": [

@@ -36,6 +36,7 @@ import {
   type EmployeeMonth,
 } from "./calc";
 import { AreaChangeModal, EmployeeEditModal, EmployeeFormModal, JustifyAbsenceModal, LiquidationModal, RehireModal } from "./PayrollModals";
+import { formatDateForDisplay } from "../../../utils/dates";
 
 const LABELS = { pick: "Seleccionar planilla PDF", pickAnother: "Seleccionar otra planilla", analyzing: "Analizando planilla…" };
 
@@ -226,7 +227,7 @@ export default function PayrollPage() {
           </Button>
         }
       />
-      <StatementFileCard state={state} details={summary && <span>· Periodo {summary.period} · Pago {summary.paymentDate}</span>} picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} labels={LABELS} />
+      <StatementFileCard state={state} details={summary && <span>· Periodo {summary.period} · Pago {formatDateForDisplay(summary.paymentDate)}</span>} picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} labels={LABELS} />
 
       {summary && (
         <>

@@ -1,6 +1,7 @@
 import type { PdfDocumentText, PdfTextItem } from "../../../bank-analysis/shared/pdf/pdfTypes";
 import { normalizeKey } from "../../../../utils/text";
 import type { TaxType, VatPeriodicity } from "../types";
+import { formatDateForDisplay } from "../../../../utils/dates";
 
 /**
  * Lector de declaraciones DIAN (Formularios 350 Retención en la fuente, 300
@@ -274,7 +275,7 @@ export function parseTaxReturn(doc: PdfDocumentText): ParsedTaxReturn {
   if (year === null && form.taxType === "income" && presentedOn) {
     year = Number(presentedOn.slice(0, 4)) - 1;
     yearSource = "presentation";
-    warnings.push(`El formulario no trae el año gravable como texto: se propone ${year} (año anterior a la presentación del ${presentedOn}). Confírmalo antes de guardar.`);
+    warnings.push(`El formulario no trae el año gravable como texto: se propone ${year} (año anterior a la presentación del ${formatDateForDisplay(presentedOn)}). Confírmalo antes de guardar.`);
   }
   const periodDigits = periodLabel ? page.digits((i) => i !== periodLabel && i.x > periodLabel.x && i.x < periodLabel.x + 90 && Math.abs(i.y - periodLabel.y) <= 5) : "";
   const period = /^\d{1,2}$/.test(periodDigits) ? Number(periodDigits) : null;

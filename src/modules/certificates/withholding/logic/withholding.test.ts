@@ -94,7 +94,7 @@ describe("Excel de referencia (Facturacion Obedservices.xlsx)", () => {
     expect(d.title).toBe("CERTIFICADO DE ICA A TÍTULO DE RENTA");
     expect(d.rows[0]).toMatchObject({ tasa: "9,66", base: "$ 3.906.000,00", valor: "$ 37.732,00" });
     expect(d.rateHeader).toBe("TASA ‰");
-    expect(d.info.find((i) => i.label === "FECHA Y HORA DE GENERACIÓN")?.value).toBe("2026-06-18 15:27:01");
+    expect(d.info.find((i) => i.label === "FECHA Y HORA DE GENERACIÓN")?.value).toBe("18/06/2026 15:27:01");
     expect(d.info.find((i) => i.label === "CONSIGNADO EN")?.value).toBe("CALI");
     expect(d.fileName).toBe("Certificado_ICA_MONO_COLOMBIA_2026-03_2026-04.pdf");
   });

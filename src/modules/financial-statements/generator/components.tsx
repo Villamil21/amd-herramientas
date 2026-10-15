@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { CalendarRange, Check, ChevronDown, ChevronRight, Minus } from "lucide-react";
-import { Alert, Badge, Button, Field, Input, Loader, Modal, Select, Textarea, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, DateInput, Field, Input, Loader, Modal, Select, Textarea, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import type { Adjustment, AdjustmentType, BatchSummary, FsPucMapping } from "../../../types/fs";
@@ -16,6 +16,7 @@ import { PERIODICITY_LABEL, type TaxReturn, type VatPeriodicity } from "../tax-o
 import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type BankCoverage, type CoverageRow, type TaxCoverage } from "./checks";
 import type { LineValue, StatementRow } from "./engine";
 import { BankLifecycleModal, lifecycleText } from "../bank/BankLifecycleModal";
+import { formatDateForDisplay } from "../../../utils/dates";
 
 /** Estado en la app: valores al millar (como en el PDF) y, al abrir una línea, el exacto y su origen por PUC. */
 export function StatementView({ title, rows, lines }: { title: string; rows: StatementRow[]; lines: Map<number, LineValue> }) {
@@ -483,7 +484,7 @@ function BankStatementTable({ cell }: { cell: BankCell }) {
                   #{s.batch.id} · {s.batch.fileName || "—"}
                   {s.replaced.length > 0 && <div className="table__secondary">Reemplazó {s.replaced.map((b) => `#${b.id}`).join(", ")}</div>}
                 </td>
-                <td className="nowrap">{formatIsoDate(s.batch.createdAt.slice(0, 10))}</td>
+                <td className="nowrap">{formatDateForDisplay(s.batch.createdAt)}</td>
                 <td style={{ textAlign: "right" }}>{s.movementCount === 0 ? "0 · sin movimientos" : formatInteger(s.movementCount)}</td>
                 <td>{s.batch.status === "active" ? <Badge tone="success">Activo</Badge> : s.batch.status === "replaced" ? <Badge tone="warning">Reemplazado{s.batch.replacedBy ? ` por #${s.batch.replacedBy}` : ""}</Badge> : <Badge>Anulado</Badge>}</td>
                 <td className="nowrap" style={{ textAlign: "right" }}>{s.closingBalanceCents === null ? "—" : formatExactCents(s.closingBalanceCents)}</td>
@@ -514,7 +515,7 @@ export function BatchTable({ batches }: { batches: BatchSummary[] }) {
             <tr key={b.id}>
               <td>#{b.id}</td>
               <td>{[b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"}</td>
-              <td>{b.createdAt.slice(0, 10)}</td>
+              <td>{formatDateForDisplay(b.createdAt)}</td>
               <td style={{ textAlign: "right" }}>{formatInteger(b.recordCount)}</td>
               <td>{b.status === "active" ? <Badge tone="success">Activo</Badge> : b.status === "replaced" ? <Badge tone="warning">Reemplazado{b.replacedBy ? ` por #${b.replacedBy}` : ""}</Badge> : <Badge>Anulado</Badge>}</td>
             </tr>
@@ -662,7 +663,7 @@ export function AdjustmentModal({ open, companyId, editing, defaultDate, index, 
           <Field label="Código PUC" required className="span-2">
             {() => <PucField index={index} value={puc} onChange={setPuc} mappings={mappings} onCodesChanged={onCodesChanged} />}
           </Field>
-          <Field label="Fecha contable" required>{(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+          <Field label="Fecha contable" required>{(id) => <DateInput id={id} value={date} onChange={setDate} />}</Field>
           <Field label="Tipo de ajuste" required>
             {(id) => (
               <Select id={id} value={type} onChange={(e) => setType(e.target.value as AdjustmentType)}>
@@ -680,7 +681,7 @@ export function AdjustmentModal({ open, companyId, editing, defaultDate, index, 
         </div>
         {editing && editing.history.length > 0 && (
           <div className="field__hint">
-            Historial: {editing.history.map((h) => `${formatIsoDate(h.editedAt.slice(0, 10))}: final ${formatExactCents(Number(h.previous.finalCents ?? 0))}`).join(" · ")}
+            Historial: {editing.history.map((h) => `${formatDateForDisplay(h.editedAt)}: final ${formatExactCents(Number(h.previous.finalCents ?? 0))}`).join(" · ")}
           </div>
         )}
       </div>
