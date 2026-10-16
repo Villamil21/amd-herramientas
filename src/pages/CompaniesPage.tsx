@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Building2, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { Alert, Button, Card, ConfirmDialog, EmptyState, Input, Loader, PageHeader, useToast } from "../components/ui";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Input, Loader, Menu, PageHeader, useToast } from "../components/ui";
 import { LogoThumb } from "../components/LogoThumb";
 import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
 import { companyService } from "../services/companyService";
 import type { Company } from "../types/models";
 import { CompanyFormModal } from "./companies/CompanyFormModal";
+import { COMPANY_STATE_LABEL, companyStatus } from "./companies/companyStatus";
 
 export function CompaniesPage() {
   const toast = useToast();
@@ -75,39 +76,60 @@ export function CompaniesPage() {
               <thead>
                 <tr>
                   <th>Empresa</th>
-                  <th>Código CIIU</th>
                   <th>Ciudad</th>
-                  <th>Documento representante</th>
-                  <th>Nombre representante</th>
-                  <th className="actions">Acciones</th>
+                  <th>Estado</th>
+                  <th className="actions">
+                    <span className="sr-only">Acciones</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {companies.map((c) => (
-                  <tr key={c.id} className="is-clickable" onClick={() => setEditing(c)}>
-                    <td>
-                      <div className="company-cell">
-                        <LogoThumb logoFile={c.logoFile} />
-                        <div>
-                          <div className="table__primary">{c.razonSocial}</div>
-                          {/* El NIT sigue a la vista (y en el buscador) sin ocupar una columna. */}
-                          <div className="table__secondary nowrap selectable">
-                            NIT {c.nit}
-                            {c.dv ? `-${c.dv}` : ""}
+                {companies.map((c) => {
+                  const status = companyStatus(c);
+                  return (
+                    <tr
+                      key={c.id}
+                      className="is-clickable company-row"
+                      tabIndex={0}
+                      onClick={() => setEditing(c)}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setEditing(c);
+                        }
+                      }}
+                    >
+                      <td>
+                        <div className="company-cell">
+                          <LogoThumb logoFile={c.logoFile} />
+                          <div>
+                            <div className="table__primary">{c.razonSocial}</div>
+                            <div className="table__secondary nowrap selectable">
+                              NIT {c.nit}
+                              {c.dv ? `-${c.dv}` : ""}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td>{c.ciiuCode || <span className="muted">—</span>}</td>
-                    <td>{c.ciudad || <span className="muted">—</span>}</td>
-                    <td className="nowrap selectable">{c.legalRepDocument || <span className="muted">—</span>}</td>
-                    <td>{c.legalRepName || <span className="muted">—</span>}</td>
-                    <td className="actions" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => setEditing(c)} />
-                      <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setDeleting(c)} />
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>{c.ciudad || <span className="muted">—</span>}</td>
+                      <td>
+                        <span className={`state-pill state-pill--${status.state}`} title={status.detail}>
+                          {COMPANY_STATE_LABEL[status.state]}
+                        </span>
+                      </td>
+                      <td className="actions" onClick={(e) => e.stopPropagation()}>
+                        <Menu
+                          label={`Acciones de ${c.razonSocial}`}
+                          items={[
+                            { label: "Abrir ficha", icon: <Pencil size={14} />, onSelect: () => setEditing(c) },
+                            { label: "Eliminar", icon: <Trash2 size={14} />, danger: true, onSelect: () => setDeleting(c) },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -117,11 +139,9 @@ export function CompaniesPage() {
       <CompanyFormModal
         open={editing !== undefined}
         company={editing ?? null}
+        keepOpenOnCreate
         onClose={() => setEditing(undefined)}
-        onSaved={() => {
-          setEditing(undefined);
-          void list.reload();
-        }}
+        onSaved={() => void list.reload()}
       />
       <ConfirmDialog
         open={!!deleting}

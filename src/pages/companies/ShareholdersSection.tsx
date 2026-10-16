@@ -1,6 +1,6 @@
 import { Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Alert, Badge, Button, Input, Modal, useToast } from "../../components/ui";
+import { Alert, Badge, Button, Menu, Modal, useToast } from "../../components/ui";
 import { allocateCapital, subscribedCapitalPesos } from "../../modules/exogena/domain/capital";
 import { useCatalogs } from "../../modules/exogena/hooks";
 import { companyService } from "../../services/companyService";
@@ -17,13 +17,16 @@ interface Props {
   company: Company | null;
   update: (change: (list: CompanyInput["shareholders"]) => CompanyInput["shareholders"]) => void;
   error?: string;
+  /** Mientras la empresa no esté guardada no se pueden agregar socios: se ofrece guardarla y continuar. */
+  onSaveFirst?: () => void;
+  saving?: boolean;
 }
 
 /**
  * Socios / accionistas. La tabla solo muestra lo esencial (nombre o razón social, documento, participación, capital asignado y
  * estado del RUT); crear o editar abre la ficha completa del socio.
  */
-export function ShareholdersSection({ values, company, update, error }: Props) {
+export function ShareholdersSection({ values, company, update, error, onSaveFirst, saving }: Props) {
   const toast = useToast();
   const { catalogs, index } = useCatalogs();
   const [editing, setEditing] = useState<{ index: number | null; imported?: PickedRut | null } | null>(null);
@@ -66,6 +69,23 @@ export function ShareholdersSection({ values, company, update, error }: Props) {
     update((l) => l.filter((_, k) => k !== i));
   }
 
+  if (!company && list.length === 0) {
+    return (
+      <Alert tone="info" title="Los socios se agregan después de guardar la empresa">
+        <div className="stack stack--sm">
+          <span>Primero se guardan la identificación y el capital; luego podrás agregar socios, importar su RUT y definir la representación legal.</span>
+          {onSaveFirst && (
+            <div>
+              <Button size="sm" variant="primary" onClick={onSaveFirst} loading={saving}>
+                Guardar empresa y continuar
+              </Button>
+            </div>
+          )}
+        </div>
+      </Alert>
+    );
+  }
+
   const target = editing === null ? null : editing.index === null ? NEW_SHAREHOLDER(list.length) : list[editing.index];
 
   return (
@@ -73,11 +93,9 @@ export function ShareholdersSection({ values, company, update, error }: Props) {
       <div className="row row--between">
         <strong className="form-section__subtitle">Socios / accionistas</strong>
         <div className="row" style={{ gap: 6 }}>
-          <span title={importBlockedReason ?? undefined}>
-            <Button size="sm" icon={<Upload size={14} />} loading={importing} disabled={!!importBlockedReason || !catalogs} onClick={() => void importForAny()}>
-              Importar RUT de un socio
-            </Button>
-          </span>
+          <Button size="sm" icon={<Upload size={14} />} loading={importing} disabled={!catalogs} onClick={() => (importBlockedReason ? setNotFound(importBlockedReason) : void importForAny())}>
+            Importar RUT de un socio
+          </Button>
           <Button size="sm" variant="secondary" icon={<Plus size={14} />} onClick={() => setEditing({ index: null })}>
             Agregar socio
           </Button>
@@ -86,9 +104,9 @@ export function ShareholdersSection({ values, company, update, error }: Props) {
       {list.length === 0 ? (
         <span className="muted">Sin socios registrados.</span>
       ) : (
-        <div className="shareholder-table">
+        <div className="shareholder-table shareholder-table--compact">
           <div className="shareholder-table__head">
-            <span>Nombre o razón social</span>
+            <span>Socio</span>
             <span>Documento</span>
             <span className="num">Participación</span>
             <span>Capital asignado</span>
@@ -107,14 +125,19 @@ export function ShareholdersSection({ values, company, update, error }: Props) {
                 )}
               </span>
               <span className="selectable">{s.identityDocument || "—"}</span>
-              <Input readOnly tabIndex={-1} aria-label={`Participación del socio ${i + 1}`} className="input--right" value={s.percentage ? `${String(s.percentage).replace(".", ",")} %` : ""} />
+              <span className="num">{s.percentage ? `${String(s.percentage).replace(".", ",")} %` : "—"}</span>
               <span>{allocatedLabel(allocation ? allocation[i] : null)}</span>
               <span>
                 <Badge tone={s.rutStatus === "validado" ? "success" : s.rutStatus === "revisar" ? "warning" : undefined}>{RUT_STATUS_LABEL[s.rutStatus ?? "pendiente"]}</Badge>
               </span>
-              <span className="row" style={{ gap: 2 }} onClick={(e) => e.stopPropagation()}>
-                <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={14} />} aria-label={`Editar socio ${i + 1}`} onClick={() => setEditing({ index: i })} />
-                <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label={`Quitar socio ${i + 1}`} onClick={() => void remove(i)} />
+              <span onClick={(e) => e.stopPropagation()}>
+                <Menu
+                  label={`Acciones de ${s.name || `socio ${i + 1}`}`}
+                  items={[
+                    { label: "Editar socio", icon: <Pencil size={14} />, onSelect: () => setEditing({ index: i }) },
+                    { label: "Quitar socio", icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove(i) },
+                  ]}
+                />
               </span>
             </div>
           ))}
@@ -141,7 +164,7 @@ export function ShareholdersSection({ values, company, update, error }: Props) {
           }}
         />
       )}
-      <Modal open={!!notFound} size="sm" title="El RUT no corresponde a ningún socio" onClose={() => setNotFound(null)} footer={<Button variant="primary" onClick={() => setNotFound(null)}>Entendido</Button>}>
+      <Modal open={!!notFound} size="sm" title="No se puede importar el RUT todavía" onClose={() => setNotFound(null)} footer={<Button variant="primary" onClick={() => setNotFound(null)}>Entendido</Button>}>
         <Alert tone="warning">{notFound}</Alert>
       </Modal>
     </>

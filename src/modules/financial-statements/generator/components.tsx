@@ -54,7 +54,7 @@ export function StatementView({ title, rows, lines }: { title: string; rows: Sta
                   {r.kind === "line" ? (
                     <>
                       <td>{r.label}</td>
-                      <td />
+                      <td style={{ textAlign: "center" }}>{r.note ?? ""}</td>
                     </>
                   ) : (
                     <td colSpan={2}>{r.label}</td>
@@ -553,7 +553,7 @@ export function BatchTable({ batches }: { batches: BatchSummary[] }) {
 }
 
 /** Dibuja todas las páginas del PDF real con pdf.js (lo que se ve es exactamente lo que se exporta). */
-export function PdfPages({ bytes, width = 560 }: { bytes: Uint8Array | null; width?: number }) {
+export function PdfPages({ bytes, width = 560, pageLabel }: { bytes: Uint8Array | null; width?: number; pageLabel?: (page: number) => string }) {
   const holder = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState(0);
@@ -582,7 +582,7 @@ export function PdfPages({ bytes, width = 560 }: { bytes: Uint8Array | null; wid
           canvas.height = Math.round(viewport.height);
           canvas.className = "fs-preview__page";
           canvas.style.width = `${width}px`;
-          canvas.setAttribute("aria-label", n === 1 ? "Página 1: Estado de Situación Financiera" : "Página 2: Estado de Resultados");
+          canvas.setAttribute("aria-label", pageLabel ? pageLabel(n) : n === 1 ? "Página 1: Estado de Situación Financiera" : "Página 2: Estado de Resultados");
           await page.render({ canvas, viewport }).promise;
           if (current) target.appendChild(canvas);
         }

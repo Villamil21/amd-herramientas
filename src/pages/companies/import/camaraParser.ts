@@ -1,5 +1,6 @@
 import type { PdfDocumentText } from "../../../modules/bank-analysis/shared/pdf/pdfTypes";
 import { joinPages, pageLines, parseWholeNumber } from "./lines";
+import { parseRegistral, REGISTRAL_LABEL, type RegistralData } from "./registral";
 
 export interface CapitalData {
   /** Cantidad de acciones y valor nominal. El valor total no se extrae: siempre es acciones × valor nominal. */
@@ -26,6 +27,8 @@ export interface CamaraData {
   /** Representantes legales nombrados (no incluye junta directiva ni revisores fiscales). */
   principals: PersonRef[];
   alternates: PersonRef[];
+  /** Datos registrales para Notas Financieras (constitución, inscripción, Cámara, objeto social). */
+  registral: RegistralData;
   /** Qué no se pudo leer de forma confiable, en palabras para el usuario. */
   notes: string[];
 }
@@ -174,6 +177,9 @@ export function parseCamara(doc: PdfDocumentText): CamaraData {
     .find(Boolean);
   const expedition = /fecha\s+(?:de\s+)?expedici[oó]n\s*:?\s*(\d{2})\/(\d{2})\/(\d{4})/i.exec((pages[0] ?? []).join("\n"));
 
+  const registral = parseRegistral(pages, lines, { razonSocial });
+  if (registral.review.length) notes.push(`Datos registrales por revisar (no se confirmaron con seguridad): ${registral.review.map((f) => REGISTRAL_LABEL[f]).join(", ")}.`);
+
   return {
     razonSocial,
     nit: nitMatch ? nitMatch[1].replace(/\D/g, "") : undefined,
@@ -183,6 +189,7 @@ export function parseCamara(doc: PdfDocumentText): CamaraData {
     paid,
     principals: people.filter((p) => !isAlternate(p.cargo)),
     alternates: people.filter((p) => isAlternate(p.cargo)),
+    registral,
     notes,
   };
 }

@@ -6,6 +6,7 @@ import { RECORD_ORIGIN_LABEL } from "../../../types/exogena";
 import { COLOMBIA, DOC_NIT } from "../domain/thirdParty";
 import { isValidPercentage, roundPesos, splitPercentage } from "../domain/numbers";
 import { CONCEPTS_1009 } from "../domain/form1009";
+import { ConceptCombobox, type ConceptItem } from "./ConceptCombobox";
 import { IdentityFields, LocationFields, type IdentityValue, type LocationValue } from "./ThirdPartyForm";
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -35,7 +36,12 @@ const parseDecimal = (text: string) => Number(text.replace(/\s/g, "").replace(",
 interface Props {
   open: boolean;
   record: ExoRecord | null;
-  format: "1010" | "1009";
+  format: "1010" | "1009" | "1008";
+  /** Conceptos del formato (1008): combobox buscable con alta explícita. */
+  concepts?: ConceptItem[];
+  onCreateConcept?: (code: string, description: string) => Promise<void>;
+  /** Texto de origen de un concepto sugerido automáticamente. */
+  conceptOrigin?: string;
   catalogs: ExoCatalogs | null;
   onClose: () => void;
   /** Guarda solo los campos que cambiaron (el backend los marca como corregidos a mano). */
@@ -45,12 +51,13 @@ interface Props {
 }
 
 /** Edición de un registro de Exógena. Cada corrección queda marcada como manual y no se pierde al sincronizar. */
-export function RecordEditor({ open, record, format, catalogs, onClose, onSave, onRestore }: Props) {
+export function RecordEditor({ open, record, format, catalogs, concepts, onCreateConcept, conceptOrigin, onClose, onSave, onRestore }: Props) {
   const [identity, setIdentity] = useState<IdentityValue | null>(null);
   const [location, setLocation] = useState<LocationValue | null>(null);
   const [percentage, setPercentage] = useState("");
   const [nominal, setNominal] = useState("");
   const [concept, setConcept] = useState("");
+  const [conceptDescription, setConceptDescription] = useState("");
   const [balance, setBalance] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -63,6 +70,7 @@ export function RecordEditor({ open, record, format, catalogs, onClose, onSave, 
     setPercentage(typeof d.percentage === "number" ? String(d.percentage).replace(".", ",") : "");
     setNominal(typeof d.nominalValue === "number" ? String(d.nominalValue) : "");
     setConcept(str(d.concept));
+    setConceptDescription(str(d.conceptDescription));
     setBalance(typeof d.balance === "number" ? String(d.balance) : "");
     setError(null);
   }, [open, record]);
@@ -101,17 +109,18 @@ export function RecordEditor({ open, record, format, catalogs, onClose, onSave, 
       }
     } else {
       next.concept = concept;
+      if (format === "1008") next.conceptDescription = conceptDescription;
       const value = parseDecimal(balance.replace(/\./g, ""));
       if (!Number.isFinite(value)) return { error: "El saldo debe ser un número." };
       const pesos = roundPesos(value);
       // El saldo exacto en centavos acompaña al valor en pesos que se exporta (la conciliación usa los centavos).
       if (pesos !== d.balance) {
         next.balance = pesos;
-        next.balanceCents = pesos * 100;
+        if (format !== "1008") next.balanceCents = pesos * 100;
       }
     }
     return Object.fromEntries(Object.entries(next).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(d[k]) && !(v === "" && (d[k] === undefined || d[k] === null))));
-  }, [record, identity, location, percentage, nominal, concept, balance, format]);
+  }, [record, identity, location, percentage, nominal, concept, conceptDescription, balance, format]);
 
   if (!record || !identity || !location) return null;
   const hasError = "error" in patch;
@@ -184,7 +193,9 @@ export function RecordEditor({ open, record, format, catalogs, onClose, onSave, 
           ) : (
             <div className="form-grid form-grid--compact">
               <Field label="Concepto" required>
-                {(id) => (
+                {(id) => format === "1008" && concepts && onCreateConcept ? (
+                  <ConceptCombobox id={id} value={concept} savedDescription={conceptDescription} concepts={concepts} origin={conceptOrigin} onChange={(code, desc) => { setConcept(code); setConceptDescription(desc); }} onCreate={onCreateConcept} />
+                ) : (
                   <Select id={id} value={concept} onChange={(e) => setConcept(e.target.value)}>
                     {CONCEPTS_1009.map((c) => (
                       <option key={c.code} value={c.code}>

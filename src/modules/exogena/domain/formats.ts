@@ -1,5 +1,5 @@
 /**
- * Registro de formatos de Información Exógena. En esta fase solo están implementados 1010 y 1009; el resto queda
+ * Registro de formatos de Información Exógena. En esta fase están implementados 1010, 1009 y 1008; el resto queda
  * registrado (con su código y nombre confirmados) para agregarlo después sin cambiar la infraestructura: una pantalla
  * "no disponible" nunca se presenta como terminada.
  *
@@ -62,6 +62,23 @@ export const FORMAT_1009_COLUMNS: FormatColumn[] = [
   { key: "balance", header: "Saldo cuentas por pagar al 31-12", kind: "integer" },
 ];
 
+export const FORMAT_1008_COLUMNS: FormatColumn[] = [
+  { key: "concept", header: "Concepto", kind: "text" },
+  { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
+  { key: "docNumber", header: "Número identificación deudor", kind: "text" },
+  { key: "dv", header: "DV", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido deudor", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido deudor", kind: "text" },
+  { key: "firstName", header: "Primer nombre deudor", kind: "text" },
+  { key: "otherNames", header: "Otros nombres deudor", kind: "text" },
+  { key: "businessName", header: "Razón social deudor", kind: "text" },
+  { key: "address", header: "Dirección", kind: "text" },
+  { key: "deptCode", header: "Código dpto", kind: "text" },
+  { key: "muniCode", header: "Código mcp", kind: "text" },
+  { key: "countryCode", header: "País de Residencia o domicilio", kind: "text" },
+  { key: "balance", header: "Saldo cuentas por cobrar al 31-12", kind: "integer" },
+];
+
 export const FORMATS: FormatDef[] = [
   { code: "1001", name: "Pagos o abonos en cuenta y retenciones practicadas", sheetTitle: "Pagos o abonos en cuenta y retenciones practicadas", implemented: false },
   { code: "1003", name: "Retenciones en la fuente que le practicaron", sheetTitle: "Retenciones en la fuente que le practicaron", implemented: false },
@@ -69,7 +86,7 @@ export const FORMATS: FormatDef[] = [
   { code: "1005", name: "Impuesto a las ventas por pagar (descontable)", sheetTitle: "Impuesto a las ventas por pagar (descontable)", implemented: false },
   { code: "1006", name: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", sheetTitle: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", implemented: false },
   { code: "1007", name: "Ingresos recibidos", sheetTitle: "Ingresos recibidos", implemented: false },
-  { code: "1008", name: "Saldo de cuentas por cobrar al 31 de diciembre", sheetTitle: "Saldo de cuentas por cobrar al 31 de diciembre", implemented: false },
+  { code: "1008", name: "Saldo de cuentas por cobrar al 31 de diciembre", sheetTitle: "Saldo de cuentas por cobrar al 31 de diciembre", implemented: true, columns: FORMAT_1008_COLUMNS },
   { code: "1009", name: "Saldos de cuentas por pagar al 31 de diciembre", sheetTitle: "Saldo de cuentas por pagar al 31 de diciembre", implemented: true, columns: FORMAT_1009_COLUMNS },
   { code: "1010", name: "Socios, accionistas y similares", sheetTitle: "Información de socios, accionistas, comuneros y/o cooperados", implemented: true, columns: FORMAT_1010_COLUMNS },
   { code: "1011", name: "Información de las declaraciones tributarias", sheetTitle: "Información de las declaraciones tributarias", implemented: false },

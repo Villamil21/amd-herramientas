@@ -6,7 +6,7 @@ use crate::models::company::{Company, CompanyInput, Shareholder};
 use crate::models::third_party::ThirdPartyData;
 use crate::services::time::now_iso;
 
-const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual";
+const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review";
 
 fn map(r: &Row) -> rusqlite::Result<Company> {
     Ok(Company {
@@ -31,6 +31,16 @@ fn map(r: &Row) -> rusqlite::Result<Company> {
         legal_rep_alt_document: r.get(20)?,
         legal_rep_manual: r.get::<_, i64>(21)? != 0,
         legal_rep_alt_manual: r.get::<_, i64>(22)? != 0,
+        entity_narrative: r.get(23)?,
+        corporate_purpose: r.get(24)?,
+        registry_chamber: r.get(25)?,
+        registry_city: r.get(26)?,
+        constitution_doc_type: r.get(27)?,
+        constitution_date: r.get(28)?,
+        registry_number: r.get(29)?,
+        registry_date: r.get(30)?,
+        registry_book: r.get(31)?,
+        registral_review: serde_json::from_str(&r.get::<_, String>(32)?).unwrap_or_default(),
         shareholders: Vec::new(),
         documents: Vec::new(),
         created_at: r.get(14)?,
@@ -166,9 +176,9 @@ fn replace_shareholders(conn: &Connection, company_id: i64, rows: &[Shareholder]
 pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
     let now = now_iso();
     conn.execute(
-        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual],
+        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
     )?;
     let id = conn.last_insert_rowid();
     replace_shareholders(conn, id, &c.shareholders, &c.document_sizes)?;
@@ -179,8 +189,8 @@ pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
 /// Inserta conservando id y fechas (restauración de backups).
 pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
     conn.execute(
-        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"),
-        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual],
+        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"),
+        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
     )?;
     replace_shareholders(conn, c.id, &c.shareholders, &Default::default())?;
     Ok(())
@@ -189,9 +199,9 @@ pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
 pub fn update(conn: &Connection, id: i64, c: &CompanyInput) -> AppResult<()> {
     let n = conn.execute(
         "UPDATE companies SET razon_social = ?1, nit = ?2, direccion = ?3, ciudad = ?4, telefono = ?5,
-                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16, legal_rep_name = ?17, legal_rep_document = ?18, legal_rep_alt_name = ?19, legal_rep_alt_document = ?20, legal_rep_manual = ?21, legal_rep_alt_manual = ?22
+                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16, legal_rep_name = ?17, legal_rep_document = ?18, legal_rep_alt_name = ?19, legal_rep_alt_document = ?20, legal_rep_manual = ?21, legal_rep_alt_manual = ?22, entity_narrative = ?23, corporate_purpose = ?24, registry_chamber = ?25, registry_city = ?26, constitution_doc_type = ?27, constitution_date = ?28, registry_number = ?29, registry_date = ?30, registry_book = ?31, registral_review = ?32
          WHERE id = ?15",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual],
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
     )?;
     if n == 0 {
         return Err(AppError::user("La empresa no existe o fue eliminada."));
@@ -276,6 +286,16 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            entity_narrative: String::new(),
+            corporate_purpose: String::new(),
+            registry_chamber: String::new(),
+            registry_city: String::new(),
+            constitution_doc_type: String::new(),
+            constitution_date: String::new(),
+            registry_number: String::new(),
+            registry_date: String::new(),
+            registry_book: String::new(),
+            registral_review: vec![],
             shareholders,
             new_documents: vec![],
             document_sizes: Default::default(),
@@ -379,5 +399,28 @@ mod tests {
         changed[0].tax.address = "CL NUEVA 9".into();
         update(&conn, company_id, &company_input(changed).validated().unwrap()).unwrap();
         assert_eq!(status(&conn), "requiere_actualizacion");
+    }
+
+    #[test]
+    fn registry_data_round_trips_keeps_case_and_flags_review_fields() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        let mut input = company_input(vec![]);
+        input.entity_narrative = "  D&P Capital   Inversiones SAS con domicilio en Medellín  ".into();
+        input.corporate_purpose = "Procesamiento de datos.\r\n\r\n\r\nComercio al por mayor.".into();
+        input.registry_chamber = "Cámara de Comercio de Medellín".into();
+        input.constitution_date = "2024-07-05".into();
+        input.registry_number = "5955".into();
+        input.registry_book = "IX".into();
+        input.registral_review = vec!["registryDate".into(), " ".into()];
+        let id = insert(&conn, &input.validated().unwrap()).unwrap();
+        let c = get(&conn, id).unwrap();
+        assert_eq!(c.entity_narrative, "D&P Capital Inversiones SAS con domicilio en Medellín");
+        assert_eq!(c.corporate_purpose, "Procesamiento de datos.\n\nComercio al por mayor.");
+        assert_eq!((c.registry_chamber.as_str(), c.constitution_date.as_str(), c.registry_number.as_str(), c.registry_book.as_str()), ("Cámara de Comercio de Medellín", "2024-07-05", "5955", "IX"));
+        assert_eq!(c.registral_review, vec!["registryDate".to_string()]);
+        let mut bad = company_input(vec![]);
+        bad.constitution_date = "05/07/2024".into();
+        assert!(bad.validated().is_err());
     }
 }

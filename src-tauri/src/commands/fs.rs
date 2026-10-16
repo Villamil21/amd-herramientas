@@ -251,3 +251,22 @@ pub fn unlock_fs_period(db: State<'_, Db>, key: PeriodKey, note: String) -> AppR
     let key = key.validated()?;
     db.with(|c| fs::unlock_period(c, &key, &note))
 }
+
+// ---------------------------------------------------------------------------
+// Notas Financieras
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_fs_notes(db: State<'_, Db>, company_id: i64, period_start: String, period_end: String) -> AppResult<Option<crate::database::fs_notes::FsNotes>> {
+    db.with(|c| crate::database::fs_notes::get(c, company_id, &period_start, &period_end))
+}
+
+#[tauri::command]
+pub fn save_fs_notes(db: State<'_, Db>, input: crate::database::fs_notes::FsNotesInput) -> AppResult<crate::database::fs_notes::FsNotes> {
+    db.with(|c| crate::database::fs_notes::save(c, &input))
+}
+
+#[tauri::command]
+pub fn delete_fs_notes(db: State<'_, Db>, company_id: i64, period_start: String, period_end: String) -> AppResult<()> {
+    db.with(|c| crate::database::fs_notes::delete(c, company_id, &period_start, &period_end))
+}

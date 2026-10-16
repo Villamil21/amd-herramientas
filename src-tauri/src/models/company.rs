@@ -46,6 +46,29 @@ pub struct Company {
     pub legal_rep_manual: bool,
     #[serde(default)]
     pub legal_rep_alt_manual: bool,
+    /// Datos registrales de la Cámara de Comercio (siempre editables). Ausentes en backups anteriores.
+    #[serde(default)]
+    pub entity_narrative: String,
+    #[serde(default)]
+    pub corporate_purpose: String,
+    #[serde(default)]
+    pub registry_chamber: String,
+    #[serde(default)]
+    pub registry_city: String,
+    #[serde(default)]
+    pub constitution_doc_type: String,
+    /// AAAA-MM-DD o vacío.
+    #[serde(default)]
+    pub constitution_date: String,
+    #[serde(default)]
+    pub registry_number: String,
+    #[serde(default)]
+    pub registry_date: String,
+    #[serde(default)]
+    pub registry_book: String,
+    /// Campos registrales que la lectura del certificado no confirmó con certeza («Revisar»).
+    #[serde(default)]
+    pub registral_review: Vec<String>,
     #[serde(default)]
     pub shareholders: Vec<Shareholder>,
     /// Historial de RUT / Cámara de Comercio (más antiguo primero). Se llena al leer; no se restaura desde el backup.
@@ -169,6 +192,29 @@ pub struct CompanyInput {
     pub legal_rep_manual: bool,
     #[serde(default)]
     pub legal_rep_alt_manual: bool,
+    /// Datos registrales de la Cámara de Comercio (siempre editables). Ausentes en backups anteriores.
+    #[serde(default)]
+    pub entity_narrative: String,
+    #[serde(default)]
+    pub corporate_purpose: String,
+    #[serde(default)]
+    pub registry_chamber: String,
+    #[serde(default)]
+    pub registry_city: String,
+    #[serde(default)]
+    pub constitution_doc_type: String,
+    /// AAAA-MM-DD o vacío.
+    #[serde(default)]
+    pub constitution_date: String,
+    #[serde(default)]
+    pub registry_number: String,
+    #[serde(default)]
+    pub registry_date: String,
+    #[serde(default)]
+    pub registry_book: String,
+    /// Campos registrales que la lectura del certificado no confirmó con certeza («Revisar»).
+    #[serde(default)]
+    pub registral_review: Vec<String>,
     #[serde(default)]
     pub shareholders: Vec<Shareholder>,
     /// Versiones nuevas del RUT / Cámara cargadas en esta edición.
@@ -249,6 +295,16 @@ impl CompanyInput {
             legal_rep_alt_document: normalize::document(&self.legal_rep_alt_document, 60),
             legal_rep_manual: self.legal_rep_manual,
             legal_rep_alt_manual: self.legal_rep_alt_manual,
+            entity_narrative: normalize::free_text(&self.entity_narrative, 4000),
+            corporate_purpose: normalize::free_text(&self.corporate_purpose, 8000),
+            registry_chamber: normalize::free_text(&self.registry_chamber, 150),
+            registry_city: normalize::free_text(&self.registry_city, 100),
+            constitution_doc_type: normalize::free_text(&self.constitution_doc_type, 100),
+            constitution_date: normalize::iso_date_or_empty(&self.constitution_date, "La fecha de constitución")?,
+            registry_number: normalize::free_text(&self.registry_number, 60),
+            registry_date: normalize::iso_date_or_empty(&self.registry_date, "La fecha de matrícula o inscripción")?,
+            registry_book: normalize::free_text(&self.registry_book, 60),
+            registral_review: self.registral_review.iter().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).take(20).collect(),
             shareholders: Vec::new(),
             new_documents: self.new_documents,
             document_sizes: self.document_sizes,
@@ -394,6 +450,16 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            entity_narrative: String::new(),
+            corporate_purpose: String::new(),
+            registry_chamber: String::new(),
+            registry_city: String::new(),
+            constitution_doc_type: String::new(),
+            constitution_date: String::new(),
+            registry_number: String::new(),
+            registry_date: String::new(),
+            registry_book: String::new(),
+            registral_review: vec![],
             shareholders: vec![],
             new_documents: vec![],
             document_sizes: Default::default(),

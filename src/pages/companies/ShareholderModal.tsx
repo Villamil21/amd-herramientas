@@ -1,6 +1,6 @@
 import { Download, Eye, FileText, Upload } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Field, FormSection, Input, Modal, useToast } from "../../components/ui";
+import { Alert, Badge, Button, Field, Input, Modal, Tabs, useToast } from "../../components/ui";
 import { IdentityFields, LocationFields, type IdentityValue, type LocationValue } from "../../modules/exogena/components/ThirdPartyForm";
 import { allocateCapital } from "../../modules/exogena/domain/capital";
 import type { CatalogIndex } from "../../modules/exogena/domain/catalogIndex";
@@ -87,6 +87,7 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
+  const [tab, setTab] = useState<"ident" | "ubic" | "part">("ident");
 
   useEffect(() => {
     if (!open) return;
@@ -96,6 +97,7 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
     setKeep(new Set());
     setWarning(null);
     setError(null);
+    setTab(initialImport ? "part" : "ident");
     // Solo al abrir: después manda lo que escribe el usuario.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shareholder]);
@@ -206,7 +208,7 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
   return (
     <Modal
       open={open}
-      size="xl"
+      size="lg"
       title={isNew ? "Nuevo socio" : "Ficha del socio"}
       description="Identificación, ubicación y participación. Alimenta el formato 1010 de Información Exógena."
       onClose={() => void close()}
@@ -229,69 +231,9 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
             {warning}
           </Alert>
         )}
-        {review && (
-          <Alert tone="info" title={`Revisar el RUT importado · ${review.fileName}`}>
-            <div className="stack stack--sm">
-              <span>Compara lo extraído del RUT con los datos actuales. Nada cambia hasta que confirmes; en un conflicto elige cuál conservar.</span>
-              {review.rut.notes.length > 0 && <span className="muted">{review.rut.notes.join(" ")}</span>}
-              {review.territory.warnings.length > 0 && <span className="muted">{review.territory.warnings.join(" ")}</span>}
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Campo</th>
-                      <th>Extraído del RUT</th>
-                      <th>Dato actual</th>
-                      <th>Resultado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {comparison.map((c) => (
-                      <tr key={c.key} className={c.status === "conflict" ? "row--warning" : c.status === "match" ? "row--ok" : undefined}>
-                        <td>{c.label}</td>
-                        <td className="selectable">{c.extracted || <span className="muted">—</span>}</td>
-                        <td className="selectable">{c.current || <span className="muted">—</span>}</td>
-                        <td>
-                          {c.status === "match" && <Badge tone="success">Coincide</Badge>}
-                          {c.status === "new" && <Badge tone="gold">Dato nuevo</Badge>}
-                          {c.status === "absent" && <span className="muted">El RUT no lo trae</span>}
-                          {c.status === "conflict" && (
-                            <label className="checkbox" title="Marcado: se usa el valor del RUT">
-                              <Badge tone="warning">Conflicto</Badge>
-                              <input
-                                type="checkbox"
-                                checked={!keep.has(c.key)}
-                                onChange={(e) =>
-                                  setKeep((k) => {
-                                    const next = new Set(k);
-                                    if (e.target.checked) next.delete(c.key);
-                                    else next.add(c.key);
-                                    return next;
-                                  })
-                                }
-                              />{" "}
-                              Usar el del RUT
-                            </label>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="row" style={{ gap: 8 }}>
-                <Button variant="primary" onClick={confirmImport}>
-                  Confirmar e importar
-                </Button>
-                <Button variant="ghost" onClick={() => void cancelImport()}>
-                  Cancelar importación
-                </Button>
-              </div>
-            </div>
-          </Alert>
-        )}
-
-        <FormSection step={1} title="Identificación">
+        <Tabs label="Secciones del socio" value={tab} onChange={setTab} tabs={[{ id: "ident", label: "Identificación" }, { id: "ubic", label: "Ubicación y contacto" }, { id: "part", label: "Participación y documentos", badge: status === "revisar" ? "Revisar" : undefined }]} />
+        {tab === "ident" && (
+        <div className="stack" role="tabpanel" id="panel-ident" aria-labelledby="tab-ident">
           <IdentityFields value={identity} onChange={onIdentity} catalogs={catalogs} numberLabel="Número de documento" numberHint="Sin puntos ni espacios; el NIT sin DV." />
           {identity.personType === "PJ" && (
             <div className="form-grid form-grid--compact">
@@ -307,9 +249,11 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
               </Field>
             </div>
           )}
-        </FormSection>
+        </div>
+        )}
 
-        <FormSection step={2} title="Ubicación y contacto">
+        {tab === "ubic" && (
+        <div className="stack" role="tabpanel" id="panel-ubic" aria-labelledby="tab-ubic">
           <LocationFields value={location} onChange={onLocation} catalogs={catalogs} />
           <div className="form-grid form-grid--compact">
             <Field label="Teléfono" hint="Sin espacios ni separadores.">
@@ -317,9 +261,11 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
             </Field>
             <Field label="Correo electrónico">{(id) => <Input id={id} type="email" value={draft.email ?? ""} onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))} />}</Field>
           </div>
-        </FormSection>
+        </div>
+        )}
 
-        <FormSection step={3} title="Participación y documentos">
+        {tab === "part" && (
+        <div className="stack" role="tabpanel" id="panel-part" aria-labelledby="tab-part">
           <div className="form-grid form-grid--compact">
             <Field label="Participación (%)" required hint="Hasta dos decimales. Un solo socio inicia en 100 %; varios deben sumar exactamente 100 %.">
               {(id) => <Input id={id} value={percentage} inputMode="decimal" className="input--right" onChange={(e) => setPercentage(e.target.value)} />}
@@ -333,13 +279,11 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
               <strong>RUT del socio</strong>
               <Badge tone={statusTone}>{RUT_STATUS_LABEL[status]}</Badge>
             </span>
-            <span title={importBlockedReason ?? undefined}>
-              <Button icon={<Upload size={14} />} loading={busy} disabled={!!importBlockedReason || !catalogs || !!review} onClick={() => void importRut()}>
-                Importar RUT del socio
-              </Button>
-            </span>
+            <Button icon={<Upload size={14} />} loading={busy} disabled={!catalogs || !!review || !!importBlockedReason} onClick={() => void importRut()}>
+              Importar RUT del socio
+            </Button>
           </div>
-          {importBlockedReason && <span className="field__hint">{importBlockedReason}</span>}
+          {importBlockedReason && <Alert tone="info">{importBlockedReason}</Alert>}
           {rutRows.length === 0 ? (
             <span className="muted">Sin RUT importado. Se lee en este equipo y propone los datos; todo sigue siendo editable.</span>
           ) : (
@@ -366,10 +310,95 @@ export function ShareholderModal({ open, shareholder, isNew, others, capitalPeso
               ))}
             </ul>
           )}
-        </FormSection>
+        </div>
+        )}
       </div>
+      <RutReviewModal review={review} comparison={comparison} keep={keep} setKeep={setKeep} onConfirm={confirmImport} onCancel={() => void cancelImport()} />
       <DocumentPreviewModal target={preview} onClose={() => setPreview(null)} />
     </Modal>
   );
 }
 
+
+/**
+ * Revisión del RUT de un socio antes de aplicarlo: primero las diferencias (conservar el dato actual o aplicar el extraído, una
+ * por una), las coincidencias quedan plegadas. Nada cambia hasta confirmar.
+ */
+function RutReviewModal({ review, comparison, keep, setKeep, onConfirm, onCancel }: { review: PickedRut | null; comparison: FieldComparison[]; keep: Set<FieldKey>; setKeep: (fn: (k: Set<FieldKey>) => Set<FieldKey>) => void; onConfirm: () => void; onCancel: () => void }) {
+  const diffs = comparison.filter((c) => c.status === "conflict" || c.status === "new");
+  const same = comparison.filter((c) => c.status === "match" || c.status === "absent");
+  const toggle = (key: FieldKey, keepCurrent: boolean) =>
+    setKeep((k) => {
+      const next = new Set(k);
+      if (keepCurrent) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  return (
+    <Modal open={!!review} size="lg" title="Revisar el RUT del socio" description={review ? review.fileName : undefined} onClose={onCancel} footer={<><Button variant="ghost" onClick={onCancel}>Cancelar importación</Button><Button variant="primary" onClick={onConfirm}>Confirmar y aplicar</Button></>}>
+      {review && (
+        <div className="stack">
+          <span className="muted">Nada cambia hasta que confirmes. En cada diferencia elige si conservas el dato actual o aplicas el extraído del RUT.</span>
+          {review.rut.notes.length > 0 && <Alert tone="warning">{review.rut.notes.join(" ")}</Alert>}
+          {review.territory.warnings.length > 0 && <Alert tone="warning">{review.territory.warnings.join(" ")}</Alert>}
+          {diffs.length === 0 ? (
+            <Alert tone="success">El RUT coincide con los datos actuales del socio; no hay diferencias.</Alert>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Campo</th>
+                    <th>Dato actual</th>
+                    <th>Extraído del RUT</th>
+                    <th>Qué hacer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diffs.map((c) => (
+                    <tr key={c.key} className="row--warning">
+                      <td>{c.label}</td>
+                      <td className="selectable">{c.current || <span className="muted">—</span>}</td>
+                      <td className="selectable">{c.extracted || <span className="muted">—</span>}</td>
+                      <td>
+                        {c.status === "new" ? (
+                          <Badge tone="gold">Dato nuevo: se aplica</Badge>
+                        ) : (
+                          <div className="stack stack--sm">
+                            <label className="checkbox">
+                              <input type="radio" name={`rut-${c.key}`} checked={keep.has(c.key)} onChange={() => toggle(c.key, true)} /> Conservar el actual
+                            </label>
+                            <label className="checkbox">
+                              <input type="radio" name={`rut-${c.key}`} checked={!keep.has(c.key)} onChange={() => toggle(c.key, false)} /> Aplicar el del RUT
+                            </label>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {same.length > 0 && (
+            <details>
+              <summary>Ver campos que coinciden ({same.length})</summary>
+              <div className="table-wrap">
+                <table className="table">
+                  <tbody>
+                    {same.map((c) => (
+                      <tr key={c.key} className={c.status === "match" ? "row--ok" : undefined}>
+                        <td>{c.label}</td>
+                        <td className="selectable">{c.status === "match" ? c.current : <span className="muted">El RUT no lo trae</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}

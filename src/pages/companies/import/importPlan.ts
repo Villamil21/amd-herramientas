@@ -1,5 +1,6 @@
 import { digitsOf, normalizePhone, upperText } from "../normalize";
 import type { CamaraData } from "./camaraParser";
+import { REGISTRAL_FIELDS, REGISTRAL_LABEL, type RegistralField } from "./registral";
 import type { RutData } from "./rutParser";
 
 export type ImportSource = "rut" | "camara";
@@ -19,6 +20,15 @@ export interface ImportableValues {
   subscribedNominalValue: number | null;
   paidTotalShares: number | null;
   paidNominalValue: number | null;
+  entityNarrative: string;
+  corporatePurpose: string;
+  registryChamber: string;
+  registryCity: string;
+  constitutionDocType: string;
+  constitutionDate: string;
+  registryNumber: string;
+  registryDate: string;
+  registryBook: string;
 }
 export type ImportField = keyof ImportableValues;
 
@@ -35,13 +45,18 @@ export const FIELD_LABEL: Record<ImportField, string> = {
   subscribedNominalValue: "Capital suscrito · valor nominal",
   paidTotalShares: "Capital pagado · acciones",
   paidNominalValue: "Capital pagado · valor nominal",
+  ...REGISTRAL_LABEL,
 };
+
+/** Campos registrales: texto libre (no se pasa a MAYÚSCULAS). Solo vienen de la Cámara de Comercio. */
+export const isRegistralField = (field: ImportField): field is RegistralField => (REGISTRAL_FIELDS as string[]).includes(field);
 
 export type ImportValue = string | number;
 
 /** Cómo se guarda cada campo (misma normalización que el backend) para comparar sin falsos desacuerdos. */
 function normalizeValue(field: ImportField, value: ImportValue): ImportValue {
   if (typeof value === "number") return value;
+  if (isRegistralField(field)) return value.replace(/\s+/g, " ").trim();
   switch (field) {
     case "nit":
     case "dv":
@@ -106,6 +121,7 @@ function candidatesFrom(rut: RutData | null, camara: CamaraData | null): Partial
     add("subscribedNominalValue", "camara", camara.subscribed.nominal);
     add("paidTotalShares", "camara", camara.paid.shares);
     add("paidNominalValue", "camara", camara.paid.nominal);
+    for (const key of REGISTRAL_FIELDS) add(key, "camara", camara.registral.values[key]);
   }
   return out;
 }

@@ -13,6 +13,7 @@ import { buildExportWorkbook, exportBlockers, suggestedExportName } from "../dom
 import { IMPLEMENTED_FORMATS } from "../domain/formats";
 import { blocking } from "../domain/problems";
 import { useExogenaSelection } from "../state";
+import { use1008 } from "../use1008";
 import { use1009 } from "../use1009";
 import { use1010 } from "../use1010";
 
@@ -27,25 +28,26 @@ export default function ControlPage() {
   const [selection] = useExogenaSelection();
   const a = use1010(selection.companyId, selection.year);
   const b = use1009(selection.companyId, selection.year);
+  const c8 = use1008(selection.companyId, selection.year);
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
   const company = b.company ?? a.company;
-  const ready = !!company && !!a.model && !!b.model;
+  const ready = !!company && !!a.model && !!b.model && !!c8.model;
 
-  const statuses = useMemo<Record<string, FormatStatusRow>>(() => ({ "1010": a.format.status, "1009": b.format.status }), [a.format.status, b.format.status]);
+  const statuses = useMemo<Record<string, FormatStatusRow>>(() => ({ "1010": a.format.status, "1009": b.format.status, "1008": c8.format.status }), [a.format.status, b.format.status, c8.format.status]);
   const blockers = useMemo(
     () =>
       ready
-        ? exportBlockers({ statuses, problems: { "1010": a.model!.problems, "1009": b.model!.problems }, reconciliation1009: b.model!.reconciliation })
+        ? exportBlockers({ statuses, problems: { "1010": a.model!.problems, "1009": b.model!.problems, "1008": c8.model!.problems }, reconciliation1009: b.model!.reconciliation })
         : [],
-    [ready, statuses, a.model, b.model],
+    [ready, statuses, a.model, b.model, c8.model],
   );
 
   async function exportAll() {
-    if (!company || !a.format.records || !b.format.records) return;
+    if (!company || !a.format.records || !b.format.records || !c8.format.records) return;
     setExporting(true);
     try {
-      const workbook = buildExportWorkbook({ company, year: selection.year, statuses, records: { "1010": a.format.records, "1009": b.format.records } });
+      const workbook = buildExportWorkbook({ company, year: selection.year, statuses, records: { "1010": a.format.records, "1009": b.format.records, "1008": c8.format.records } });
       const path = await exogenaService.saveWorkbook(company.id, workbook, suggestedExportName(company, selection.year));
       if (path) {
         setExported(path);
@@ -63,6 +65,10 @@ export default function ControlPage() {
     if (!ready) return "—";
     if (code === "1009")
       return rec!.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">Diferencia {formatMoneyCents(rec!.differenceCents)}</Badge>;
+    if (code === "1008") {
+      const r8 = c8.model!.reconciliation;
+      return r8.difference === 0 && blocking(c8.model!.problems).length === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{r8.difference !== 0 ? `Diferencia ${formatMoneyCents(r8.difference * 100)}` : `${blocking(c8.model!.problems).length} pendientes`}</Badge>;
+    }
     const stoppers = blocking(a.model!.problems);
     return stoppers.length === 0 ? <Badge tone="success">Sin pendientes</Badge> : <Badge tone="danger">{stoppers.length} pendientes</Badge>;
   };
@@ -144,6 +150,21 @@ export default function ControlPage() {
               </table>
             </div>
           </Card>
+          {c8.model && (
+            <Card title="Conciliación del 1008" description={`CxC a socios (capital suscrito − pagado) frente al total del formato al 31/12/${selection.year}.`}>
+              <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>
+                <span>
+                  CxC a socios en Empresas: <strong>{c8.model.reconciliation.companyReceivable === null ? "—" : formatMoneyCents(c8.model.reconciliation.companyReceivable * 100)}</strong>
+                </span>
+                <span>
+                  Total 1008: <strong>{formatMoneyCents(c8.model.reconciliation.total * 100)}</strong>
+                </span>
+                <span>
+                  Diferencia: <strong>{formatMoneyCents(c8.model.reconciliation.difference * 100)}</strong>
+                </span>
+              </div>
+            </Card>
+          )}
           {b.model && (
             <Card title="Conciliación del 1009" description={`Pasivos del Estado de Situación Financiera al 31/12/${selection.year}.`}>
               <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>

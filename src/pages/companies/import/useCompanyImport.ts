@@ -8,8 +8,9 @@ import { base64ToBytes, type PendingDocument } from "./documentHistory";
 import { planImport, type ImportConflict, type ImportField, type ImportOption, type ImportSource, type ImportValue, type ImportableValues } from "./importPlan";
 import { assignRole, findShareholder, planRepresentatives, type Person, type RepOption, type RepProposal } from "./legalReps";
 import { parseRut, type RutData } from "./rutParser";
+import { REGISTRAL_FIELDS } from "./registral";
 
-const IMPORTABLE: ImportField[] = ["razonSocial", "nit", "dv", "ciiuCode", "ciudad", "direccion", "correo", "telefono", "subscribedTotalShares", "subscribedNominalValue", "paidTotalShares", "paidNominalValue"];
+const IMPORTABLE: ImportField[] = ["razonSocial", "nit", "dv", "ciiuCode", "ciudad", "direccion", "correo", "telefono", "subscribedTotalShares", "subscribedNominalValue", "paidTotalShares", "paidNominalValue", ...REGISTRAL_FIELDS];
 
 const importableOf = (v: CompanyInput): ImportableValues => Object.fromEntries(IMPORTABLE.map((k) => [k, v[k]])) as unknown as ImportableValues;
 
@@ -24,6 +25,7 @@ export type RepMode = "shareholder" | "add-shareholder" | "exception";
 /** Un valor tal como se muestra en el formulario (mismo formato que se guarda). */
 function formValue(field: ImportField, value: ImportValue): ImportValue {
   if (typeof value === "number") return value;
+  if ((REGISTRAL_FIELDS as string[]).includes(field)) return value.replace(/\s+/g, " ").trim();
   if (field === "nit" || field === "dv") return value.replace(/\D/g, "");
   if (field === "correo") return value.toLowerCase();
   if (field === "telefono") return normalizePhone(value);
@@ -76,7 +78,16 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
       const current = valuesRef.current;
       const plan = planImport(importableOf(current), parsed.current.rut, parsed.current.camara);
       const applied = Object.fromEntries(Object.entries(plan.apply).map(([k, v]) => [k, formValue(k as ImportField, v as ImportValue)]));
-      setValues((v) => ({ ...v, ...applied }));
+      setValues((v) => {
+        const next = { ...v, ...applied } as CompanyInput;
+        // «Revisar»: lo que la Cámara no permitió confirmar y sigue vacío; lo que ya tiene valor deja de estar en revisión.
+        if (kind === "camara") {
+          const fromCamara = (parsed.current.camara?.registral.review ?? []) as string[];
+          const keep = new Set([...v.registralReview.filter((k) => !(next[k as keyof CompanyInput] as string)), ...fromCamara.filter((k) => !(next[k as keyof CompanyInput] as string))]);
+          next.registralReview = [...keep];
+        }
+        return next;
+      });
       setOrigins((o) => ({ ...o, ...Object.fromEntries(Object.entries(applied).map(([k, v]) => [k, { sources: plan.origin[k as ImportField]!, value: v as ImportValue }])) }));
       setConflicts(plan.conflicts);
 

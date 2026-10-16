@@ -1,3 +1,4 @@
+import type { FormatConcept, FormatConceptInput } from "../types/exogena";
 import type { ApplySyncInput, CatalogAuditEntry, CatalogEntryInput, CatalogKey, ExoCatalogs, ExoOverview, ExoRecord, FormatStatus, RecordData, SyncOutcome, SyncRun } from "../types/exogena";
 import { call } from "./tauri";
 
@@ -19,6 +20,10 @@ export const exogenaService = {
   saveCatalogEntry: (input: CatalogEntryInput) => call<void>("save_exo_catalog_entry", { input }),
   deleteCatalogEntry: (catalog: CatalogKey, code: string, parentCode?: string) => call<void>("delete_exo_catalog_entry", { catalog, code, parentCode: parentCode ?? null }),
   catalogAudit: (limit = 200) => call<CatalogAuditEntry[]>("list_exo_catalog_audit", { limit }),
+
+  formatConcepts: (formatCode: string) => call<FormatConcept[]>("list_exo_format_concepts", { formatCode }),
+  saveFormatConcept: (input: FormatConceptInput) => call<void>("save_exo_format_concept", { input }),
+  deleteFormatConcept: (formatCode: string, code: string) => call<void>("delete_exo_format_concept", { formatCode, code }),
 
   overview: (companyId: number, year: number) => call<ExoOverview>("get_exo_overview", { companyId, year }),
   setStatus: (companyId: number, year: number, formatCode: string, status: FormatStatus, reason?: string) =>

@@ -90,6 +90,11 @@ export const fsService = {
   updateAdjustment: (id: number, input: AdjustmentInput) => call<void>("update_fs_adjustment", { id, input }),
   adjustments: (companyId: number) => call<Adjustment[]>("list_fs_adjustments", { companyId }),
 
+  // Notas Financieras (por empresa y período)
+  notes: (companyId: number, periodStart: string, periodEnd: string) => call<FsNotes | null>("get_fs_notes", { companyId, periodStart, periodEnd }),
+  saveNotes: (input: FsNotesInput) => call<FsNotes>("save_fs_notes", { input }),
+  deleteNotes: (companyId: number, periodStart: string, periodEnd: string) => call<void>("delete_fs_notes", { companyId, periodStart, periodEnd }),
+
   // Periodos
   period: (key: PeriodKey) => call<Period | null>("get_fs_period", { key }),
   periods: (companyId: number) => call<Period[]>("list_fs_periods", { companyId }),
@@ -99,3 +104,24 @@ export const fsService = {
   close: (key: PeriodKey, snapshot: unknown) => call<void>("close_fs_period", { key, snapshot }),
   unlock: (key: PeriodKey, note: string) => call<void>("unlock_fs_period", { key, note }),
 };
+
+export interface FsNotes {
+  id: number;
+  companyId: number;
+  periodStart: string;
+  periodEnd: string;
+  data: unknown;
+  companySnapshot: unknown;
+  generatedAt: string | null;
+  updatedAt: string;
+}
+
+export interface FsNotesInput {
+  companyId: number;
+  periodStart: string;
+  periodEnd: string;
+  data: unknown;
+  companySnapshot: unknown;
+  /** El usuario generó el PDF con esta versión. */
+  generated?: boolean;
+}

@@ -152,3 +152,19 @@ export interface ResetOutcome {
 
 /** Frase que el usuario debe escribir para reiniciar los datos. */
 export const RESET_PHRASE = "REINICIAR DATOS";
+
+/** Concepto de un formato (exclusivo de ese formato). Los de sistema solo se activan o desactivan. */
+export interface FormatConcept {
+  formatCode: string;
+  code: string;
+  description: string;
+  isSystem: boolean;
+  isActive: boolean;
+}
+
+export interface FormatConceptInput {
+  formatCode: string;
+  code: string;
+  description: string;
+  isActive: boolean;
+}

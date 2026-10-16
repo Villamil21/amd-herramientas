@@ -2,6 +2,8 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type Selec
 
 interface FieldProps {
   label?: string;
+  /** Marca discreta junto a la etiqueta (por ejemplo el origen de un dato precargado). */
+  labelAdornment?: ReactNode;
   required?: boolean;
   hint?: ReactNode;
   error?: string | null;
@@ -9,7 +11,7 @@ interface FieldProps {
   children: (id: string) => ReactNode;
 }
 
-export function Field({ label, required, hint, error, className, children }: FieldProps) {
+export function Field({ label, labelAdornment, required, hint, error, className, children }: FieldProps) {
   const id = useId();
   return (
     <div className={["field", className].filter(Boolean).join(" ")}>
@@ -17,6 +19,7 @@ export function Field({ label, required, hint, error, className, children }: Fie
         <label className="field__label" htmlFor={id}>
           {label}
           {required && <em>*</em>}
+          {labelAdornment}
         </label>
       )}
       {children(id)}

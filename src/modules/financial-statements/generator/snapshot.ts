@@ -3,6 +3,7 @@ import { signerService } from "../../../services/signerService";
 import type { FsCatalog, FsPucMapping, Presentation } from "../../../types/fs";
 import type { CertificateSigner, Company } from "../../../types/models";
 import { eerrRows, esfRows, type Statements, type StatementRow } from "./engine";
+import { withNoteNumbers } from "../notes/model";
 import { statementsFileName, type PdfImage, type StatementsPdfModel } from "./pdf";
 
 /**
@@ -45,7 +46,7 @@ export function buildSnapshot(s: Statements, args: { company: Company; accountan
   };
 }
 
-function loadImage(dataUrl: string | null): Promise<PdfImage | null> {
+export function loadImage(dataUrl: string | null): Promise<PdfImage | null> {
   if (!dataUrl) return Promise.resolve(null);
   return new Promise((resolve) => {
     const img = new Image();
@@ -68,8 +69,7 @@ export async function pdfModel(snapshot: StatementsSnapshot): Promise<Statements
     logo,
     startDate: snapshot.period.start,
     endDate: snapshot.period.end,
-    esfRows: snapshot.esfRows,
-    eerrRows: snapshot.eerrRows,
+    ...(({ esf, eerr }) => ({ esfRows: esf, eerrRows: eerr }))(withNoteNumbers(snapshot.esfRows, snapshot.eerrRows)),
     legalRep: { name: snapshot.company.legalRepName, document: snapshot.company.legalRepDocument },
     accountant: { name: snapshot.accountant?.name ?? "", title: snapshot.accountant?.accountantTitle ?? "", professionalDocument: snapshot.accountant?.professionalDocument ?? "", signature },
   };

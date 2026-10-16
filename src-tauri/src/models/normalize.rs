@@ -11,6 +11,34 @@ pub fn upper_text(value: &str, max: usize) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ").to_uppercase().chars().take(max).collect()
 }
 
+/// Texto libre (narrativas registrales): conserva mayúsculas y minúsculas, recorta y colapsa espacios y saltos de línea.
+/// A diferencia de `upper_text`, mantiene los párrafos (líneas en blanco) para textos largos.
+pub fn free_text(value: &str, max: usize) -> String {
+    let paragraphs: Vec<String> = value.replace('\r', "").split("\n\n").map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|p| !p.is_empty()).collect();
+    paragraphs.join("\n\n").chars().take(max).collect()
+}
+
+/// Fecha AAAA-MM-DD válida o vacío; cualquier otra cosa es un error de usuario.
+pub fn iso_date_or_empty(value: &str, label: &str) -> Result<String, crate::error::AppError> {
+    let v = value.trim();
+    if v.is_empty() {
+        return Ok(String::new());
+    }
+    let parts: Vec<&str> = v.split('-').collect();
+    let ok = parts.len() == 3
+        && parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
+        && matches!(parts[1].parse::<u32>(), Ok(1..=12))
+        && matches!(parts[2].parse::<u32>(), Ok(1..=31));
+    if ok {
+        Ok(v.to_string())
+    } else {
+        Err(crate::error::AppError::user(format!("{label} no es válida (use AAAA-MM-DD).")))
+    }
+}
+
 /// Quita espacios y separadores visuales (. , - espacio) que estén entre dos dígitos.
 /// «CC 1.192.729.629» → «CC 1192729629»; «3 10-555 1234» → «3105551234».
 pub fn strip_digit_separators(value: &str) -> String {

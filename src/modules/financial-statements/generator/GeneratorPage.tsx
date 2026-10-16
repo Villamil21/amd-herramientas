@@ -32,6 +32,7 @@ import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligatio
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
+import { withNoteNumbers } from "../notes/model";
 import { renderStatementsPdf } from "./pdf";
 import { buildSnapshot, pdfModel, type StatementsSnapshot } from "./snapshot";
 import { formatDateTimeForDisplay } from "../../../utils/dates";
@@ -241,7 +242,7 @@ export default function GeneratorPage() {
     }
   }
 
-  const shownRows: { esf: StatementRow[]; eerr: StatementRow[] } | null = closedSnapshot ? { esf: closedSnapshot.esfRows, eerr: closedSnapshot.eerrRows } : rows;
+  const shownRows: { esf: StatementRow[]; eerr: StatementRow[] } | null = closedSnapshot ? withNoteNumbers(closedSnapshot.esfRows, closedSnapshot.eerrRows) : rows ? withNoteNumbers(rows.esf, rows.eerr) : null;
   const otherPeriods = (ledger?.periods ?? []).filter((p) => p.id !== period?.id).slice(0, 6);
 
   return (

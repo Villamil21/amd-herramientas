@@ -303,6 +303,7 @@ const FS_TABLES: &[&str] = &[
     "fs_employee_events",
     "fs_movement_edits",
     "fs_tax_empty_periods",
+    "fs_notes",
 ];
 
 type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;
@@ -313,7 +314,7 @@ fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
 
 /// Tablas de Información Exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso):
 /// los catálogos con sus ajustes, la auditoría de catálogos y el estado / registros / sincronizaciones por formato.
-const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_status", "exo_records", "exo_sync_runs"];
+const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs"];
 
 fn dump_tables(conn: &Connection, tables: &[&str]) -> AppResult<FsDump> {
     use rusqlite::types::Value as Sql;
@@ -614,6 +615,16 @@ fn company_input(c: &Company) -> CompanyInput {
         legal_rep_alt_document: c.legal_rep_alt_document.clone(),
         legal_rep_manual: manual,
         legal_rep_alt_manual: c.legal_rep_alt_manual,
+        entity_narrative: c.entity_narrative.clone(),
+        corporate_purpose: c.corporate_purpose.clone(),
+        registry_chamber: c.registry_chamber.clone(),
+        registry_city: c.registry_city.clone(),
+        constitution_doc_type: c.constitution_doc_type.clone(),
+        constitution_date: c.constitution_date.clone(),
+        registry_number: c.registry_number.clone(),
+        registry_date: c.registry_date.clone(),
+        registry_book: c.registry_book.clone(),
+        registral_review: c.registral_review.clone(),
         shareholders,
         new_documents: Vec::new(),
         document_sizes: Default::default(),
@@ -784,6 +795,16 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                     legal_rep_alt_document: v.legal_rep_alt_document,
                     legal_rep_manual: v.legal_rep_manual,
                     legal_rep_alt_manual: v.legal_rep_alt_manual,
+                    entity_narrative: v.entity_narrative,
+                    corporate_purpose: v.corporate_purpose,
+                    registry_chamber: v.registry_chamber,
+                    registry_city: v.registry_city,
+                    constitution_doc_type: v.constitution_doc_type,
+                    constitution_date: v.constitution_date,
+                    registry_number: v.registry_number,
+                    registry_date: v.registry_date,
+                    registry_book: v.registry_book,
+                    registral_review: v.registral_review,
                     shareholders: v.shareholders,
                     documents: Vec::new(),
                     created_at: c.company.created_at.clone(),
@@ -1163,6 +1184,16 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            entity_narrative: String::new(),
+            corporate_purpose: String::new(),
+            registry_chamber: String::new(),
+            registry_city: String::new(),
+            constitution_doc_type: String::new(),
+            constitution_date: String::new(),
+            registry_number: String::new(),
+            registry_date: String::new(),
+            registry_book: String::new(),
+            registral_review: vec![],
             shareholders: vec![shareholder("ana gómez", "cc 1.020", 60.0, Some("principal")), shareholder("luis ruiz", "cc 2.030", 40.0, Some("alternate"))],
             new_documents: vec![],
             document_sizes: Default::default(),
@@ -1254,6 +1285,16 @@ mod tests {
                 legal_rep_alt_document: String::new(),
                 legal_rep_manual: false,
                 legal_rep_alt_manual: false,
+                entity_narrative: String::new(),
+                corporate_purpose: String::new(),
+                registry_chamber: String::new(),
+                registry_city: String::new(),
+                constitution_doc_type: String::new(),
+                constitution_date: String::new(),
+                registry_number: String::new(),
+                registry_date: String::new(),
+                registry_book: String::new(),
+                registral_review: vec![],
                 shareholders: vec![],
                 new_documents: vec![],
                 document_sizes: Default::default(),

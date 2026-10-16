@@ -5,7 +5,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::files::sanitize_with_extension;
 use crate::commands::to_path;
-use crate::database::{exogena, Db};
+use crate::database::{exo_concepts, exogena, Db};
 use crate::error::{AppError, AppResult};
 use crate::models::exogena::*;
 use crate::services::{exogena_xlsx, logos};
@@ -133,4 +133,23 @@ pub async fn save_exogena_workbook(
         saved.push(path.clone());
     }
     Ok(Some(path.to_string_lossy().to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Conceptos por formato
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn list_exo_format_concepts(db: State<'_, Db>, format_code: String) -> AppResult<Vec<exo_concepts::FormatConcept>> {
+    db.with(|c| exo_concepts::list(c, &format_code))
+}
+
+#[tauri::command]
+pub fn save_exo_format_concept(db: State<'_, Db>, input: exo_concepts::FormatConceptInput) -> AppResult<()> {
+    db.with(|c| exo_concepts::save(c, &input))
+}
+
+#[tauri::command]
+pub fn delete_exo_format_concept(db: State<'_, Db>, format_code: String, code: String) -> AppResult<()> {
+    db.with(|c| exo_concepts::delete(c, &format_code, &code))
 }

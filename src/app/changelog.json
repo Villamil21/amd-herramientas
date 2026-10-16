@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.33.0",
+    "date": "2026-10-16",
+    "notes": [
+      "Empresas rediseñadas: lista compacta con estado (Lista / Requiere revisión / Faltan datos) y ficha de trabajo con 4 pestañas (Resumen y documentos, Datos generales, Estructura societaria, Fiscal y registral), documentos RUT y Cámara con historial de versiones y revisión del RUT de cada socio con diferencias primero.",
+      "Empresas guarda datos registrales (ente económico, objeto social, Cámara, constitución, inscripción) leídos de la Cámara de Comercio; lo que no se confirma con certeza queda marcado «Revisar».",
+      "Nuevo submódulo Notas Financieras en Estados Financieros: notas generales y políticas fijas, notas específicas numeradas como la columna NOTA de los estados, edición, persistencia por empresa y período y PDF.",
+      "Información Exógena: nuevo formato 1008 (cuentas por cobrar a socios = capital suscrito − pagado, concepto 1316 sugerido), conceptos administrables por formato, conciliación con Empresas e integración en Control y en el Excel único."
+    ]
+  },
+  {
     "version": "1.32.0",
     "date": "2026-10-16",
     "notes": [
@@ -8,13 +18,6 @@
       "Empresas: ficha de socios ampliada e importación del RUT del socio con comparación contra los datos actuales. IVA, Retención y Clasificación de compras proponen datos del emisor de la factura para revisar.",
       "Nómina: el detalle por entidad (AFP, EPS, ARL, CCF) de las planillas queda guardado con el lote.",
       "Configuración → Zona de peligro: reinicio total de datos con copia previa, frase de confirmación y segunda confirmación. El respaldo JSON incluye los datos de Exógena."
-    ]
-  },
-  {
-    "version": "1.32.0",
-    "date": "2026-10-16",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {

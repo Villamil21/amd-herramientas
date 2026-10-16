@@ -159,6 +159,7 @@ function table(pdf: JsPDF, rows: StatementRow[]) {
     if (row.kind !== "gap") {
       const bold = row.kind !== "line";
       label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: row.kind === "title" ? size + 1 : size, bold }));
+      if (row.kind === "line" && row.note !== undefined) text(pdf, String(row.note), NOTE_X, baseline, { size, align: "center", color: COLORS.muted });
       if (row.pesos !== undefined) {
         const value = formatStatementPesos(row.pesos);
         text(pdf, value, VALUE_RIGHT, baseline, { size, bold, align: "right", color: row.pesos < 0 ? COLORS.negative : COLORS.text });

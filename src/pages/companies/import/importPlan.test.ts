@@ -3,10 +3,10 @@ import type { CamaraData } from "./camaraParser";
 import { planImport, type ImportableValues } from "./importPlan";
 import type { RutData } from "./rutParser";
 
-const EMPTY: ImportableValues = { razonSocial: "", nit: "", dv: "", ciiuCode: "", ciudad: "", direccion: "", correo: "", telefono: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null };
+const EMPTY: ImportableValues = { razonSocial: "", nit: "", dv: "", ciiuCode: "", ciudad: "", direccion: "", correo: "", telefono: "", subscribedTotalShares: null, subscribedNominalValue: null, paidTotalShares: null, paidNominalValue: null, entityNarrative: "", corporatePurpose: "", registryChamber: "", registryCity: "", constitutionDocType: "", constitutionDate: "", registryNumber: "", registryDate: "", registryBook: "" };
 
 const rut = (extra: Partial<RutData> = {}): RutData => ({ nit: "901679752", dv: "3", razonSocial: "NFES SOLUTIONS S.A.S.", ciiu: "6201", ciudad: "Sincelejo", direccion: "DG 35 34 29 CA 2", correo: "info@nfessolutions.com", telefono: "3108072906", isNaturalPerson: false, representatives: [], notes: [], ...extra });
-const camara = (extra: Partial<CamaraData> = {}): CamaraData => ({ razonSocial: "NFES SOLUTIONS S.A.S.", nit: "901679752", dv: "3", subscribed: { shares: 50_000, nominal: 1000 }, paid: { shares: 10_000, nominal: 1000 }, principals: [], alternates: [], notes: [], ...extra });
+const camara = (extra: Partial<CamaraData> = {}): CamaraData => ({ razonSocial: "NFES SOLUTIONS S.A.S.", nit: "901679752", dv: "3", subscribed: { shares: 50_000, nominal: 1000 }, paid: { shares: 10_000, nominal: 1000 }, principals: [], alternates: [], registral: { values: {}, review: [] }, notes: [], ...extra });
 
 describe("prellenado desde el RUT y la Cámara", () => {
   it("rellena lo vacío con su origen y sin discrepancias cuando ambos documentos coinciden", () => {
@@ -53,5 +53,26 @@ describe("prellenado desde el RUT y la Cámara", () => {
     expect(plan.apply.ciiuCode).toBeUndefined();
     expect(plan.apply.telefono).toBeUndefined();
     expect(plan.apply.subscribedTotalShares).toBeUndefined();
+  });
+});
+
+describe("datos registrales de la Cámara", () => {
+  const registral = { values: { registryChamber: "Cámara de Comercio de Medellín", registryNumber: "5955", corporatePurpose: "La sociedad tendrá por objeto el desarrollo de software." }, review: [] };
+
+  it("rellena los campos registrales vacíos sin pasarlos a mayúsculas y con origen Cámara", () => {
+    const plan = planImport(EMPTY, null, camara({ registral }));
+    expect(plan.apply).toMatchObject({ registryChamber: "Cámara de Comercio de Medellín", registryNumber: "5955" });
+    expect(plan.origin.registryChamber).toEqual(["camara"]);
+  });
+
+  it("un campo registral distinto al ya escrito es una discrepancia: nunca se sobrescribe en silencio", () => {
+    const plan = planImport({ ...EMPTY, registryNumber: "7000" }, null, camara({ registral }));
+    expect(plan.apply.registryNumber).toBeUndefined();
+    expect(plan.conflicts.map((c) => c.field)).toContain("registryNumber");
+  });
+
+  it("el mismo valor con otra capitalización o espacios no es discrepancia", () => {
+    const plan = planImport({ ...EMPTY, registryChamber: "Cámara de  Comercio de Medellín " }, null, camara({ registral }));
+    expect(plan.conflicts.map((c) => c.field)).not.toContain("registryChamber");
   });
 });

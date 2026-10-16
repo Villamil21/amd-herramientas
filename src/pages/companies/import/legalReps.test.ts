@@ -22,6 +22,7 @@ const camara = (principal?: [string, string], alternate?: [string, string]): Cam
   paid: { shares: null, nominal: null },
   principals: principal ? [{ name: principal[0], documentType: "CC", documentNumber: principal[1], cargo: "REPRESENTANTE LEGAL" }] : [],
   alternates: alternate ? [{ name: alternate[0], documentType: "CC", documentNumber: alternate[1], cargo: "REPRESENTANTE LEGAL SUPLENTE" }] : [],
+  registral: { values: {}, review: [] },
   notes: [],
 });
 

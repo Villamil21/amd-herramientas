@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BookCheck, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
 
@@ -91,6 +91,15 @@ export const financialStatementsModule: ModuleDef = {
       description: "Estado de Situación Financiera y Estado de Resultados: validación, previsualización, PDF y cierre.",
       icon: ChartNoAxesCombined,
       component: lazy(() => import("./generator/GeneratorPage")),
+    },
+    {
+      id: "notas-financieras",
+      name: "Notas Financieras",
+      // Junto al Generador: justo después de su tarjeta.
+      priority: 0.5,
+      description: "Notas a los estados financieros del mismo período: datos de Empresas, políticas fijas y notas específicas numeradas.",
+      icon: NotebookText,
+      component: lazy(() => import("./notes/NotesPage")),
     },
     {
       id: "movimientos-contables",

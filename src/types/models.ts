@@ -24,6 +24,20 @@ export interface Company {
   /** El principal / suplente no está entre los socios y se confirmó como excepción. */
   legalRepManual: boolean;
   legalRepAltManual: boolean;
+  // --- Datos registrales de la Cámara de Comercio (siempre editables; alimentan Notas Financieras) ---
+  /** Ente económico: texto narrativo de constitución. */
+  entityNarrative: string;
+  corporatePurpose: string;
+  registryChamber: string;
+  registryCity: string;
+  constitutionDocType: string;
+  /** AAAA-MM-DD o vacío. */
+  constitutionDate: string;
+  registryNumber: string;
+  registryDate: string;
+  registryBook: string;
+  /** Campos registrales que la lectura del certificado no confirmó con certeza («Revisar»). */
+  registralReview: string[];
   shareholders: Shareholder[];
   /** Historial de RUT y Cámara de Comercio (más antiguo primero). */
   documents: CompanyDocument[];

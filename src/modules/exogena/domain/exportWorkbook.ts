@@ -29,6 +29,8 @@ export function exportBlockers(state: ExportState): ExportBlocker[] {
   const out: ExportBlocker[] = [];
   let applicable = 0;
   for (const f of IMPLEMENTED_FORMATS) {
+    // Un formato que quien llama no informa no participa en la verificación.
+    if (!(f.code in state.statuses)) continue;
     const row = state.statuses[f.code];
     const status = row?.status ?? "en_preparacion";
     if (status === "no_aplica") continue;
@@ -54,7 +56,7 @@ const textOf = (v: unknown): string | null => {
 
 /** Orden estable de los registros dentro de la hoja. */
 function sortRecords(code: string, records: ExoRecord[]): ExoRecord[] {
-  const key = (r: ExoRecord) => (code === "1009" ? `${String(r.data.concept ?? "")}|${String(r.data.docNumber ?? "")}` : `${String(r.data.docNumber ?? "")}`);
+  const key = (r: ExoRecord) => ((code === "1009" || code === "1008") ? `${String(r.data.concept ?? "")}|${String(r.data.docNumber ?? "")}` : `${String(r.data.docNumber ?? "")}`);
   return [...records].sort((a, b) => key(a).localeCompare(key(b)) || a.id - b.id);
 }
 

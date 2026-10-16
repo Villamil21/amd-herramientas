@@ -1,3 +1,4 @@
+import { EMPTY_REGISTRAL } from "../../../pages/companies/companyDefaults";
 import type { ExoCatalogs, ExoRecord } from "../../../types/exogena";
 import type { Company, Shareholder } from "../../../types/models";
 import { buildCatalogIndex } from "./catalogIndex";
@@ -72,6 +73,7 @@ export function company(shareholders: Shareholder[], overrides: Partial<Company>
     paidTotalShares: null,
     paidNominalValue: null,
     ciiuCode: "",
+    ...EMPTY_REGISTRAL,
     legalRepName: "",
     legalRepDocument: "",
     legalRepAltName: "",

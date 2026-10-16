@@ -394,6 +394,8 @@ export interface StatementRow {
   /** Pesos redondeados al millar (calculado desde el exacto). */
   pesos?: number;
   lineId?: number;
+  /** Número de la nota (columna NOTA): lo asigna `notes/model.ts`; no interviene en ningún cálculo. */
+  note?: number;
 }
 
 const valueRow = (kind: RowKind, label: string, cents: number, lineId?: number): StatementRow => ({ kind, label, cents, pesos: roundThousands(cents), lineId });
