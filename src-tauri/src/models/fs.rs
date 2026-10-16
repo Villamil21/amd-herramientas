@@ -219,6 +219,34 @@ pub enum SendOutcome {
     Duplicate { batches: Vec<BatchSummary>, repeated_documents: i64 },
 }
 
+/// Fuentes que admiten «Registrar periodo sin …» (compras, nómina, ventas, operaciones).
+pub const EMPTY_PERIOD_SOURCES: [&str; 4] = ["purchases", "payroll", "sales_einvoice", "sales_tpsv"];
+
+/// Periodo declarado sin actividad: cubre los meses en el Generador sin crear movimientos.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyPeriodInput {
+    pub company_id: i64,
+    pub source: String,
+    /// Meses AAAA-MM sin actividad.
+    pub months: Vec<String>,
+    /// Texto de la confirmación explícita que aceptó el usuario (queda en la trazabilidad).
+    pub confirmation: String,
+    /// El usuario ya vio la advertencia de que alguno de los meses tiene información real.
+    #[serde(default)]
+    pub allow_with_data: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum EmptyPeriodOutcome {
+    #[serde(rename_all = "camelCase")]
+    Registered { batch_ids: Vec<i64> },
+    /// Meses con información real activa: se detiene para pedir la advertencia explícita.
+    #[serde(rename_all = "camelCase")]
+    HasData { months: Vec<String> },
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Movement {

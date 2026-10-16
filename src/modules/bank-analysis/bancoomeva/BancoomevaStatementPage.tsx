@@ -1,9 +1,8 @@
 import { PageHeader } from "../../../components/ui";
 import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
-import { DebitCreditSummaryCards } from "../shared/components/DebitCreditSummaryCards";
-import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
+import { BancoomevaGroupDetailModal } from "./components/BancoomevaGroupDetailModal";
+import { AccountDetails, StatementFileActions, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
-import { BancoomevaGroupsTable } from "./components/BancoomevaGroupsTable";
 import { BancoomevaValidationPanel } from "./components/BancoomevaValidationPanel";
 import { analyzeBancoomeva, type BancoomevaAnalysis } from "./services/analysis";
 import { exportBancoomevaExcel } from "./services/excelExport";
@@ -23,6 +22,7 @@ export default function BancoomevaStatementPage() {
       <PageHeader eyebrow="Extractos bancarios" title="Bancoomeva" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
+        hideWhenDone
         state={state}
         details={state.status === "done" && <AccountDetails {...state.analysis.statement} />}
         picking={picking}
@@ -40,11 +40,11 @@ export default function BancoomevaStatementPage() {
           fileName={state.fileName}
           onExport={exportExcel}
           exporting={exporting}
-        >
-          <BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
-          <BancoomevaGroupsTable groups={state.analysis.groups} />
-        </TypedBankAccounting>
+          validated={state.analysis.validation.validated}
+          validation={<BancoomevaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />}
+          fileActions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} />}
+          renderDetail={(key, close) => <BancoomevaGroupDetailModal group={state.analysis.groups.find((g) => g.key === key) ?? null} onClose={close} />}
+        />
       )}
     </>
   );

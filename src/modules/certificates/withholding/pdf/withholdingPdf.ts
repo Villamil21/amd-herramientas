@@ -1,6 +1,6 @@
 import type { jsPDF as JsPDF } from "jspdf";
 import type { CertificateDocument } from "../logic/certificateModel";
-import { COLORS, FONT_SIZES, LAYOUT, PAGE } from "./layout";
+import { COLORS, FONT_SIZES, LAYOUT, PAGE, tableMetrics } from "./layout";
 
 export interface LogoImage {
   dataUrl: string;
@@ -85,14 +85,17 @@ export async function renderWithholdingPdf(
   const t = LAYOUT.table;
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(FONT_SIZES.tableText);
+  // Compactación automática: con la letra normal se mide cuántas líneas ocupa cada concepto.
+  const m = tableMetrics(doc.rows.map((row) => (pdf.splitTextToSize(row.concepto, t.concept.maxWidth) as string[]).length));
+  pdf.setFontSize(m.fontSize);
   let y = t.firstRowBaseline;
   const rows = doc.rows.map((row) => {
     const lines: string[] = pdf.splitTextToSize(row.concepto, t.concept.maxWidth);
     const baseline = y;
-    y += lines.length * t.lineHeight + t.rowGap;
+    y += lines.length * m.lineHeight + m.rowGap;
     return { row, lines, baseline };
   });
-  const bottom = Math.max(t.minBottom, y);
+  const bottom = Math.max(m.minBottom, y);
 
   pdf.setDrawColor(COLORS.line);
   pdf.setLineWidth(0.6);
@@ -107,10 +110,10 @@ export async function renderWithholdingPdf(
   text(pdf, "BASE DE RETENCIÓN", t.baseX, t.headerBaseline, header);
   text(pdf, "VALOR RETENIDO", t.valueRight, t.headerBaseline, { ...header, align: "right" });
 
-  const cell = { size: FONT_SIZES.tableText, color: COLORS.tableText };
+  const cell = { size: m.fontSize, color: COLORS.tableText };
   for (const { row, lines, baseline } of rows) {
     text(pdf, `${row.index}.`, t.concept.numberX, baseline, cell);
-    lines.forEach((line, i) => text(pdf, line, t.concept.textX, baseline + i * t.lineHeight, cell));
+    lines.forEach((line, i) => text(pdf, line, t.concept.textX, baseline + i * m.lineHeight, cell));
     text(pdf, row.tasa, t.rateX, baseline, cell);
     text(pdf, row.base, t.baseX, baseline, cell);
     text(pdf, row.valor, t.valueRight, baseline, { ...cell, align: "right" });

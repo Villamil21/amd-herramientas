@@ -11,6 +11,20 @@ export const PERIODICITY_LABEL: Record<TaxPeriodicity, string> = { monthly: "Men
 /** Solo un saldo a pagar o un saldo a favor: si la declaración trae ambos, el usuario decide cuál vale. */
 export type TaxResolution = "" | "payable" | "favor";
 
+/** «Periodo sin obligación» registrado (lo que devuelve Rust). */
+export interface TaxEmptyPeriod {
+  id: number;
+  companyId: number;
+  taxType: TaxType;
+  year: number;
+  period: number | null;
+  periodicity: TaxPeriodicity;
+  confirmation: string;
+  status: "active" | "voided";
+  createdAt: string;
+  voidedAt: string | null;
+}
+
 /** Declaración guardada (lo que devuelve Rust). Valores en centavos. */
 export interface TaxReturn {
   id: number;

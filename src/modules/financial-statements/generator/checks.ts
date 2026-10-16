@@ -1,8 +1,8 @@
-import { SOURCE_LABEL, type BankAccountLifecycle, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
+import { isEmptyPeriodBatch, SOURCE_LABEL, type BankAccountLifecycle, type BankBalance, type BatchSummary, type Employee, type FsSource, type Movement, type PayrollRow } from "../../../types/fs";
 import { employeeKey, findAbsences, type Absence } from "../payroll/calc";
 import { monthsBetween, periodLabel } from "../shared/money";
 import { periodsPerYear } from "../tax-obligations/services/effects";
-import type { TaxPeriodicity, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import type { TaxEmptyPeriod, TaxPeriodicity, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
 import { statementMonths } from "../bank/bankAccounting";
 import { isBalanced, pendingBankBalances, type BankBalanceStatus, type Statements } from "./engine";
 
@@ -18,6 +18,8 @@ export interface CoverageCell {
   /** Importaciones con información de ese mes (activas o reemplazadas). */
   batches: BatchSummary[];
   records: number;
+  /** El mes está cubierto solo por un registro «periodo sin actividad» (✓ Sin compras…). */
+  emptyDeclared?: boolean;
 }
 
 export interface CoverageRow {
@@ -83,6 +85,16 @@ export function coverage(
       return { source, label: SOURCE_LABEL[source], cells, missing, empty: bank.banks.length === 0, bank };
     }
     for (const m of movements) if (m.source === source && m.accountingDate >= start && m.accountingDate <= end) add(m.accountingDate.slice(0, 7), m.batchId, m.status === "active");
+    // «Registrar periodo sin …»: el mes queda cubierto sin movimientos.
+    for (const b of batches) {
+      if (b.source !== source || !isEmptyPeriodBatch(b) || !b.periodStart) continue;
+      const cell = cells[b.periodStart.slice(0, 7)];
+      if (!cell) continue;
+      if (!cell.batches.includes(b)) cell.batches.push(b);
+      if (b.status !== "active") continue;
+      if (!cell.loaded) cell.emptyDeclared = true;
+      cell.loaded = true;
+    }
     if (NOT_MONTHLY_SOURCES.includes(source)) {
       const snapshotDates = source === "opening" ? [...new Set(movements.filter((m) => m.source === "opening" && m.status === "active" && m.accountingDate <= end).map((m) => m.accountingDate))].sort() : [];
       const empty = source === "opening" ? snapshotDates.length === 0 : months.every((m) => !cells[m].loaded);
@@ -290,9 +302,16 @@ export interface TaxCoverage {
   vat: { periodicity: TaxPeriodicity | null; periods: { key: string; year: number; period: number; months: string[]; returns: TaxReturn[] }[] };
   income: { year: number; returns: TaxReturn[] }[];
   counts: { withholding: number; vat: number; income: number };
+  /** Periodos registrados «sin obligación» (clave: «withholding:2026-03», «vat:2026-2», «income:2025»). */
+  empty: Set<string>;
 }
 
-export function taxCoverage(months: string[], returns: TaxReturn[], vatPeriodicity: VatPeriodicity | null, end: string): TaxCoverage {
+export function taxCoverage(months: string[], returns: TaxReturn[], vatPeriodicity: VatPeriodicity | null, end: string, empties: TaxEmptyPeriod[] = []): TaxCoverage {
+  const empty = new Set(
+    empties
+      .filter((e) => e.status === "active")
+      .map((e) => (e.taxType === "withholding" ? `withholding:${e.year}-${String(e.period).padStart(2, "0")}` : e.taxType === "vat" ? `vat:${e.periodicity}:${e.year}-${e.period}` : `income:${e.year}`)),
+  );
   const live = returns.filter((r) => r.supersededBy === null);
   const withholding = Object.fromEntries(months.map((m) => [m, live.filter((r) => r.taxType === "withholding" && r.periodStart.slice(0, 7) === m)]));
   const vatReturns = live.filter((r) => r.taxType === "vat");
@@ -313,7 +332,7 @@ export function taxCoverage(months: string[], returns: TaxReturn[], vatPeriodici
   const years = incomeReturns.map((r) => r.year);
   const income: TaxCoverage["income"] = [];
   if (years.length) for (let y = Math.min(...years); y <= Math.max(...years, Number(end.slice(0, 4)) - 1); y++) income.push({ year: y, returns: incomeReturns.filter((r) => r.year === y) });
-  return { vatPeriodicity, withholding, vat: { periodicity, periods }, income, counts: { withholding: returns.filter((r) => r.taxType === "withholding").length, vat: vatReturns.length, income: incomeReturns.length } };
+  return { vatPeriodicity, withholding, vat: { periodicity, periods }, income, counts: { withholding: returns.filter((r) => r.taxType === "withholding").length, vat: vatReturns.length, income: incomeReturns.length }, empty };
 }
 
 export interface DuplicateGroup {

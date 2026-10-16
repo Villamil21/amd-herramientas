@@ -1,10 +1,10 @@
 import { PageHeader } from "../../../components/ui";
 import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
-import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
+import { BbvaGroupDetailModal } from "./components/BbvaGroupDetailModal";
+import { AccountDetails, StatementFileActions, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
-import { BbvaGroupsTable } from "./components/BbvaGroupsTable";
-import { BbvaSummaryCards } from "./components/BbvaSummaryCards";
 import { BbvaValidationPanel } from "./components/BbvaValidationPanel";
+import { BBVA_TYPE_LABEL } from "./types";
 import { analyzeBbva, type BbvaAnalysis } from "./services/analysis";
 import { exportBbvaExcel } from "./services/excelExport";
 
@@ -23,6 +23,7 @@ export default function BbvaStatementPage() {
       <PageHeader eyebrow="Extractos bancarios" title="BBVA" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
+        hideWhenDone
         state={state}
         details={
           state.status === "done" && (
@@ -47,11 +48,13 @@ export default function BbvaStatementPage() {
           fileName={state.fileName}
           onExport={exportExcel}
           exporting={exporting}
-        >
-          <BbvaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <BbvaSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.closingBalanceCents} />
-          <BbvaGroupsTable groups={state.analysis.groups} />
-        </TypedBankAccounting>
+          typeLabels={{ C: BBVA_TYPE_LABEL.credit, D: BBVA_TYPE_LABEL.debit }}
+          fileDetail={state.analysis.statement.clientName}
+          validated={state.analysis.validation.validated}
+          validation={<BbvaValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />}
+          fileActions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} />}
+          renderDetail={(key, close) => <BbvaGroupDetailModal group={state.analysis.groups.find((g) => g.key === key) ?? null} onClose={close} />}
+        />
       )}
     </>
   );

@@ -10,6 +10,29 @@ const mv = (id: number, date: string, batchId: number, extra: Partial<Movement> 
 const batch = (id: number): BatchSummary => ({ id, companyId: 1, source: "purchases", fileName: `lote${id}`, periodLabel: "", periodStart: null, periodEnd: null, dedupeKey: "", recordCount: 1, totalCents: 1, status: "active", replacedBy: null, metadata: null, createdAt: "2026-10-14" });
 
 describe("cobertura mensual", () => {
+  it("un periodo registrado sin compras cubre el mes sin movimientos (✓ Sin compras); anulado o reemplazado no", () => {
+    const empty = (id: number, month: string, status: BatchSummary["status"] = "active"): BatchSummary => ({
+      ...batch(id),
+      recordCount: 0,
+      totalCents: 0,
+      periodStart: `${month}-01`,
+      periodEnd: `${month}-28`,
+      periodLabel: month,
+      status,
+      metadata: { emptyPeriod: true, confirmation: "No hubo facturas de compra.", confirmedAt: "2026-10-15T10:00:00Z" },
+    });
+    const movements = [mv(1, "2026-03-10", 4)];
+    const c = coverage("2026-01-01", "2026-04-30", movements, [], [empty(1, "2026-01"), empty(2, "2026-02", "voided"), empty(3, "2026-03", "replaced"), batch(4)]);
+    const row = c.rows.find((r) => r.source === "purchases")!;
+    expect(row.cells["2026-01"]).toMatchObject({ loaded: true, emptyDeclared: true, records: 0 });
+    expect(row.cells["2026-02"].loaded).toBe(false);
+    expect(row.cells["2026-03"]).toMatchObject({ loaded: true });
+    expect(row.cells["2026-03"].emptyDeclared).toBeFalsy();
+    expect(row.missing).toEqual(["2026-02", "2026-04"]);
+    // Otra fuente no se cubre con el registro de compras.
+    expect(c.rows.find((r) => r.source === "payroll")!.missing).toHaveLength(4);
+  });
+
   it("no supone importación secuencial: muestra exactamente los meses que faltan", () => {
     const movements = [mv(1, "2026-01-15", 1), mv(2, "2026-02-03", 2), mv(3, "2026-04-20", 3), mv(4, "2026-06-30", 4), mv(5, "2026-09-01", 5)];
     const c = coverage("2026-01-01", "2026-08-31", movements, [], [1, 2, 3, 4, 5].map(batch));

@@ -3,7 +3,7 @@ import { CalendarRange, Check, ChevronDown, ChevronRight, Minus } from "lucide-r
 import { Alert, Badge, Button, DateInput, Field, Input, Loader, Modal, Select, Textarea, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
-import type { Adjustment, AdjustmentType, BatchSummary, FsPucMapping } from "../../../types/fs";
+import { EMPTY_PERIOD_LABEL, isEmptyPeriodBatch, type Adjustment, type AdjustmentType, type BatchSummary, type EmptyPeriodSource, type FsPucMapping } from "../../../types/fs";
 import { formatInteger } from "../../../utils/format";
 import { parseNumericText } from "../../../utils/numbers";
 import type { PucIndex } from "../puc-codes/services/pucCatalog";
@@ -138,12 +138,13 @@ export function CoverageTable({
         <td key={m} style={{ textAlign: "center" }}>
           <button
             type="button"
-            className={`fs-coverage__cell ${c.loaded ? "is-loaded" : neutral ? "is-na" : ""}`}
+            className={`fs-coverage__cell ${c.loaded ? "is-loaded" : neutral ? "is-na" : ""}${c.emptyDeclared ? " fs-coverage__cell--wide is-empty-period" : ""}`}
             onClick={() => setSelected({ kind: "source", row: r, month: m })}
             title={neutral ? (r.source === "opening" ? "Saldo inicial: foto de apertura, no se espera cada mes" : "Los ajustes son puntuales: no se esperan cada mes") : undefined}
-            aria-label={`${r.label} ${periodLabel(m)}: ${c.loaded ? "cargado" : neutral ? "no se espera mensualmente" : "falta"}`}
+            aria-label={`${r.label} ${periodLabel(m)}: ${c.emptyDeclared ? EMPTY_PERIOD_LABEL[r.source as EmptyPeriodSource].toLowerCase() : c.loaded ? "cargado" : neutral ? "no se espera mensualmente" : "falta"}`}
           >
             {c.loaded ? <Check size={14} /> : <Minus size={14} />}
+            {c.emptyDeclared && <span className="fs-coverage__empty">{EMPTY_PERIOD_LABEL[r.source as EmptyPeriodSource]}</span>}
           </button>
         </td>
       );
@@ -320,7 +321,7 @@ export function CoverageTable({
         <td>Retención en la fuente</td>
         {months.map((m) => (
           <td key={m} style={{ textAlign: "center" }}>
-            {mark(t.withholding[m].length > 0, `Retefuente ${periodLabel(m)}`, () => pick(`Retención en la fuente · ${periodLabel(m)}`, t.withholding[m], "retencion-en-la-fuente"))}
+            {mark(t.withholding[m].length > 0 || t.empty.has(`withholding:${m}`), `Retefuente ${periodLabel(m)}`, () => pick(`Retención en la fuente · ${periodLabel(m)}`, t.withholding[m], "retencion-en-la-fuente"))}
           </td>
         ))}
       </tr>,
@@ -338,7 +339,7 @@ export function CoverageTable({
             const name = periodName({ taxType: "vat", year: p.year, period: p.period, periodicity: t.vat.periodicity! });
             return (
               <td key={p.key} colSpan={p.months.length} style={{ textAlign: "center" }}>
-                {mark(p.returns.length > 0, `IVA ${name}`, () => pick(`IVA · ${name}`, p.returns, "iva"), `P${p.period} `)}
+                {mark(p.returns.length > 0 || t.empty.has(`vat:${t.vat.periodicity}:${p.key}`), `IVA ${name}`, () => pick(`IVA · ${name}`, p.returns, "iva"), `P${p.period} `)}
               </td>
             );
           })
@@ -352,7 +353,7 @@ export function CoverageTable({
           ) : (
             <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
               {t.income.map((y) => (
-                <span key={y.year}>{mark(y.returns.length > 0, `Renta ${y.year}`, () => pick(`Renta · año gravable ${y.year}`, y.returns, "renta"), `${y.year} `)}</span>
+                <span key={y.year}>{mark(y.returns.length > 0 || t.empty.has(`income:${y.year}`), `Renta ${y.year}`, () => pick(`Renta · año gravable ${y.year}`, y.returns, "renta"), `${y.year} `)}</span>
               ))}
             </div>
           )}
@@ -530,7 +531,16 @@ export function BatchTable({ batches }: { batches: BatchSummary[] }) {
           {batches.map((b) => (
             <tr key={b.id}>
               <td>#{b.id}</td>
-              <td>{[b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"}</td>
+              <td>
+                {isEmptyPeriodBatch(b) ? (
+                  <>
+                    {EMPTY_PERIOD_LABEL[b.source as EmptyPeriodSource] ?? "Sin actividad"} · {periodLabel(b.periodStart?.slice(0, 7) ?? b.periodLabel)}
+                    <div className="table__secondary">Confirmado el {formatDateForDisplay(String(b.metadata?.confirmedAt ?? b.createdAt))}: «{String(b.metadata?.confirmation ?? "")}»</div>
+                  </>
+                ) : (
+                  [b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"
+                )}
+              </td>
               <td>{formatDateForDisplay(b.createdAt)}</td>
               <td style={{ textAlign: "right" }}>{formatInteger(b.recordCount)}</td>
               <td>{b.status === "active" ? <Badge tone="success">Activo</Badge> : b.status === "replaced" ? <Badge tone="warning">Reemplazado{b.replacedBy ? ` por #${b.replacedBy}` : ""}</Badge> : <Badge>Anulado</Badge>}</td>

@@ -46,3 +46,18 @@ pub fn get_fs_tax_settings(db: State<'_, Db>, company_id: i64) -> AppResult<TaxC
 pub fn save_fs_tax_settings(db: State<'_, Db>, settings: TaxCompanySettings) -> AppResult<()> {
     db.with(|c| tax::save_settings(c, &settings))
 }
+
+#[tauri::command]
+pub fn list_fs_tax_empty_periods(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<TaxEmptyPeriod>> {
+    db.with(|c| tax::list_empty_periods(c, company_id))
+}
+
+#[tauri::command]
+pub fn register_fs_tax_empty_period(db: State<'_, Db>, input: TaxEmptyPeriodInput) -> AppResult<i64> {
+    db.with(|c| tax::register_empty_period(c, &input))
+}
+
+#[tauri::command]
+pub fn void_fs_tax_empty_period(db: State<'_, Db>, id: i64) -> AppResult<()> {
+    db.with(|c| tax::void_empty_period(c, id))
+}

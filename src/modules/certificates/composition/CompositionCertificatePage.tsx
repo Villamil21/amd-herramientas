@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, CircleDashed, XCircle } from "lucide-react";
 import { Alert, Button, Card, Field, Loader, PageHeader, Select } from "../../../components/ui";
 import { useAsync } from "../../../hooks/useAsync";
 import { companyService, getLogoDataUrl } from "../../../services/companyService";
 import { signerService } from "../../../services/signerService";
 import { fileService } from "../../../services/fileService";
 import { build, formatMoney, formatNumber, validate } from "./model";
-import { renderCompositionPdf } from "./pdf";
+import { layoutCompositionPdf, renderCompositionPdf } from "./pdf";
 
 // Empresa y firmante empiezan siempre sin seleccionar. Versiones anteriores
 // recordaban la última selección: se borra lo que haya quedado guardado.
@@ -41,6 +42,39 @@ export default function CompositionCertificatePage() {
 
   const errors = validate(company, signer, logo, signature, signatureMissing);
   const doc = useMemo(() => company && signer && logo && signature && errors.length === 0 ? build(company, signer, logo, signature) : null, [company, signer, logo, signature, errors.length]);
+  // «Certificado en una página»: se comprueba con el mismo motor del PDF (ajusta letra y espaciado antes de desbordar).
+  const [onePage, setOnePage] = useState<boolean | "error" | null>(null);
+  useEffect(() => {
+    setOnePage(null);
+    if (!doc) return;
+    let alive = true;
+    layoutCompositionPdf(doc).then(
+      (r) => alive && setOnePage(r.fits),
+      () => alive && setOnePage("error"),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [doc]);
+
+  const share = company ? company.shareholders.reduce((a, s) => a + s.percentage, 0) : 0;
+  const checklist: { label: string; ok: boolean | null; detail?: string }[] = [
+    { label: "Empresa completa", ok: company ? Boolean(logo && company.nit && company.dv && company.ciudad) : false, detail: company ? (!logo ? "Falta el logo" : !company.nit || !company.dv || !company.ciudad ? "Falta NIT, DV o ciudad" : company.razonSocial) : "Selecciona una empresa" },
+    {
+      label: "Socios configurados",
+      ok: Boolean(company && company.shareholders.length && company.subscribedTotalShares && company.subscribedNominalValue && company.paidTotalShares && company.paidNominalValue),
+      detail: company ? `${company.shareholders.length} ${company.shareholders.length === 1 ? "socio" : "socios"} · capital suscrito y pagado` : undefined,
+    },
+    { label: "Participación total 100 %", ok: company ? Math.abs(share - 100) <= 0.000001 : false, detail: company ? `Suma ${formatNumber(share)} %` : undefined },
+    { label: "Firmante con firma", ok: signer ? Boolean(signature) && !signatureMissing : false, detail: signer ? (signatureMissing || !signer.signatureAvailable ? "Sin imagen de firma" : signer.name) : "Selecciona un firmante" },
+    {
+      label: "Certificado en una página",
+      ok: doc ? (onePage === "error" ? false : onePage) : false,
+      detail: !doc ? "Completa lo anterior" : onePage === null ? "Comprobando…" : onePage === "error" ? "No se pudo preparar el PDF (revisa el logo y la firma)" : onePage ? "Letra y espaciado ajustados" : "No cabe ni con la letra mínima",
+    },
+  ];
+  const ready = checklist.every((c) => c.ok === true);
+
   async function generate() {
     if (!doc) return;
     setBusy(true); setError(null);
@@ -59,8 +93,20 @@ export default function CompositionCertificatePage() {
         <div className="param-bar composition-bar">
           <Field label="Empresa" required>{id => <Select id={id} value={companyId ?? ""} onChange={event => { setCompanyId(event.target.value ? Number(event.target.value) : null); setPreview(false); }}><option value="">Seleccionar empresa…</option>{companies.data?.map(item => <option key={item.id} value={item.id}>{item.razonSocial}</option>)}</Select>}</Field>
           <Field label="Firmante" required>{id => <Select id={id} value={signerId ?? ""} onChange={event => { setSignerId(event.target.value ? Number(event.target.value) : null); setPreview(false); }}><option value="">Seleccionar firmante…</option>{signers.data?.map(item => <option key={item.id} value={item.id}>{item.name} — {item.role}</option>)}</Select>}</Field>
-          <div className="param-bar__group composition-bar__actions"><Button variant="secondary" disabled={errors.length > 0} onClick={() => setPreview(true)}>Vista previa</Button><Button variant="primary" disabled={errors.length > 0 || !preview} loading={busy} onClick={() => void generate()}>Generar PDF</Button></div>
+          <div className="param-bar__group composition-bar__actions"><Button variant="secondary" disabled={errors.length > 0} onClick={() => setPreview(true)}>Vista previa</Button><Button variant="primary" disabled={!ready || !preview} loading={busy} onClick={() => void generate()}>Generar PDF</Button></div>
         </div>
+        {/* Checklist antes de generar. */}
+        <ul className="fs-checklist composition-checklist">
+          {checklist.map((c) => (
+            <li key={c.label} className={c.ok ? "is-ok" : "is-pending"}>
+              {c.ok ? <CheckCircle2 size={15} /> : c.ok === null ? <CircleDashed size={15} /> : <XCircle size={15} />}
+              <span>
+                {c.label}
+                {c.detail && <span className="field__hint"> · {c.detail}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
         {errors.length > 0 && (company || signer) && <Alert tone="warning">{errors.map(message => <div key={message}>{message}</div>)}</Alert>}
       </div>
     </Card>

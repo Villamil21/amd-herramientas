@@ -111,7 +111,7 @@ export default function IndependentContributionsPage() {
                   <strong>{formatCalcPesos(ibc.status === "ok" ? ibc.ibcPesos : 0)}</strong>
                 </div>
               </div>
-              <p className="calc__ibc-why">
+              <p className={`calc__ibc-why${ibc.status === "ok" ? " is-highlighted" : ""}`}>
                 {ibc.status !== "ok"
                   ? "Escribe los ingresos para calcular el IBC."
                   : ibc.usesMinimumWage

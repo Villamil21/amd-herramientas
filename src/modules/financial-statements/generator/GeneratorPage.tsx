@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Eye, FileDown, Lock, Pencil, Plus, Unlock, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Eye, FileDown, Lock, Pencil, Plus, Settings2, Unlock, XCircle } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
 import { Alert, Button, Card, ConfirmDialog, DateInput, Field, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
@@ -28,7 +28,7 @@ import { CompanySelect } from "../shared/components/CompanySelect";
 import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, roundThousands } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { taxService } from "../tax-obligations/services/taxService";
-import type { TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
@@ -45,6 +45,8 @@ interface Ledger {
   payrollRows: PayrollRow[];
   periods: Period[];
   taxReturns: TaxReturn[];
+  /** Periodos registrados «sin obligación». */
+  taxEmpty: TaxEmptyPeriod[];
   vatPeriodicity: VatPeriodicity | null;
   bankLifecycles: BankAccountLifecycle[];
 }
@@ -72,6 +74,10 @@ export default function GeneratorPage() {
   const [preview, setPreview] = useState<{ snapshot: StatementsSnapshot; bytes: Uint8Array | null; regenerate?: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"close" | "unlock" | null>(null);
+  /** Configuración desplegada; ya configurada se compacta en un resumen con «Cambiar configuración». */
+  const [configOpen, setConfigOpen] = useState(true);
+  /** Verificación: los puntos ya cumplidos se ven solo al pedir el detalle. */
+  const [checksDetail, setChecksDetail] = useState(false);
   const reviewing = useRef<string | null>(null);
 
   const company = data.companies?.find((c) => c.id === companyId) ?? null;
@@ -86,7 +92,7 @@ export default function GeneratorPage() {
   const loadLedger = useCallback(async () => {
     if (companyId === null) return setLedger(null);
     try {
-      const [movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, taxSettings, bankLifecycles] = await Promise.all([
+      const [movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, taxSettings, bankLifecycles, taxEmpty] = await Promise.all([
         fsService.movements(companyId),
         fsService.bankBalances(companyId),
         fsService.batches(companyId),
@@ -97,8 +103,9 @@ export default function GeneratorPage() {
         taxService.list(companyId),
         taxService.settings(companyId),
         fsService.bankLifecycles(companyId),
+        taxService.emptyPeriods(companyId),
       ]);
-      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, vatPeriodicity: taxSettings.vatPeriodicity, bankLifecycles });
+      setLedger({ movements, balances, batches, adjustments, employees, payrollRows, periods, taxReturns, vatPeriodicity: taxSettings.vatPeriodicity, bankLifecycles, taxEmpty });
     } catch (e) {
       toast(errorMessage(e), "error");
     }
@@ -159,7 +166,7 @@ export default function GeneratorPage() {
       return !e || !areaFor(e, r.period);
     }).length;
     const cov = coverage(start, end, ledger.movements, ledger.balances, ledger.batches, ledger.bankLifecycles);
-    return { coverage: cov, tax: taxCoverage(cov.months, ledger.taxReturns, ledger.vatPeriodicity, end), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
+    return { coverage: cov, tax: taxCoverage(cov.months, ledger.taxReturns, ledger.vatPeriodicity, end, ledger.taxEmpty), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
   }, [ledger, start, end, rangeOk]);
 
   const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea) : []), [statements, review]);
@@ -240,7 +247,43 @@ export default function GeneratorPage() {
   return (
     <>
       <PageHeader eyebrow="Estados Financieros" title="Generador de Estados Financieros" description="Estado de Situación Financiera (saldos a la fecha final) y Estado de Resultados (movimientos del rango) por empresa." />
-      <Card title={<StepTitle n={1}>Configuración del periodo</StepTitle>}>
+      {companyId !== null && rangeOk && presentation && !configOpen ? (
+        <Card className="fs-config-summary">
+          <div className="context-bar__main">
+            <dl className="context-bar__items">
+              <div className="context-bar__item">
+                <dt>1 · Empresa</dt>
+                <dd>{data.companies?.find((c) => c.id === companyId)?.razonSocial ?? "—"}</dd>
+              </div>
+              <div className="context-bar__item">
+                <dt>Periodo</dt>
+                <dd className="nowrap">
+                  {formatIsoDate(start)} a {formatIsoDate(end)}
+                </dd>
+              </div>
+              <div className="context-bar__item">
+                <dt>Presentación</dt>
+                <dd>{PRESENTATION_LABEL[presentation as Presentation]} (interna)</dd>
+              </div>
+            </dl>
+            <div className="context-bar__actions">
+              <Button size="sm" icon={<Settings2 size={14} />} onClick={() => setConfigOpen(true)}>
+                Cambiar configuración
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : (
+      <Card
+        title={<StepTitle n={1}>Configuración del periodo</StepTitle>}
+        actions={
+          companyId !== null && rangeOk && presentation ? (
+            <Button size="sm" variant="primary" onClick={() => setConfigOpen(false)}>
+              Listo
+            </Button>
+          ) : undefined
+        }
+      >
         <div className="param-bar fs-period-config">
           <div className="fs-period-config__company">
             <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
@@ -260,6 +303,7 @@ export default function GeneratorPage() {
           </Field>
         </div>
       </Card>
+      )}
 
       {key && s && shownRows && review && (
         <>
@@ -326,9 +370,21 @@ export default function GeneratorPage() {
           </Card>
 
           <div className="fs-grid fs-grid--check">
-            <Card title={<StepTitle n={3}>Verificación</StepTitle>}>
+            <Card
+              title={<StepTitle n={3}>Verificación</StepTitle>}
+              description={pendingChecks === 0 ? `Completa · ${checks.length} de ${checks.length} puntos` : `${pendingChecks} pendiente${pendingChecks === 1 ? "" : "s"} · ${checks.length - pendingChecks} de ${checks.length} puntos cumplidos`}
+              actions={
+                checks.length > pendingChecks ? (
+                  <Button size="sm" variant="ghost" icon={checksDetail ? <ChevronDown size={14} /> : <ChevronRight size={14} />} aria-expanded={checksDetail} onClick={() => setChecksDetail((v) => !v)}>
+                    {checksDetail ? "Ocultar cumplidos" : "Ver detalle"}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {/* Primero lo que falta (críticos visibles); los cumplidos, solo en el detalle. */}
+              {pendingChecks === 0 && !checksDetail && <p className="muted" style={{ margin: 0 }}>Todas las validaciones se cumplen.</p>}
               <ul className="fs-checklist">
-                {checks.map((c) => (
+                {[...checks.filter((c) => !c.ok), ...(checksDetail ? checks.filter((c) => c.ok) : [])].map((c) => (
                   <li key={c.id} className={c.ok ? "is-ok" : "is-pending"}>
                     {c.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
                     <span>
@@ -580,7 +636,7 @@ export default function GeneratorPage() {
                 <table className="table">
                   <tbody>
                     {otherPeriods.map((p) => (
-                      <tr key={p.id} className="is-clickable" onClick={() => { setStart(p.startDate); setEnd(p.endDate); setPresentation(p.presentation); }}>
+                      <tr key={p.id} className="is-clickable" onClick={() => { setStart(p.startDate); setEnd(p.endDate); setPresentation(p.presentation); setConfigOpen(false); }}>
                         <td>
                           {formatIsoDate(p.startDate)} a {formatIsoDate(p.endDate)}
                         </td>

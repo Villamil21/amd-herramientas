@@ -199,6 +199,24 @@ export interface BatchSummary {
   createdAt: string;
 }
 
+/** Fuentes que admiten «Registrar periodo sin …». */
+export type EmptyPeriodSource = "purchases" | "payroll" | "sales_einvoice" | "sales_tpsv";
+
+/** «✓ Sin compras», «✓ Sin nómina»… */
+export const EMPTY_PERIOD_LABEL: Record<EmptyPeriodSource, string> = {
+  purchases: "Sin compras",
+  payroll: "Sin nómina",
+  sales_einvoice: "Sin ventas",
+  sales_tpsv: "Sin operaciones",
+};
+
+export type EmptyPeriodOutcome = { kind: "registered"; batchIds: number[] } | { kind: "hasData"; months: string[] };
+
+/** Lote «periodo sin actividad»: cubre el mes sin movimientos. */
+export function isEmptyPeriodBatch(b: Pick<BatchSummary, "metadata">): boolean {
+  return b.metadata?.emptyPeriod === true;
+}
+
 export type SendOutcome =
   | { kind: "sent"; batchId: number; replacedBatchIds: number[]; invalidatedPeriods: number }
   | { kind: "duplicate"; batches: BatchSummary[]; repeatedDocuments: number };

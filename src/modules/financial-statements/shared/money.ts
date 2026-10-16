@@ -79,6 +79,29 @@ export const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio
 /** «2026-08» → «Agosto 2026». */
 export const periodLabel = (period: string) => `${MONTH_NAMES[Number(period.slice(5, 7)) - 1]} ${period.slice(0, 4)}`;
 
+/** «a», «a y b», «a, b y c». */
+const joinSpanish = (items: string[]) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`);
+
+/**
+ * Meses detectados (AAAA-MM, en cualquier orden y con repetidos) en texto:
+ * «Enero 2026», «Enero a marzo de 2026», «Enero, marzo y mayo de 2026»,
+ * «Diciembre 2025 a enero 2026». Vacío si no hay meses.
+ */
+export function describeMonths(months: string[]): string {
+  const list = [...new Set(months)].sort();
+  if (list.length === 0) return "";
+  if (list.length === 1) return periodLabel(list[0]);
+  const name = (m: string) => MONTH_NAMES[Number(m.slice(5, 7)) - 1].toLowerCase();
+  const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  const first = list[0];
+  const last = list[list.length - 1];
+  const consecutive = monthsBetween(`${first}-01`, `${last}-01`).length === list.length;
+  const sameYear = first.slice(0, 4) === last.slice(0, 4);
+  if (consecutive) return sameYear ? `${capital(name(first))} a ${name(last)} de ${first.slice(0, 4)}` : `${periodLabel(first)} a ${name(last)} ${last.slice(0, 4)}`;
+  if (sameYear) return `${capital(joinSpanish(list.map(name)))} de ${first.slice(0, 4)}`;
+  return capital(joinSpanish(list.map((m) => `${name(m)} ${m.slice(0, 4)}`)));
+}
+
 /** «2026-08-31» → «31/08/2026» (regla única de la aplicación, ver utils/dates). */
 export const formatIsoDate = (iso: string) => formatDateForDisplay(iso);
 

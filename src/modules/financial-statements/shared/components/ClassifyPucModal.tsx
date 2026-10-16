@@ -27,6 +27,8 @@ interface Props {
   mappings: Map<string, FsPucMapping>;
   onClose: () => void;
   onSaved: () => void | Promise<unknown>;
+  /** Clasificación masiva: varias cuentas a la misma línea (pucCode / concept se ignoran). */
+  bulk?: { code: string; concept: string }[];
 }
 
 /**
@@ -84,15 +86,16 @@ function Choices<T extends string | number>({ label, options, value, onChange }:
  * subgrupo (sección del catálogo) → línea. La clasificación de un padre se
  * muestra como sugerencia, nunca se aplica sola.
  */
-export function ClassifyPucModal({ open, pucCode, concept, catalog, mappings, onClose, onSaved }: Props) {
+export function ClassifyPucModal({ open, pucCode, concept, catalog, mappings, onClose, onSaved, bulk }: Props) {
   const toast = useToast();
-  const current = mappings.get(pucCode);
+  const many = bulk && bulk.length > 0 ? bulk : null;
+  const current = many ? undefined : mappings.get(pucCode);
   const [group, setGroup] = useState<Group | null>(null);
   const [section, setSection] = useState<FsSectionKey | null>(null);
   const [lineId, setLineId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const suggestion = useMemo(() => parentMapping(pucCode, mappings), [pucCode, mappings]);
+  const suggestion = useMemo(() => (many ? undefined : parentMapping(pucCode, mappings)), [many, pucCode, mappings]);
 
   const active = (catalog?.lines ?? []).filter((l) => l.isActive);
   const lineById = new Map((catalog?.lines ?? []).map((l) => [l.id, l]));
@@ -139,11 +142,26 @@ export function ClassifyPucModal({ open, pucCode, concept, catalog, mappings, on
     ? ["No afecta Estados Financieros"]
     : [GROUPS.find((g) => g.key === group)?.label, section && sectionsOf(group!).length > 1 ? SECTION_SHORT[section] : undefined, lineId !== null ? lineById.get(lineId)?.name : undefined].filter((x): x is string => Boolean(x));
 
+  /** Cuentas seleccionadas que ya tienen otra clasificación (se reemplazaría). */
+  const conflicts = many && ready ? many.filter((c) => {
+    const m = mappings.get(c.code);
+    return m && (m.excluded !== excluded || (!excluded && m.lineId !== lineId));
+  }) : [];
+  const describe = (m: FsPucMapping | undefined) => (!m ? "Sin clasificar" : m.excluded ? "No afecta Estados Financieros" : (lineById.get(m.lineId!)?.name ?? "—"));
+
   async function save() {
     if (!ready) return;
     setSaving(true);
     setError(null);
     try {
+      if (many) {
+        // Cada cuenta queda con su trazabilidad (historial de clasificación) en Rust.
+        for (const c of many) await fsService.setMapping(c.code, excluded ? null : lineId, excluded);
+        toast(many.length === 1 ? `${many[0].code} clasificado.` : `${many.length} cuentas clasificadas.`);
+        await onSaved();
+        onClose();
+        return;
+      }
       await fsService.setMapping(pucCode, excluded ? null : lineId, excluded);
       toast(`${pucCode} clasificado.`);
       await onSaved();
@@ -158,8 +176,8 @@ export function ClassifyPucModal({ open, pucCode, concept, catalog, mappings, on
   return (
     <Modal
       open={open}
-      title={`${pucCode} — ${concept}`}
-      description={current ? "Cambiar la clasificación recalcula los periodos abiertos; los cerrados conservan lo aprobado." : "Este código PUC todavía no está clasificado."}
+      title={many ? `Clasificar ${many.length === 1 ? "1 cuenta PUC" : `${many.length} cuentas PUC`}` : `${pucCode} — ${concept}`}
+      description={many ? "Todas las cuentas seleccionadas quedan en la misma ubicación. Recalcula los periodos abiertos; los cerrados conservan lo aprobado." : current ? "Cambiar la clasificación recalcula los periodos abiertos; los cerrados conservan lo aprobado." : "Este código PUC todavía no está clasificado."}
       onClose={onClose}
       locked={saving}
       footer={
@@ -168,13 +186,27 @@ export function ClassifyPucModal({ open, pucCode, concept, catalog, mappings, on
             Cancelar
           </Button>
           <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!ready}>
-            Guardar clasificación
+            {conflicts.length ? `Guardar (reemplaza ${conflicts.length})` : "Guardar clasificación"}
           </Button>
         </>
       }
     >
       <div className="stack">
         {error && <Alert tone="danger">{error}</Alert>}
+        {many && (
+          <div className="puc-bulk-list" aria-label="Cuentas seleccionadas">
+            {many.map((c) => (
+              <span key={c.code} className="puc-bulk-list__item" title={`${c.concept} · ${describe(mappings.get(c.code))}`}>
+                <span className="mono">{c.code}</span> {c.concept}
+              </span>
+            ))}
+          </div>
+        )}
+        {conflicts.length > 0 && (
+          <Alert tone="warning" title={conflicts.length === 1 ? "1 cuenta ya tiene otra clasificación" : `${conflicts.length} cuentas ya tienen otra clasificación`}>
+            Se reemplazará: {conflicts.map((c) => `${c.code} (${describe(mappings.get(c.code))})`).join(", ")}.
+          </Alert>
+        )}
         {suggestion && !current && (
           <Alert tone="info" title="Sugerencia">
             Usar la misma clasificación de {suggestion.parent}: <strong>{suggestedLabel}</strong>.{" "}

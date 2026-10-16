@@ -138,8 +138,10 @@ export default function IncomeCertificatePage() {
 
       <div className="cert-layout">
       <div className="cert-layout__form">
-      <Card title={<CertStep n={1}>Firmante y plantilla</CertStep>}>
+      {/* Flujo compacto en tres bloques: 1 Datos del certificado · 2 Ingresos y expedición · 3 Vista previa y generar. */}
+      <Card title={<CertStep n={1}>Datos del certificado</CertStep>}>
         <div className="stack">
+          <div className="cert-subtitle">Firmante y plantilla</div>
           <Field label="Firmante" required hint={signers.data?.length === 0 ? "No hay firmantes guardados: créalos en Datos → Firmas." : "Nombre, cargo, matrícula y firma se toman de Datos → Firmas."}>
             {(id) => (
               <Select id={id} value={form.signerId ?? ""} onChange={(e) => set("signerId", e.target.value ? Number(e.target.value) : null)}>
@@ -193,10 +195,7 @@ export default function IncomeCertificatePage() {
             </div>
             <span className="field__hint">El membrete ya incluye el logo AMD y los datos de contacto del pie.</span>
           </div>
-        </div>
-      </Card>
-
-      <Card title={<CertStep n={2}>Titular</CertStep>}>
+          <div className="cert-subtitle">Titular</div>
         <div className="form-grid">
           <div className="field">
             <span className="field__label">
@@ -250,9 +249,10 @@ export default function IncomeCertificatePage() {
             {(id) => <Input id={id} maxLength={160} value={form.activity} placeholder="Ej. Support Consultant" onChange={(e) => set("activity", e.target.value)} />}
           </Field>
         </div>
+        </div>
       </Card>
 
-      <Card title={<CertStep n={3}>Ingresos</CertStep>}>
+      <Card title={<CertStep n={2}>Ingresos y expedición</CertStep>}>
         <div className="stack">
           <div className="segmented" role="radiogroup" aria-label="Forma de mostrar el valor" style={{ alignSelf: "flex-start" }}>
             <button type="button" role="radio" aria-checked={form.incomeMode === "direct"} className={form.incomeMode === "direct" ? "is-active" : undefined} onClick={() => set("incomeMode", "direct")}>
@@ -301,10 +301,7 @@ export default function IncomeCertificatePage() {
               </>
             )}
           </div>
-        </div>
-      </Card>
-
-      <Card title={<CertStep n={4}>Expedición</CertStep>}>
+          <div className="cert-subtitle">Expedición</div>
         <div className="form-grid">
           <Field label="Ciudad de expedición del certificado" required>
             {(id) => <Input id={id} maxLength={80} value={form.issueCity} onChange={(e) => set("issueCity", e.target.value)} />}
@@ -313,12 +310,13 @@ export default function IncomeCertificatePage() {
             {(id) => <Input id={id} value={today ?? ""} readOnly disabled />}
           </Field>
         </div>
+        </div>
       </Card>
 
       </div>
 
       <aside className="cert-layout__preview">
-        <Card title={<CertStep n={5}>Vista previa y PDF</CertStep>} description={valid ? "Es el mismo PDF que se exporta; se actualiza al cambiar los datos." : undefined}>
+        <Card title={<CertStep n={3}>Vista previa y generar</CertStep>} description={valid ? "Es el mismo PDF que se exporta; se actualiza al cambiar los datos." : undefined}>
           <div className="stack">
             {!valid && touched && <Alert tone="warning" title="Para generar el certificado falta:" items={errors} />}
             <div className="row">
@@ -357,7 +355,7 @@ export default function IncomeCertificatePage() {
   );
 }
 
-/** Título numerado de cada bloque del certificado (1 · Firmante y plantilla … 5 · Vista previa). */
+/** Título numerado de cada bloque del certificado (1 · Datos del certificado … 3 · Vista previa y generar). */
 function CertStep({ n, children }: { n: number; children: string }) {
   return (
     <span className="step-title">

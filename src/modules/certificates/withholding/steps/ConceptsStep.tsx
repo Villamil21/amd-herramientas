@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Percent, Plus, Trash2 } from "lucide-react";
+import { Copy, Percent, Plus, Settings2, Trash2 } from "lucide-react";
 import { navigate, paths } from "../../../../app/router";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, Select } from "../../../../components/ui";
 import { ConceptFormModal } from "../../../../pages/concepts/ConceptFormModal";
@@ -35,6 +35,15 @@ export function ConceptsStep(p: Props) {
     update(key, c
       ? { conceptId: c.id, nombre: c.nombre, tipo: resolveTipo(c), unidad: c.unidadTarifa, rateText: c.tarifaPredeterminada != null ? formatRate(c.tarifaPredeterminada) : "" }
       : { conceptId: null, nombre: "", tipo: null, unidad: null, rateText: "" });
+  };
+
+  /** Duplica una fila (mismo concepto y tarifa) justo debajo, para cambiarle el concepto o la tarifa. */
+  const duplicateLine = (key: string) => {
+    const i = p.lines.findIndex((l) => l.key === key);
+    if (i < 0) return;
+    const next = [...p.lines];
+    next.splice(i + 1, 0, { ...p.lines[i], key: newLineKey() });
+    p.onLines(next);
   };
 
   const addLine = () => p.onLines([...p.lines, { key: newLineKey(), conceptId: null, nombre: "", tipo: null, unidad: null, rateText: "" }]);
@@ -133,8 +142,9 @@ export function ConceptsStep(p: Props) {
                           </div>
                         </td>
                         <td className="num">{value !== null && rate! > 0 ? formatMoneyCents(value) : <span className="muted">—</span>}</td>
-                        <td className="actions">
-                          <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Quitar concepto" onClick={() => p.onLines(p.lines.filter((l) => l.key !== line.key))} />
+                        <td className="actions nowrap">
+                          <Button variant="ghost" size="sm" iconOnly icon={<Copy size={14} />} aria-label="Duplicar fila" title="Duplicar fila (para cambiar concepto o tarifa)" onClick={() => duplicateLine(line.key)} />
+                          <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Quitar concepto" title="Quitar concepto" onClick={() => p.onLines(p.lines.filter((l) => l.key !== line.key))} />
                         </td>
                       </tr>
                     );
@@ -143,17 +153,18 @@ export function ConceptsStep(p: Props) {
               </table>
             </div>
             <div className="row row--between">
-              <div className="row">
-                <Button icon={<Plus size={15} />} onClick={addLine}>
-                  Agregar concepto
+              <Button icon={<Plus size={15} />} onClick={addLine}>
+                Agregar concepto
+              </Button>
+              {/* Acciones secundarias, discretas. */}
+              <div className="row" style={{ gap: 4 }}>
+                <Button variant="ghost" size="sm" icon={<Plus size={13} />} onClick={() => setCreating(true)}>
+                  Crear concepto
                 </Button>
-                <Button variant="ghost" onClick={() => setCreating(true)}>
-                  Crear concepto nuevo
+                <Button variant="ghost" size="sm" icon={<Settings2 size={13} />} onClick={() => navigate(paths.concepts)}>
+                  Administrar
                 </Button>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => navigate(paths.concepts)}>
-                Administrar conceptos
-              </Button>
             </div>
           </>
         )}

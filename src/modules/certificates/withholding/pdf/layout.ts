@@ -47,3 +47,37 @@ export const LAYOUT = {
   },
   footer: { x: 30, gapAfterTable: 65 },
 };
+
+/** Último punto donde puede terminar la tabla para que el pie quepa en la hoja (margen inferior 30 pt). */
+export const TABLE_MAX_BOTTOM = PAGE.height - 30 - LAYOUT.footer.gapAfterTable;
+
+export interface TableMetrics {
+  fontSize: number;
+  lineHeight: number;
+  rowGap: number;
+  /** Alto mínimo de la tabla (hasta dónde llega aunque haya pocas filas). */
+  minBottom: number;
+}
+
+/** Densidades de la tabla, de la normal a la más compacta (nunca por debajo de 7 pt: legible). */
+const DENSITIES: Omit<TableMetrics, "minBottom">[] = [
+  { fontSize: FONT_SIZES.tableText, lineHeight: LAYOUT.table.lineHeight, rowGap: LAYOUT.table.rowGap },
+  { fontSize: 7.5, lineHeight: 9, rowGap: 5 },
+  { fontSize: 7, lineHeight: 8.5, rowGap: 3 },
+];
+
+/**
+ * Compactación automática según las filas (líneas de texto de cada concepto):
+ * con pocas filas la tabla no reserva el alto completo (menos espacio vacío);
+ * con muchas, se reduce el interlineado y la letra lo necesario para que todo
+ * quepa en una hoja. Función pura: la usan el PDF y la vista previa.
+ */
+export function tableMetrics(lineCounts: number[]): TableMetrics {
+  const t = LAYOUT.table;
+  const minBottom = lineCounts.length <= 4 ? 470 : t.minBottom;
+  for (const d of DENSITIES) {
+    const bottom = t.firstRowBaseline + lineCounts.reduce((y, n) => y + Math.max(1, n) * d.lineHeight + d.rowGap, 0);
+    if (bottom <= TABLE_MAX_BOTTOM) return { ...d, minBottom };
+  }
+  return { ...DENSITIES[DENSITIES.length - 1], minBottom };
+}

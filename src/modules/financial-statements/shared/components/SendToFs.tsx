@@ -3,7 +3,7 @@ import { CheckCircle2, FileSpreadsheet, Send } from "lucide-react";
 import { Button, Modal, useToast } from "../../../../components/ui";
 import { fsService } from "../../../../services/fsService";
 import { errorMessage } from "../../../../services/tauri";
-import type { BatchInput, BatchSummary } from "../../../../types/fs";
+import { EMPTY_PERIOD_LABEL, isEmptyPeriodBatch, type BatchInput, type BatchSummary, type EmptyPeriodSource } from "../../../../types/fs";
 import { formatInteger } from "../../../../utils/format";
 import { formatExactCents } from "../money";
 import { formatDateForDisplay } from "../../../../utils/dates";
@@ -86,6 +86,9 @@ export function SendToFs({
   }
 
   const pending = blocked ? (reasons?.length ? reasons : [blocked]) : [];
+  // El periodo estaba registrado «sin compras / nómina…»: se pide reemplazar el registro vacío.
+  const emptyOnly = duplicate !== null && duplicate.batches.length > 0 && duplicate.batches.every(isEmptyPeriodBatch);
+  const emptyLabel = emptyOnly ? EMPTY_PERIOD_LABEL[duplicate.batches[0].source as EmptyPeriodSource] : "";
   return (
     <>
       <div className="card fs-action-bar">
@@ -114,8 +117,8 @@ export function SendToFs({
       </div>
       <Modal
         open={duplicate !== null}
-        title={duplicateTitle}
-        description="Nunca se suma un duplicado: elige si el nuevo envío reemplaza al anterior."
+        title={emptyOnly ? `Este periodo estaba registrado como «${emptyLabel}».` : duplicateTitle}
+        description={emptyOnly ? "Ahora hay información real: reemplaza el registro vacío para enviarla." : "Nunca se suma un duplicado: elige si el nuevo envío reemplaza al anterior."}
         onClose={() => setDuplicate(null)}
         locked={sending !== null}
         footer={
@@ -124,7 +127,7 @@ export function SendToFs({
               Cancelar
             </Button>
             <Button variant="primary" loading={sending !== null} onClick={() => duplicate && void send({ ...duplicate.input, replace: true }, duplicate.download)}>
-              {replaceLabel}
+              {emptyOnly ? "Reemplazar registro vacío" : replaceLabel}
             </Button>
           </>
         }
@@ -147,7 +150,7 @@ export function SendToFs({
                   {duplicate.batches.map((b) => (
                     <tr key={b.id}>
                       <td>#{b.id}</td>
-                      <td>{[b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"}</td>
+                      <td>{isEmptyPeriodBatch(b) ? `${EMPTY_PERIOD_LABEL[b.source as EmptyPeriodSource]} · ${b.periodLabel}` : [b.fileName, b.periodLabel].filter(Boolean).join(" · ") || "—"}</td>
                       <td>{formatInteger(b.recordCount)}</td>
                       <td style={{ textAlign: "right" }}>{formatExactCents(b.totalCents)}</td>
                       <td>{formatDateForDisplay(b.createdAt)}</td>

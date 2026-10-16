@@ -1,8 +1,7 @@
 import { PageHeader } from "../../../components/ui";
 import { SignedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
-import { GroupsTable } from "../shared/components/GroupsTable";
-import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
-import { SummaryCards } from "../shared/components/SummaryCards";
+import { GroupDetailModal } from "../shared/components/GroupDetailModal";
+import { AccountDetails, StatementFileActions, StatementFileCard } from "../shared/components/StatementFileCard";
 import { ValidationPanel } from "../shared/components/ValidationPanel";
 import { exportStatementExcel } from "../shared/excelExportService";
 import { groupMovements } from "../shared/groupingService";
@@ -43,6 +42,7 @@ export default function BancolombiaStatementPage() {
       <PageHeader eyebrow="Extractos bancarios" title="Bancolombia" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
+        hideWhenDone
         state={state}
         details={state.status === "done" && <AccountDetails {...state.analysis.statement} />}
         picking={picking}
@@ -52,11 +52,12 @@ export default function BancolombiaStatementPage() {
       />
 
       {state.status === "done" && (
-        <SignedBankAccounting statement={state.analysis.statement} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting}>
-          <ValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <SummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.totals.currentBalanceCents} />
-          <GroupsTable groups={state.analysis.groups} />
-        </SignedBankAccounting>
+        <SignedBankAccounting statement={state.analysis.statement} groups={state.analysis.groups} fileName={state.fileName} onExport={exportExcel} exporting={exporting}
+          validated={state.analysis.validation.validated}
+          validation={<ValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />}
+          fileActions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} />}
+          renderDetail={(key, close) => <GroupDetailModal group={state.analysis.groups.find((g) => g.key === key) ?? null} onClose={close} />}
+        />
       )}
     </>
   );

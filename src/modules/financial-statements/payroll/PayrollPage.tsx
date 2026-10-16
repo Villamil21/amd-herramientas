@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Settings2 } from "lucide-react";
+import { CalendarX2, Contact, Pencil, Settings2 } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
-import { Alert, Badge, Button, Card, PageHeader, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, Card, ContextBar, MetricBar, Modal, PageHeader, useToast } from "../../../components/ui";
 import { saveExcelSheets } from "../../bank-analysis/shared/excelExportService";
-import { StatementFileCard } from "../../bank-analysis/shared/components/StatementFileCard";
+import { StatementFileActions, StatementFileCard } from "../../bank-analysis/shared/components/StatementFileCard";
+import { SearchBox, SegmentedFilter } from "../../bank-analysis/shared/components/tableControls";
+import { EmptyPeriodModal } from "../shared/components/EmptyPeriodModal";
+import { normalizeKey } from "../../../utils/text";
 import type { PdfDocumentText } from "../../bank-analysis/shared/pdf/pdfTypes";
 import { useStatementImport } from "../../bank-analysis/shared/useStatementImport";
 import { analyzeAportesEnLinea } from "../../social-security/payroll-summary/aportes-en-linea/services/analysis";
@@ -84,6 +87,12 @@ export default function PayrollPage() {
   const [justify, setJustify] = useState<Employee | null>(null);
   const [areaChange, setAreaChange] = useState<Employee | null>(null);
   const [editing, setEditing] = useState<Employee | null>(null);
+  const [emptyOpen, setEmptyOpen] = useState(false);
+  const [areaFilter, setAreaFilter] = useState<"all" | "admin" | "sales">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "ready">("all");
+  const [query, setQuery] = useState("");
+  /** Empleado abierto en el detalle (tipo + número de documento). */
+  const [detailKey, setDetailKey] = useState<string | null>(null);
 
   useEffect(() => {
     minimumWageService.list().then(setWages, (e) => toast(errorMessage(e), "error"));
@@ -148,6 +157,27 @@ export default function PayrollPage() {
   const rehires = months.filter((m) => m.employee && !m.employmentId);
   const noArea = months.filter((m) => m.employee && m.employmentId && !m.area);
   const renamed = months.filter((m) => m.employee && !namesMatch(m.employee.name, m.source.name));
+  /** Lo que le falta a cada empleado antes de enviar (vacío = listo). */
+  const rowIssue = (m: EmployeeMonth) => (!m.employee ? "Sin ficha" : !m.employmentId ? "Reingreso sin registrar" : !m.area ? "Sin área contable" : null);
+  const socialOf = (m: EmployeeMonth) => m.social.pension + m.social.health + m.social.arl + m.social.ccf;
+  const benefitsOf = (m: EmployeeMonth) => m.calc.primaCents + m.calc.cesantiasCents + m.calc.interesesCents + m.calc.vacacionesCents;
+  const totals = useMemo(
+    () => ({
+      days: months.reduce((n, m) => n + m.calc.days, 0),
+      salaries: months.reduce((n, m) => n + m.calc.salaryCents, 0),
+      transport: months.reduce((n, m) => n + m.calc.transportCents, 0),
+      social: months.reduce((n, m) => n + m.social.pension + m.social.health + m.social.arl + m.social.ccf, 0),
+      benefits: months.reduce((n, m) => n + m.calc.primaCents + m.calc.cesantiasCents + m.calc.interesesCents + m.calc.vacacionesCents, 0),
+    }),
+    [months],
+  );
+  const visibleMonths = months.filter(
+    (m) =>
+      (areaFilter === "all" || m.area === areaFilter) &&
+      (statusFilter === "all" || (statusFilter === "pending") === Boolean(rowIssue(m))) &&
+      (!query || normalizeKey(`${m.employee?.name ?? m.source.name} ${m.docNumber}`).includes(normalizeKey(query))),
+  );
+  const detail = months.find((m) => `${m.docType}${m.docNumber}` === detailKey) ?? null;
 
   const blocking = [
     companyId === null && "Selecciona la empresa",
@@ -222,15 +252,40 @@ export default function PayrollPage() {
         title="Aportes en Línea"
         description="Importa la planilla de seguridad social para causar salarios, auxilio, aportes y prestaciones por empleado y enviarlos a Estados Financieros."
         actions={
-          <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
-            Cuentas PUC de nómina
-          </Button>
+          <>
+            <Button icon={<CalendarX2 size={15} />} onClick={() => setEmptyOpen(true)}>
+              Registrar periodo sin nómina
+            </Button>
+            <Button icon={<Contact size={15} />} onClick={() => navigate(paths.submodule("estados-financieros", "empleados"))}>
+              Empleados
+            </Button>
+            <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
+              Cuentas PUC de nómina
+            </Button>
+          </>
         }
       />
-      <StatementFileCard state={state} details={summary && <span>· Periodo {summary.period} · Pago {formatDateForDisplay(summary.paymentDate)}</span>} picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} labels={LABELS} />
+      <StatementFileCard hideWhenDone state={state} details={summary && <span>· Periodo {summary.period} · Pago {formatDateForDisplay(summary.paymentDate)}</span>} picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} labels={LABELS} />
 
       {summary && (
         <>
+          {/* Cabecera compacta: empresa, periodo, fecha de pago, archivo, SMMLV, auxilio y tope. */}
+          <ContextBar
+            items={[
+              { label: "Periodo", value: period ? periodLabel(period) : "—" },
+              { label: "Fecha de pago", value: formatDateForDisplay(summary.paymentDate) },
+              { label: "Archivo", value: state.status === "done" ? state.fileName : "—", selectable: true },
+              { label: `SMMLV ${period.slice(0, 4)}`, value: yearWages ? formatExactCents(yearWages.smmlv * 100) : "—" },
+              { label: "Auxilio", value: yearWages ? formatExactCents(yearWages.transport * 100) : "—" },
+              { label: "Tope auxilio", value: yearWages ? formatExactCents(yearWages.smmlv * 200) : "—" },
+            ]}
+            actions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} label={LABELS.pickAnother} />}
+          >
+            <div className="bank-head__fields">
+              <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} hint={state.status === "done" && state.analysis.employerNit ? `NIT del aportante en la planilla: ${state.analysis.employerNit}` : undefined} />
+              {company && state.status === "done" && state.analysis.employerNit && findCompanyByNit([company], state.analysis.employerNit) === undefined && <Badge tone="warning">El NIT de la planilla no es el de esta empresa</Badge>}
+            </div>
+          </ContextBar>
           <SendToFs
             blocked={blocking[0] ?? null}
             blockedStatus={blockedStatus}
@@ -241,17 +296,17 @@ export default function PayrollPage() {
             duplicateTitle="Esta planilla ya fue enviada."
             onSent={() => void reloadPayroll()}
           />
-          <Card>
-            <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
-              <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} hint={state.status === "done" && state.analysis.employerNit ? `NIT del aportante en la planilla: ${state.analysis.employerNit}` : undefined} />
-              {company && state.status === "done" && state.analysis.employerNit && findCompanyByNit([company], state.analysis.employerNit) === undefined && <Badge tone="warning">El NIT de la planilla no es el de esta empresa</Badge>}
-              {yearWages && (
-                <span className="muted">
-                  SMMLV {period.slice(0, 4)}: {formatExactCents(yearWages.smmlv * 100)} · Auxilio de transporte: {formatExactCents(yearWages.transport * 100)} · Tope auxilio: {formatExactCents(yearWages.smmlv * 200)}
-                </span>
-              )}
-            </div>
-          </Card>
+          <MetricBar
+            label="Resumen de la planilla"
+            metrics={[
+              { key: "employees", label: months.length === 1 ? "empleado" : "empleados", value: formatInteger(months.length) },
+              { key: "days", label: "días", value: formatInteger(totals.days) },
+              { key: "salaries", label: "sueldos", value: formatExactCents(totals.salaries) },
+              { key: "transport", label: "auxilio", value: formatExactCents(totals.transport) },
+              { key: "social", label: "seguridad social", value: formatExactCents(totals.social) },
+              { key: "benefits", label: "prestaciones", value: formatExactCents(totals.benefits) },
+            ]}
+          />
 
           {parafiscales.length > 0 && (
             <Alert tone="danger" title="Se detectaron aportes parafiscales.">
@@ -292,109 +347,97 @@ export default function PayrollPage() {
           )}
           {renamed.length > 0 && <Alert tone="warning" title="Nombre distinto al de la ficha">{renamed.map((m) => `${m.docType} ${m.docNumber}: «${m.source.name}» (ficha: «${m.employee!.name}»)`).join(" · ")}</Alert>}
 
-          <Card flush title={`Empleados · ${periodLabel(period)}`} description="Sueldo base = IBC pensión × 30 / días. Salario y auxilio se consideran pagados en el mes; seguridad social se paga en la fecha de pago de la planilla.">
+          <Card flush title={`Empleados · ${periodLabel(period)}`} description="Abre un empleado para ver su detalle (sueldo base, aportes y prestaciones por concepto). Sueldo base = IBC pensión × 30 / días.">
+            <div className="toolbar row--between">
+              <div className="row">
+                <SegmentedFilter
+                  label="Área"
+                  options={[
+                    { id: "all", label: "Todas" },
+                    { id: "admin", label: "Administración" },
+                    { id: "sales", label: "Ventas" },
+                  ]}
+                  value={areaFilter}
+                  onChange={setAreaFilter}
+                />
+                <SegmentedFilter
+                  label="Estado"
+                  options={[
+                    { id: "all", label: "Todos" },
+                    { id: "pending", label: "Con pendientes" },
+                    { id: "ready", label: "Listos" },
+                  ]}
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                />
+              </div>
+              <SearchBox placeholder="Empleado o documento" value={query} onChange={setQuery} />
+            </div>
             <div className="table-wrap table-wrap--scroll" style={{ maxHeight: "60vh" }}>
               <table className="table">
                 <thead>
                   <tr>
                     <th>Empleado</th>
                     <th>Área</th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Días
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Sueldo base
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Sueldo del mes
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Auxilio
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Pensión
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      EPS
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      ARL
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      CCF
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Prima
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Cesantías
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Intereses
-                    </th>
-                    <th className="nowrap" style={{ textAlign: "right" }}>
-                      Vacaciones
-                    </th>
+                    <th className="num">Días</th>
+                    <th className="num">Sueldo del mes</th>
+                    <th className="num">Auxilio</th>
+                    <th className="num">Seguridad social</th>
+                    <th className="num">Prestaciones</th>
+                    <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {months.map((m) => (
-                    <tr key={`${m.docType}${m.docNumber}`} className={!m.employee || !m.employmentId ? "row-attention--blocking" : undefined}>
-                      <td>
-                        <span className="table__primary">{m.employee?.name ?? m.source.name}</span>
-                        {m.employee && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            iconOnly
-                            icon={<Pencil size={13} />}
-                            aria-label={`Editar empleado ${m.employee.name}`}
-                            title="Editar empleado"
-                            onClick={() => setEditing(m.employee!)}
-                          />
-                        )}
-                        <div className="table__secondary">
-                          {m.docType} {m.docNumber}
-                          {m.employee && m.employmentId && m.employee.employments.length > 1 && ` · Vinculación #${m.employee.employments.find((j) => j.id === m.employmentId)?.number}`}
-                        </div>
-                        {!m.employee && (
-                          <Button size="sm" variant="primary" onClick={() => setCreating({ docType: m.docType, docNumber: m.docNumber, name: m.source.name })}>
-                            Crear ficha
-                          </Button>
-                        )}
-                        {m.employee && !m.employmentId && (
-                          <Button size="sm" variant="primary" onClick={() => setRehire(m.employee!)}>
-                            Registrar reingreso
-                          </Button>
-                        )}
+                  {visibleMonths.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="muted" style={{ textAlign: "center", padding: "var(--space-5)" }}>
+                        Ningún empleado coincide con el filtro.
                       </td>
-                      <td>
-                        {m.area ? (
-                          <button type="button" className="btn btn--ghost btn--sm" title="Cambiar área desde este periodo" onClick={() => setAreaChange(m.employee!)}>
-                            {AREA_LABEL[m.area]}
-                          </button>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td style={{ textAlign: "right" }}>{formatInteger(m.calc.days)}</td>
-                      <td className="nowrap" style={{ textAlign: "right" }}>
-                        {formatExactCents(m.calc.baseSalaryCents)}
-                      </td>
-                      <td className="nowrap" style={{ textAlign: "right" }}>
-                        {formatExactCents(m.calc.salaryCents)}
-                      </td>
-                      <td className="nowrap" style={{ textAlign: "right" }}>
-                        {m.calc.transportApplies ? formatExactCents(m.calc.transportCents) : "No aplica"}
-                      </td>
-                      {/* Toda columna monetaria: «$ 1.750.905,00» en una sola línea (la tabla se desplaza horizontalmente). */}
-                      {[m.social.pension, m.social.health, m.social.arl, m.social.ccf, m.calc.primaCents, m.calc.cesantiasCents, m.calc.interesesCents, m.calc.vacacionesCents].map((v, i) => (
-                        <td key={i} className="nowrap" style={{ textAlign: "right" }}>
-                          {formatExactCents(v)}
-                        </td>
-                      ))}
                     </tr>
-                  ))}
+                  )}
+                  {visibleMonths.map((m) => {
+                    const issue = rowIssue(m);
+                    return (
+                      <tr key={`${m.docType}${m.docNumber}`} className={["is-clickable", issue && "row-attention--blocking"].filter(Boolean).join(" ")} onClick={() => setDetailKey(`${m.docType}${m.docNumber}`)}>
+                        <td>
+                          <span className="table__primary">{m.employee?.name ?? m.source.name}</span>
+                          <div className="table__secondary">
+                            {m.docType} {m.docNumber}
+                            {m.employee && m.employmentId && m.employee.employments.length > 1 && ` · Vinculación #${m.employee.employments.find((j) => j.id === m.employmentId)?.number}`}
+                          </div>
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {m.area ? (
+                            <button type="button" className="btn btn--ghost btn--sm" title="Cambiar área desde este periodo" onClick={() => setAreaChange(m.employee!)}>
+                              {AREA_LABEL[m.area]}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num">{formatInteger(m.calc.days)}</td>
+                        <td className="num">{formatExactCents(m.calc.salaryCents)}</td>
+                        <td className="num">{m.calc.transportApplies ? formatExactCents(m.calc.transportCents) : "No aplica"}</td>
+                        <td className="num">{formatExactCents(socialOf(m))}</td>
+                        <td className="num">{formatExactCents(benefitsOf(m))}</td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {!m.employee ? (
+                            <Button size="sm" variant="primary" onClick={() => setCreating({ docType: m.docType, docNumber: m.docNumber, name: m.source.name })}>
+                              Crear ficha
+                            </Button>
+                          ) : !m.employmentId ? (
+                            <Button size="sm" variant="primary" onClick={() => setRehire(m.employee!)}>
+                              Registrar reingreso
+                            </Button>
+                          ) : issue ? (
+                            <Badge tone="warning">{issue}</Badge>
+                          ) : (
+                            <Badge tone="success">Listo</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -460,6 +503,56 @@ export default function PayrollPage() {
           await reloadPayroll();
         }}
       />
+      <Modal
+        open={detail !== null}
+        size="lg"
+        title={detail ? (detail.employee?.name ?? detail.source.name) : ""}
+        description={detail ? `${detail.docType} ${detail.docNumber} · ${detail.area ? AREA_LABEL[detail.area] : "Sin área"} · ${periodLabel(period)}` : undefined}
+        onClose={() => setDetailKey(null)}
+        footer={
+          <>
+            {detail?.employee && (
+              <Button icon={<Pencil size={14} />} onClick={() => (setEditing(detail.employee!), setDetailKey(null))} style={{ marginRight: "auto" }}>
+                Editar empleado
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => setDetailKey(null)}>
+              Cerrar
+            </Button>
+          </>
+        }
+      >
+        {detail && (
+          <div className="table-wrap">
+            <table className="table table--dense">
+              <tbody>
+                {(
+                  [
+                    ["Días", formatInteger(detail.calc.days)],
+                    ["Sueldo base", formatExactCents(detail.calc.baseSalaryCents)],
+                    ["Sueldo del mes", formatExactCents(detail.calc.salaryCents)],
+                    ["Auxilio de transporte", detail.calc.transportApplies ? formatExactCents(detail.calc.transportCents) : "No aplica"],
+                    ["Pensión", formatExactCents(detail.social.pension)],
+                    ["EPS", formatExactCents(detail.social.health)],
+                    ["ARL", formatExactCents(detail.social.arl)],
+                    ["CCF", formatExactCents(detail.social.ccf)],
+                    ["Prima", formatExactCents(detail.calc.primaCents)],
+                    ["Cesantías", formatExactCents(detail.calc.cesantiasCents)],
+                    ["Intereses de cesantías", formatExactCents(detail.calc.interesesCents)],
+                    ["Vacaciones", formatExactCents(detail.calc.vacacionesCents)],
+                  ] as const
+                ).map(([label, value]) => (
+                  <tr key={label}>
+                    <td>{label}</td>
+                    <td className="num">{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
+      <EmptyPeriodModal open={emptyOpen} source="payroll" companies={data.companies} companyId={companyId} defaultMonth={period || null} onClose={() => setEmptyOpen(false)} />
       <PucSettingsModal
         open={settingsOpen}
         title="Cuentas PUC de nómina"

@@ -58,6 +58,7 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/019_signer_fs_role_and_movement_edits.sql"),
         rebuilds_tables: false,
     },
+    Migration { version: 20, name: "tax_empty_periods", sql: include_str!("../../migrations/020_tax_empty_periods.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

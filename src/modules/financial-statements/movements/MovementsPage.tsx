@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, History, Pencil, RefreshCcw } from "lucide-react";
+import { ExternalLink, FileSpreadsheet, FilterX, History, Pencil, RefreshCcw } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
 import { Alert, Badge, Button, Card, DateInput, EmptyState, Field, Input, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { useDebounced } from "../../../hooks/useDebounced";
@@ -12,6 +12,9 @@ import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucField } from "../shared/components/PucField";
 import { formatExactCents, formatIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
+import { saveExcelSheets } from "../../bank-analysis/shared/excelExportService";
+import { SortableTh, type SortDirection } from "../../bank-analysis/shared/components/tableControls";
+import { sortMovements, type MovementSortKey } from "./sortMovements";
 import { bankAccountingCents, isDebitPuc } from "../generator/engine";
 import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../utils/dates";
 import { parseNumericText } from "../../../utils/numbers";
@@ -29,6 +32,9 @@ export const SOURCE_PATH: Record<FsSource, string> = {
 
 const MAX_ROWS = 500;
 
+const EMPTY_FILTERS = { from: "", to: "", source: "", puc: "", party: "", bank: "", document: "", period: "", status: "active" };
+const FILTER_LABEL: Record<keyof typeof EMPTY_FILTERS, string> = { from: "Desde", to: "Hasta", source: "Origen", puc: "PUC", party: "Tercero", bank: "Banco", document: "Documento", period: "Periodo", status: "Estado" };
+
 const STATUS_TONE: Record<MovementStatus, "success" | "warning" | "danger" | "gold" | undefined> = { active: "success", replaced: "warning", adjusted: "gold", ignored: undefined, voided: "danger" };
 
 /**
@@ -44,7 +50,9 @@ export default function MovementsPage() {
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [batches, setBatches] = useState<BatchSummary[]>([]);
-  const [filters, setFilters] = useState({ from: "", to: "", source: "", puc: "", party: "", bank: "", document: "", period: "", status: "active" });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [sort, setSort] = useState<{ key: MovementSortKey; direction: SortDirection }>({ key: "date", direction: "asc" });
+  const [exporting, setExporting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [open, setOpen] = useState<Movement | null>(null);
   const [editing, setEditing] = useState(false);
@@ -87,7 +95,63 @@ export default function MovementsPage() {
         has(`${m.documentNumber} ${m.documentId}`, text.document),
     );
   }, [movements, text]);
-  const shown = filtered.slice(0, MAX_ROWS);
+  const sorted = useMemo(() => sortMovements(filtered, sort.key, sort.direction), [filtered, sort]);
+  const shown = sorted.slice(0, MAX_ROWS);
+  /** Filtros distintos del inicial (Estado = Activo), para el indicador compacto. */
+  const activeFilters = (Object.keys(EMPTY_FILTERS) as (keyof typeof EMPTY_FILTERS)[]).filter((k) => filters[k] !== EMPTY_FILTERS[k]);
+  const toggleSort = (key: MovementSortKey) => setSort((s) => (s.key === key ? { key, direction: s.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "value" ? "desc" : "asc" }));
+  const th = (key: MovementSortKey, label: string, numeric = false) => <SortableTh label={label} active={sort.key === key} direction={sort.direction} numeric={numeric} onToggle={() => toggleSort(key)} />;
+
+  /** Exporta exactamente lo filtrado (todas las filas, no solo las primeras 500), en el orden de la tabla. */
+  async function exportFiltered() {
+    setExporting(true);
+    try {
+      const company = data.companies?.find((c) => c.id === companyId);
+      const path = await saveExcelSheets(
+        [
+          {
+            name: "Movimientos",
+            columns: [
+              { header: "Fecha", kind: "text" },
+              { header: "Origen", kind: "text" },
+              { header: "Importación", kind: "integer" },
+              { header: "Tercero", kind: "text" },
+              { header: "NIT", kind: "text" },
+              { header: "Documento", kind: "text" },
+              { header: "Banco / cuenta", kind: "text" },
+              { header: "Código PUC", kind: "text" },
+              { header: "Concepto PUC", kind: "text" },
+              { header: "Descripción", kind: "text" },
+              { header: "Valor", kind: "money" },
+              { header: "Naturaleza", kind: "text" },
+              { header: "Estado", kind: "text" },
+            ],
+            rows: sorted.map((m) => [
+              formatIsoDate(m.accountingDate),
+              SOURCE_LABEL[m.source],
+              m.batchId,
+              m.supplierName || null,
+              m.supplierNit || null,
+              m.documentNumber || m.documentId || null,
+              m.bank ? `${m.bank} ${m.accountNumber}` : null,
+              m.pucCode,
+              m.pucConcept,
+              m.description || null,
+              m.amountCents / 100,
+              m.dc ? (m.dc === "D" ? "Salida" : "Entrada") : null,
+              MOVEMENT_STATUS_LABEL[m.status],
+            ]),
+          },
+        ],
+        `Movimientos_${company?.nit ?? companyId}`,
+      );
+      if (path) toast(`${formatInteger(sorted.length)} movimientos exportados.`);
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setExporting(false);
+    }
+  }
   const total = filtered.reduce((s, m) => s + m.amountCents, 0);
   const set = (key: keyof typeof filters) => (e: { target: { value: string } }) => setFilters((f) => ({ ...f, [key]: e.target.value }));
   const selectable = shown.filter((m) => m.status === "active" && m.source !== "adjustment");
@@ -174,7 +238,24 @@ export default function MovementsPage() {
               </div>
             </Alert>
           )}
-          <Card flush title={`${formatInteger(filtered.length)} movimientos`} description={`Suma de los filtrados: ${formatExactCents(total)}${filtered.length > MAX_ROWS ? ` · Se muestran los primeros ${MAX_ROWS}` : ""}`}>
+          <Card
+            flush
+            title={`${formatInteger(filtered.length)} movimientos`}
+            description={`Suma de los filtrados: ${formatExactCents(total)}${filtered.length > MAX_ROWS ? ` · Se muestran los primeros ${MAX_ROWS}` : ""}`}
+            actions={
+              <div className="row">
+                {activeFilters.length > 0 && (
+                  <span className="filter-indicator" title={activeFilters.map((k) => FILTER_LABEL[k]).join(", ")}>
+                    {activeFilters.length === 1 ? "1 filtro activo" : `${activeFilters.length} filtros activos`}: {activeFilters.map((k) => FILTER_LABEL[k]).join(", ")}
+                    <Button size="sm" variant="ghost" iconOnly icon={<FilterX size={13} />} aria-label="Quitar filtros" title="Quitar filtros" onClick={() => setFilters(EMPTY_FILTERS)} />
+                  </span>
+                )}
+                <Button size="sm" icon={<FileSpreadsheet size={14} />} disabled={filtered.length === 0} loading={exporting} onClick={() => void exportFiltered()}>
+                  Exportar filtrado
+                </Button>
+              </div>
+            }
+          >
             {filtered.length === 0 ? (
               <EmptyState title="Sin movimientos" description="No hay movimientos con estos filtros." />
             ) : (
@@ -200,12 +281,12 @@ export default function MovementsPage() {
                           onChange={(e) => setSelected(e.target.checked ? new Set(selectable.map((m) => m.id)) : new Set())}
                         />
                       </th>
-                      <th>Fecha</th>
-                      <th>Origen</th>
-                      <th>Tercero · documento</th>
-                      <th>PUC · concepto</th>
-                      <th className="num">Valor</th>
-                      <th>Estado</th>
+                      {th("date", "Fecha")}
+                      {th("source", "Origen")}
+                      {th("document", "Tercero · documento")}
+                      {th("puc", "PUC · concepto")}
+                      {th("value", "Valor", true)}
+                      {th("status", "Estado")}
                       <th />
                     </tr>
                   </thead>

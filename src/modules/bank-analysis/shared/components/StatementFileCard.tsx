@@ -19,9 +19,33 @@ interface Props {
 
 const STATEMENT_LABELS = { pick: "Seleccionar extracto PDF", pickAnother: "Seleccionar otro PDF", analyzing: "Analizando extracto…" };
 
-/** Selección del PDF y estado del archivo: nombre, páginas y avance del análisis. */
-export function StatementFileCard({ state, details, picking, busy, exportedPath, onPick, labels = STATEMENT_LABELS }: Props) {
+/**
+ * Acciones del archivo ya analizado (para la cabecera compacta del extracto):
+ * Ver Excel en Finder y Seleccionar otro PDF.
+ */
+export function StatementFileActions({ picking, busy, exportedPath, onPick, label = STATEMENT_LABELS.pickAnother }: { picking: boolean; busy: boolean; exportedPath: string | null; onPick: () => void; label?: string }) {
   const toast = useToast();
+  return (
+    <>
+      {exportedPath && (
+        <Button size="sm" variant="ghost" icon={<FolderOpen size={14} />} onClick={() => void fileService.revealSaved(exportedPath).catch((e: Error) => toast(e.message, "error"))}>
+          Ver Excel en Finder
+        </Button>
+      )}
+      <Button size="sm" icon={<Upload size={14} />} onClick={onPick} loading={picking} disabled={busy}>
+        {label}
+      </Button>
+    </>
+  );
+}
+
+/**
+ * Selección del PDF y estado del archivo: nombre, páginas y avance del análisis.
+ * `hideWhenDone`: con el análisis listo la cabecera del extracto toma su lugar.
+ */
+export function StatementFileCard({ state, details, picking, busy, exportedPath, onPick, labels = STATEMENT_LABELS, hideWhenDone }: Props & { hideWhenDone?: boolean }) {
+  const toast = useToast();
+  if (hideWhenDone && state.status === "done") return null;
   const pickButton = (
     <Button variant={state.status === "idle" ? "primary" : "secondary"} icon={<Upload size={15} />} onClick={onPick} loading={picking} disabled={busy}>
       {state.status === "idle" ? labels.pick : labels.pickAnother}

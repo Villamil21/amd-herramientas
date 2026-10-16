@@ -275,6 +275,7 @@ const FS_TABLES: &[&str] = &[
     "fs_bank_gmf_rules",
     "fs_employee_events",
     "fs_movement_edits",
+    "fs_tax_empty_periods",
 ];
 
 type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;
@@ -1096,7 +1097,7 @@ mod tests {
         )
         .unwrap();
         withholding::save_uvt(&conn, 2026, 50000).unwrap();
-        minimum_wages::create(&conn, 2027, 1_900_000).unwrap();
+        minimum_wages::create(&conn, 2027, 1_900_000, 250_000).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 300, rate_bp: 450 }]).unwrap();
         withholding::save_titles(
             &mut conn,
@@ -1135,7 +1136,7 @@ mod tests {
         dropi::save_many(&mut conn, &[rule("EN REPARTO", "claim")]).unwrap();
         withholding::save_uvt(&conn, 2026, 1).unwrap();
         minimum_wages::update(&conn, 2026, 1).unwrap();
-        minimum_wages::create(&conn, 2028, 2_000_000).unwrap();
+        minimum_wages::create(&conn, 2028, 2_000_000, 250_000).unwrap();
         withholding::update_rates(&mut conn, &[crate::models::withholding::WithholdingRateUpdate { id: 6, base_uvt_centi: 0, rate_bp: 0 }]).unwrap();
         identity_documents::delete(&conn, passport).unwrap();
         vat_titles::save(&mut conn, &[vat_title("invoice")]).unwrap();
@@ -1226,7 +1227,7 @@ mod tests {
         let old = br#"{"format":"amd-herramientas-backup","formatVersion":1,"appVersion":"1.0.0","exportedAt":"x","companies":[],"concepts":[]}"#;
         let parsed = parse(old).unwrap();
         assert!(parsed.suppliers.is_none());
-        minimum_wages::create(&conn, 2027, 1_900_000).unwrap();
+        minimum_wages::create(&conn, 2027, 1_900_000, 250_000).unwrap();
         let dir = std::env::temp_dir().join(format!("amd-json-old-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         restore(&mut conn, &dir, &dir, &parsed).unwrap();

@@ -29,22 +29,25 @@ export function ImportStep({ analysis, loading, error, dragOver, onPick, onBack,
       }
     >
       <div className="stack">
-        <div
-          className={`dropzone ${dragOver ? "is-over" : ""}`}
-          role="button"
-          tabIndex={0}
-          onClick={() => !loading && onPick()}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onPick()}
-        >
-          <div className="dropzone__icon">{loading ? <span className="spinner" /> : <UploadCloud size={20} />}</div>
-          <strong>{loading ? "Leyendo archivo…" : "Selecciona o arrastra el archivo Excel"}</strong>
-          <span>Formatos .xlsx y .xls · Atajo ⌘O</span>
-        </div>
+        {/* Con el archivo cargado basta una tarjeta compacta; el área para soltar vuelve al cambiar de archivo. */}
+        {(!analysis || loading) && (
+          <div
+            className={`dropzone ${dragOver ? "is-over" : ""}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => !loading && onPick()}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onPick()}
+          >
+            <div className="dropzone__icon">{loading ? <span className="spinner" /> : <UploadCloud size={20} />}</div>
+            <strong>{loading ? "Leyendo archivo…" : "Selecciona o arrastra el archivo Excel"}</strong>
+            <span>Formatos .xlsx y .xls · Atajo ⌘O</span>
+          </div>
+        )}
 
         {error && <Alert tone="danger">{error}</Alert>}
 
         {analysis && !loading && (
-          <div className="file-chip">
+          <div className="file-chip file-chip--loaded">
             <div className="file-chip__icon">
               <FileSpreadsheet size={18} />
             </div>
@@ -55,7 +58,7 @@ export function ImportStep({ analysis, loading, error, dragOver, onPick, onBack,
                 {analysis.errors.length > 0 && ` · ${analysis.errors.length} ${analysis.errors.length === 1 ? "problema" : "problemas"} por revisar`}
               </div>
             </div>
-            <Button size="sm" onClick={onPick}>
+            <Button size="sm" icon={<UploadCloud size={14} />} onClick={onPick}>
               Cambiar archivo
             </Button>
           </div>

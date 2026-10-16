@@ -1,5 +1,25 @@
 [
   {
+    "version": "1.30.0",
+    "date": "2026-10-16",
+    "notes": [
+      "Menú lateral en orden alfabético automático dentro de cada grupo. Dropi muestra Órdenes antes de Historial de cartera.",
+      "Empresas: la tabla muestra Empresa (con su NIT), Código CIIU, Ciudad, Documento y Nombre del representante. Teléfono y correo siguen en la ficha.",
+      "Nuevo «Registrar periodo sin compras / nómina / ventas / operaciones»: cubre el mes en el Generador (✓ Sin compras…) sin crear movimientos, con confirmación explícita y trazabilidad. Si el mes ya tiene datos reales se advierte; si después llegan datos reales se pide reemplazar el registro vacío. Respeta periodos cerrados y se puede anular.",
+      "Clasificación contable de compras: arriba la empresa destino, NIT, periodo (por fecha de emisión), documentos y carpeta; resumen compacto en una línea; tabla de documentos con acción directa (Clasificar, Revisar, Ver clasificación); los productos se ven al abrir la factura; excluir pide confirmación; cobertura del año visible.",
+      "Catálogo EEFF: botones Mover al inicio / arriba / abajo / al final (también con teclado) y filtros ESF, EERR y No afecta EEFF en los PUC clasificados.",
+      "Tabla de Códigos PUC: accesos rápidos (Todas, Personalizadas, Sin clasificar, En uso, Inactivas), «⚠ Sin clasificar · en uso», ficha por cuenta con referencias y acciones, y clasificación masiva con advertencia si una cuenta ya tenía otra clasificación. Eliminar solo aparece cuando la cuenta se puede eliminar.",
+      "Saldos iniciales: cabecera compacta (empresa, fecha, cuentas, total, estado y acciones) e historial de fechas guardadas, marcando las enviadas.",
+      "Generador: con la configuración lista queda un resumen con «Cambiar configuración»; la verificación muestra primero lo pendiente. Movimientos contables: ordenar por columna, exportar lo filtrado e indicador de filtros activos.",
+      "Extractos bancarios (los 6 bancos): cabecera compacta con empresa, cuenta, periodo, archivo, PUC del saldo y estado de la cuenta; validación en una línea; métricas resumidas; una sola tabla de clasificación con filtros (pendientes, entradas, salidas, GMF), buscador, selección múltiple (Asignar PUC, Enviar a EEFF, No enviar) y detalle de movimientos al abrir una fila.",
+      "Nómina: cabecera y resumen compactos, filtros por área y estado, detalle por empleado y «Registrar periodo sin nómina». Nueva vista Estados Financieros → Empleados con el historial por empresa (áreas, vinculaciones y planillas procesadas).",
+      "Ventas: Facturación electrónica con cabecera, cobertura, tabla mensual (ventas, devoluciones, bases y neto) y vista de documentos con filtros. Reporte de operaciones acepta Excel y TXT con las mismas reglas (Tipo 2 compra, Tipo 3 venta, «Monto Acumulado») y avisa si el archivo equivalente ya fue enviado.",
+      "Obligaciones tributarias (Retefuente, IVA, Renta): resumen de pendientes y pagos, filtros, búsqueda, una sola acción «Ver» con detalle y pagos, cobertura por periodo y «Registrar periodo sin obligación» (también cuenta en el Generador).",
+      "Certificados: ReteFuente e ICA con archivo importado compacto, duplicar fila de concepto, vista previa más amplia y certificado que se compacta solo según las filas; Composición accionaria con checklist antes de generar y siempre en una página; Certificado de ingresos en tres bloques.",
+      "SMMLV: un año nuevo exige SMMLV y auxilio de transporte. Calculadoras de Dependientes e Independientes con la misma estructura; se resalta por qué se usa el SMMLV."
+    ]
+  },
+  {
     "version": "1.29.0",
     "date": "2026-10-15",
     "notes": [

@@ -363,6 +363,10 @@ pub fn send_batch(conn: &mut Connection, input: &BatchInput) -> AppResult<SendOu
             }
         }
     }
+    // Un periodo registrado «sin actividad» en alguno de los meses: se pide reemplazar el registro vacío.
+    let mut sent_months: BTreeSet<String> = input.movements.iter().map(|m| m.accounting_date[..7].to_string()).collect();
+    sent_months.extend(input.payroll_rows.iter().map(|p| p.period.clone()));
+    previous.extend(active_empty_periods(&tx, input.company_id, &input.source, &sent_months)?.into_iter().map(|(id, _)| id));
     if !previous.is_empty() && !input.replace {
         let placeholders = previous.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let batches = tx
@@ -490,6 +494,126 @@ pub fn send_batch(conn: &mut Connection, input: &BatchInput) -> AppResult<SendOu
     let invalidated_periods = invalidate_periods(&tx, input.company_id, &touched, REVIEW_NEW_MOVEMENTS)?;
     tx.commit()?;
     Ok(SendOutcome::Sent { batch_id, replaced_batch_ids, invalidated_periods })
+}
+
+// ---------------------------------------------------------------------------
+// Periodos sin actividad («Sin compras», «Sin nómina», «Sin ventas»…)
+// ---------------------------------------------------------------------------
+
+const EMPTY_PERIOD_FILE: &str = "Registro de periodo sin actividad";
+
+/// Lotes activos «periodo sin actividad» de la fuente en esos meses: (id, mes).
+fn active_empty_periods(conn: &Connection, company_id: i64, source: &str, months: &BTreeSet<String>) -> AppResult<Vec<(i64, String)>> {
+    if months.is_empty() {
+        return Ok(vec![]);
+    }
+    let rows: Vec<(i64, String)> = conn
+        .prepare("SELECT id, substr(period_start, 1, 7) FROM fs_batches WHERE company_id = ?1 AND source = ?2 AND status = 'active' AND json_extract(metadata, '$.emptyPeriod') = 1")?
+        .query_map(params![company_id, source], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    Ok(rows.into_iter().filter(|(_, m)| months.contains(m)).collect())
+}
+
+/// Último día del mes AAAA-MM (AAAA-MM-DD).
+fn month_end(month: &str) -> String {
+    let (y, m): (i32, u32) = (month[..4].parse().unwrap_or(2000), month[5..].parse().unwrap_or(1));
+    let days = match m {
+        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    format!("{month}-{days:02}")
+}
+
+/// Registra meses sin actividad de una fuente: un lote vacío por mes, sin
+/// movimientos, que cubre el mes en el Generador. Respeta periodos cerrados; si
+/// algún mes ya tiene información real activa se detiene (HasData) hasta que
+/// el usuario acepte la advertencia. Un mes ya registrado sin actividad no se repite.
+pub fn register_empty_period(conn: &mut Connection, input: &EmptyPeriodInput) -> AppResult<EmptyPeriodOutcome> {
+    company_exists(conn, input.company_id)?;
+    if !EMPTY_PERIOD_SOURCES.contains(&input.source.as_str()) {
+        return Err(AppError::user("Este origen no admite registrar un periodo sin actividad."));
+    }
+    if input.confirmation.trim().is_empty() {
+        return Err(AppError::user("Confirma explícitamente que no hubo actividad en el periodo."));
+    }
+    let months: BTreeSet<String> = input.months.iter().map(|m| m.trim().to_string()).collect();
+    if months.is_empty() {
+        return Err(AppError::user("Elige al menos un mes."));
+    }
+    for m in &months {
+        validate_period(m)?;
+    }
+    let dates: BTreeSet<String> = months.iter().flat_map(|m| [format!("{m}-01"), month_end(m)]).collect();
+    ensure_open(conn, input.company_id, &dates)?;
+
+    let with_data: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT EXISTS(SELECT 1 FROM fs_movements WHERE company_id = ?1 AND source = ?2 AND status = 'active' AND substr(accounting_date, 1, 7) = ?3)")?;
+        let mut out = Vec::new();
+        for m in &months {
+            if stmt.query_row(params![input.company_id, input.source, m], |r| r.get::<_, bool>(0))? {
+                out.push(m.clone());
+            }
+        }
+        out
+    };
+    if !with_data.is_empty() && !input.allow_with_data {
+        return Ok(EmptyPeriodOutcome::HasData { months: with_data });
+    }
+
+    let already: BTreeSet<String> = active_empty_periods(conn, input.company_id, &input.source, &months)?.into_iter().map(|(_, m)| m).collect();
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    let mut batch_ids = Vec::new();
+    for m in months.iter().filter(|m| !already.contains(*m)) {
+        let metadata = serde_json::json!({
+            "emptyPeriod": true,
+            "confirmation": input.confirmation.trim(),
+            "confirmedAt": now,
+            "withExistingData": with_data.contains(m),
+        });
+        tx.execute(
+            "INSERT INTO fs_batches (company_id, source, file_name, period_label, period_start, period_end, dedupe_key, record_count, total_cents, status, metadata, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 'active', ?8, ?9, ?9)",
+            params![input.company_id, input.source, EMPTY_PERIOD_FILE, m, format!("{m}-01"), month_end(m), format!("empty:{m}"), metadata.to_string(), now],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO fs_decisions (company_id, batch_id, source, document_key, decision, detail, created_at) VALUES (?1, ?2, ?3, ?4, 'empty_period', ?5, ?6)",
+            params![input.company_id, id, input.source, m, input.confirmation.trim(), now],
+        )?;
+        batch_ids.push(id);
+    }
+    tx.commit()?;
+    Ok(EmptyPeriodOutcome::Registered { batch_ids })
+}
+
+/// Anula un registro «periodo sin actividad» (queda «Anulado», no se borra).
+pub fn void_empty_period(conn: &mut Connection, batch_id: i64, reason: &str) -> AppResult<()> {
+    let row: Option<(i64, String, String, String, String, bool)> = conn
+        .query_row(
+            "SELECT company_id, source, status, period_start, period_end, COALESCE(json_extract(metadata, '$.emptyPeriod'), 0) = 1 FROM fs_batches WHERE id = ?1",
+            [batch_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<String>>(3)?.unwrap_or_default(), r.get::<_, Option<String>>(4)?.unwrap_or_default(), r.get(5)?)),
+        )
+        .optional()?;
+    let Some((company_id, source, status, start, end, empty)) = row else {
+        return Err(AppError::user("El registro ya no existe. Recarga la pantalla."));
+    };
+    if !empty || status != "active" {
+        return Err(AppError::user("Solo se puede anular un registro activo de periodo sin actividad."));
+    }
+    ensure_open(conn, company_id, &BTreeSet::from([start, end]))?;
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    tx.execute("UPDATE fs_batches SET status = 'voided', updated_at = ?1 WHERE id = ?2", params![now, batch_id])?;
+    tx.execute(
+        "INSERT INTO fs_decisions (company_id, batch_id, source, document_key, decision, detail, created_at) VALUES (?1, ?2, ?3, '', 'empty_period_voided', ?4, ?5)",
+        params![company_id, batch_id, source, reason.trim(), now],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn list_bank_balances(conn: &Connection, company_id: i64) -> AppResult<Vec<BankBalance>> {
@@ -1615,6 +1739,61 @@ mod tests {
         assert!(send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-13-10", "513595", 1, "x")])).is_err());
         // 7305 (NO APLICA) sí se registra: queda para trazabilidad aunque no afecte los estados.
         assert!(matches!(send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-01-10", "7305", 1, "x")])).unwrap(), SendOutcome::Sent { .. }));
+    }
+
+    fn empty_input(company_id: i64, source: &str, months: &[&str], allow_with_data: bool) -> EmptyPeriodInput {
+        EmptyPeriodInput { company_id, source: source.into(), months: months.iter().map(|m| m.to_string()).collect(), confirmation: "No hubo facturas de compra.".into(), allow_with_data }
+    }
+
+    #[test]
+    fn empty_period_covers_without_movements_and_is_replaced_by_real_data() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        // Sin confirmación u origen no admitido: no se registra.
+        assert!(register_empty_period(&mut conn, &EmptyPeriodInput { confirmation: " ".into(), ..empty_input(a, "purchases", &["2026-01"], false) }).is_err());
+        assert!(register_empty_period(&mut conn, &empty_input(a, "bank", &["2026-01"], false)).is_err());
+
+        let EmptyPeriodOutcome::Registered { batch_ids } = register_empty_period(&mut conn, &empty_input(a, "purchases", &["2026-01", "2026-02"], false)).unwrap() else { panic!() };
+        assert_eq!(batch_ids.len(), 2);
+        assert!(active(&conn, a).is_empty(), "no crea movimientos");
+        let batches = list_batches(&conn, a).unwrap();
+        assert!(batches.iter().all(|b| b.record_count == 0 && b.metadata["emptyPeriod"] == true && b.metadata["confirmedAt"].is_string()));
+        assert_eq!(batches.iter().map(|b| b.period_end.clone().unwrap()).collect::<BTreeSet<_>>(), BTreeSet::from(["2026-01-31".to_string(), "2026-02-28".to_string()]));
+        // Un mes ya registrado no se repite.
+        let EmptyPeriodOutcome::Registered { batch_ids } = register_empty_period(&mut conn, &empty_input(a, "purchases", &["2026-01"], false)).unwrap() else { panic!() };
+        assert!(batch_ids.is_empty());
+
+        // Compras reales de enero: se pide reemplazar el registro vacío.
+        let real = batch(a, "purchases", "", vec![movement("2026-01-10", "513595", 100, "f1")]);
+        let SendOutcome::Duplicate { batches, .. } = send_batch(&mut conn, &real).unwrap() else { panic!("debe pedir reemplazar el registro vacío") };
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].metadata["emptyPeriod"], true);
+        assert!(matches!(send_batch(&mut conn, &BatchInput { replace: true, ..real }).unwrap(), SendOutcome::Sent { .. }));
+        let statuses: Vec<(String, String)> = list_batches(&conn, a).unwrap().into_iter().filter(|b| b.metadata["emptyPeriod"] == true).map(|b| (b.period_label, b.status)).collect();
+        assert!(statuses.contains(&("2026-01".into(), "replaced".into())) && statuses.contains(&("2026-02".into(), "active".into())));
+
+        // Enero ya tiene compras reales: advertencia explícita antes de registrarlo vacío.
+        let EmptyPeriodOutcome::HasData { months } = register_empty_period(&mut conn, &empty_input(a, "purchases", &["2026-01"], false)).unwrap() else { panic!() };
+        assert_eq!(months, ["2026-01"]);
+        assert!(matches!(register_empty_period(&mut conn, &empty_input(a, "purchases", &["2026-01"], true)).unwrap(), EmptyPeriodOutcome::Registered { .. }));
+
+        // Anular: queda «voided» con trazabilidad.
+        let feb = list_batches(&conn, a).unwrap().into_iter().find(|b| b.period_label == "2026-02").unwrap();
+        void_empty_period(&mut conn, feb.id, "Error").unwrap();
+        assert!(void_empty_period(&mut conn, feb.id, "Error").is_err());
+        let decisions: i64 = conn.query_row("SELECT COUNT(*) FROM fs_decisions WHERE decision LIKE 'empty_period%'", [], |r| r.get(0)).unwrap();
+        assert_eq!(decisions, 4);
+    }
+
+    #[test]
+    fn empty_period_respects_closed_periods() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-03-10", "513595", 100, "f1")])).unwrap();
+        mark_ready(&mut conn, &key(a), "h").unwrap();
+        close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
+        assert!(register_empty_period(&mut conn, &empty_input(a, "payroll", &["2026-02"], false)).unwrap_err().0.contains("periodo cerrado"));
+        assert!(matches!(register_empty_period(&mut conn, &empty_input(a, "payroll", &["2026-09"], false)).unwrap(), EmptyPeriodOutcome::Registered { .. }));
     }
 
     fn key(company_id: i64) -> PeriodKey {

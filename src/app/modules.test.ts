@@ -8,7 +8,7 @@ describe("orden de las tarjetas", () => {
     const names = orderedSubmodules(fs).map((s) => s.name);
     expect(names[0]).toBe("Generador de Estados Financieros");
     // Los demás, alfabéticamente.
-    expect(names.slice(1)).toEqual(["Clasificación contable de compras", "Extractos bancarios", "Movimientos contables", "Nómina", "Obligaciones tributarias", "Saldos iniciales", "Ventas"]);
+    expect(names.slice(1)).toEqual(["Clasificación contable de compras", "Empleados", "Extractos bancarios", "Movimientos contables", "Nómina", "Obligaciones tributarias", "Saldos iniciales", "Ventas"]);
   });
 
   it("un submódulo nuevo (aunque se declare antes o se llame «A…») no desplaza a uno con prioridad 0", () => {
@@ -21,7 +21,7 @@ describe("orden de las tarjetas", () => {
   it("las herramientas y los submódulos se ordenan alfabéticamente", () => {
     expect(MODULES.filter((m) => m.submodules.length > 0).map((m) => m.name)).toEqual(["Calculadoras", "Certificados", "Dropi", "Estados Financieros", "Impuestos", "Reportes regulatorios", "Seguridad social"]);
     expect(orderedSubmodules(findModule("certificados")!).map((s) => s.name)).toEqual(["Certificado de ingresos", "Certificado de Rete fuente e ICA", "Composición Accionaria"]);
-    expect(orderedSubmodules(findModule("dropi")!).map((s) => s.name)).toEqual(["Historial de cartera", "Órdenes"]);
+    expect(orderedSubmodules(findModule("dropi")!).map((s) => s.name)).toEqual(["Órdenes", "Historial de cartera"]);
     expect(orderedSubmodules(findModule("calculadoras")!).map((s) => s.name)).toEqual(["Calculadora de aportes para Dependientes", "Calculadora de aportes para Independientes"]);
   });
 });

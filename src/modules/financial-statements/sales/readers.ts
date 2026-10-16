@@ -162,6 +162,63 @@ export interface TpsvRead {
   rows: TpsvRow[];
 }
 
+/**
+ * Columnas del TXT del reporte de operaciones, en el mismo orden que el Excel
+ * equivalente (26 campos separados por «|»). La primera línea (cabecera del
+ * reporte) y la última (cierre) no tienen «|» y se omiten.
+ */
+export const TPSV_TXT_COLUMNS = [
+  "N° Registro",
+  "Fecha",
+  "Código Tipo",
+  "N° Identificación",
+  "Tipo Documento",
+  "N° ID Relacionado",
+  "Nombres",
+  "Apellidos",
+  "País",
+  "Código Postal / Región",
+  "Tipo Cuenta",
+  "N° Cuenta / Wallet",
+  "N° Cuenta / Wallet (2)",
+  "Moneda",
+  "Monto Transacción",
+  "Monto Acumulado",
+  "Monto Transacción 2",
+  "Monto Acumulado 2",
+  "Identificador Cuenta",
+  "Código Entidad",
+  "NIT Entidad",
+  "Nombre Entidad",
+  "Razón Social",
+  "País Entidad",
+  "Entidad (2)",
+  "País Entidad (2)",
+];
+
+/**
+ * TXT del reporte de operaciones → la misma estructura interna que el Excel
+ * (una hoja «TXT» con los encabezados del Excel), para leerlo con
+ * `readTpsvWorkbook` y aplicar exactamente las mismas reglas.
+ */
+export function tpsvTextToWorkbook(fileName: string, content: string): Workbook {
+  const rows: Cell[][] = [TPSV_TXT_COLUMNS.map((h) => ({ t: "s", v: h }) as Cell)];
+  for (const line of content.split(/\r?\n/)) {
+    if (!line.includes("|")) continue;
+    rows.push(
+      line.split("|").map((v): Cell => {
+        const value = v.trim();
+        // Números puros (montos, códigos) como número: «4576200» no se confunde con miles.
+        return /^-?\d+(\.\d+)?$/.test(value) && value.length < 16 ? { t: "n", v: Number(value) } : { t: "s", v: value };
+      }),
+    );
+  }
+  if (rows.length === 1) throw new SalesFormatError("El TXT no tiene filas del reporte de operaciones (campos separados por «|»).");
+  const width = rows.slice(1).reduce((w, r) => Math.max(w, r.length), 0);
+  if (width < 16) throw new SalesFormatError(`El TXT no tiene la estructura del reporte de operaciones: se esperaban ${TPSV_TXT_COLUMNS.length} campos por fila.`);
+  return { fileName, sheets: [{ name: "TXT", rows }] };
+}
+
 /** Revisa todas las hojas con la estructura válida: compras y ventas pueden venir en hojas distintas. */
 export function readTpsvWorkbook(book: Workbook): TpsvRead {
   const used = book.sheets.map((sheet) => ({ sheet, header: findHeader(sheet, TPSV_HEADERS) })).filter((c) => c.header);

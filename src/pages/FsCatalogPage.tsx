@@ -1,13 +1,37 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Eye, EyeOff, GripVertical, Pencil, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpToLine, Eye, EyeOff, GripVertical, Pencil, Plus, Search } from "lucide-react";
 import { Alert, Badge, Button, Card, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { ClassifyPucModal, lineLabel } from "../modules/financial-statements/shared/components/ClassifyPucModal";
 import { PucField } from "../modules/financial-statements/shared/components/PucField";
+import { SegmentedFilter } from "../modules/bank-analysis/shared/components/tableControls";
 import { useFsData } from "../modules/financial-statements/shared/useFsData";
 import { fsService } from "../services/fsService";
 import { errorMessage } from "../services/tauri";
 import { CREATABLE_SECTIONS, EERR_SECTIONS, ESF_SECTIONS, SECTION_LABEL, type FsLine, type FsSectionKey } from "../types/fs";
 import { normalizeKey } from "../utils/text";
+
+type MappedFilter = "all" | "esf" | "eerr" | "excluded";
+
+const MAPPED_FILTERS: { id: MappedFilter; label: string }[] = [
+  { id: "all", label: "Todos" },
+  { id: "esf", label: "ESF" },
+  { id: "eerr", label: "EERR" },
+  { id: "excluded", label: "No afecta EEFF" },
+];
+
+/** Movimientos accesibles equivalentes al arrastre (siempre dentro de la misma sección). */
+type Move = "up" | "down" | "first" | "last";
+
+/** Nuevo orden de la sección tras mover `id` (null si no cambia). Función pura. */
+export function moveWithin(ids: number[], id: number, move: Move): number[] | null {
+  const i = ids.indexOf(id);
+  if (i < 0) return null;
+  const j = move === "up" ? i - 1 : move === "down" ? i + 1 : move === "first" ? 0 : ids.length - 1;
+  if (j < 0 || j >= ids.length || j === i) return null;
+  const next = ids.filter((x) => x !== id);
+  next.splice(j, 0, id);
+  return next;
+}
 
 const ROLE_LABEL: Record<NonNullable<FsLine["role"]>, string> = {
   share_capital: "Automático: capital suscrito (Empresas)",
@@ -38,6 +62,7 @@ export function FsCatalogPage() {
   const [classifying, setClassifying] = useState<string | null>(null);
   const [newPuc, setNewPuc] = useState<string | undefined>();
   const [search, setSearch] = useState("");
+  const [mappedFilter, setMappedFilter] = useState<MappedFilter>("all");
   /** Orden provisional de la sección mientras se arrastra (se guarda al soltar). */
   const [drag, setDrag] = useState<{ section: FsSectionKey; id: number; ids: number[] } | null>(null);
   const dragStart = useRef<number[]>([]);
@@ -48,11 +73,14 @@ export function FsCatalogPage() {
   const mapped = useMemo(() => {
     const q = normalizeKey(search);
     return data.mappings.filter((m) => {
-      if (!q) return true;
       const line = m.lineId ? lineById.get(m.lineId) : undefined;
+      if (mappedFilter === "excluded" && !m.excluded) return false;
+      if (mappedFilter === "esf" && !(line && ESF_SECTIONS.includes(line.section))) return false;
+      if (mappedFilter === "eerr" && !(line && EERR_SECTIONS.includes(line.section))) return false;
+      if (!q) return true;
       return m.pucCode.startsWith(q) || normalizeKey(`${data.index.concepts.get(m.pucCode) ?? ""} ${line?.name ?? ""}`).includes(q);
     });
-  }, [data.mappings, data.index, lineById, search]);
+  }, [data.mappings, data.index, lineById, search, mappedFilter]);
 
   async function run(action: () => Promise<unknown>, message?: string) {
     try {
@@ -129,17 +157,18 @@ export function FsCatalogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragging]);
 
-  /** Flechas arriba / abajo sobre el asa: mueve la línea un puesto. */
-  function onGripKey(key: FsSectionKey, id: number, e: KeyboardEvent<HTMLElement>) {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-    e.preventDefault();
+  function move(key: FsSectionKey, id: number, how: Move) {
     const ids = sectionIds(key);
-    const i = ids.indexOf(id);
-    const j = e.key === "ArrowUp" ? i - 1 : i + 1;
-    if (j < 0 || j >= ids.length) return;
-    const next = [...ids];
-    [next[i], next[j]] = [next[j], next[i]];
-    saveOrder(key, next, ids);
+    const next = moveWithin(ids, id, how);
+    if (next) saveOrder(key, next, ids);
+  }
+
+  /** Sobre el asa: flechas arriba / abajo mueven un puesto; Inicio / Fin, al inicio o al final. */
+  function onGripKey(key: FsSectionKey, id: number, e: KeyboardEvent<HTMLElement>) {
+    const how: Move | undefined = ({ ArrowUp: "up", ArrowDown: "down", Home: "first", End: "last" } as const)[e.key as "ArrowUp"];
+    if (!how) return;
+    e.preventDefault();
+    move(key, id, how);
   }
 
   const section = (key: FsSectionKey) => {
@@ -173,8 +202,8 @@ export function FsCatalogPage() {
                 role="button"
                 tabIndex={0}
                 className="fs-catalog__grip"
-                aria-label={`Mover ${l.name} (flechas arriba / abajo)`}
-                title="Arrastra para ordenar (o usa las flechas)"
+                aria-label={`Mover ${l.name} (flechas arriba / abajo, Inicio / Fin)`}
+                title="Arrastra para ordenar (o usa las flechas, Inicio y Fin)"
                 onPointerDown={(e) => onGripDown(key, l.id, e)}
                 onKeyDown={(e) => onGripKey(key, l.id, e)}
               >
@@ -190,6 +219,12 @@ export function FsCatalogPage() {
               {representative.get(key) === l.id && <Badge>Representativa</Badge>}
               {!l.isActive && <Badge tone="warning">Desactivada</Badge>}
               <span className="fs-catalog__actions">
+                <span className="fs-catalog__move" role="group" aria-label={`Ordenar ${l.name}`}>
+                  <Button size="sm" variant="ghost" iconOnly icon={<ArrowUpToLine size={13} />} aria-label={`Mover ${l.name} al inicio`} title="Mover al inicio" disabled={i === 0 || drag !== null} onClick={() => move(key, l.id, "first")} />
+                  <Button size="sm" variant="ghost" iconOnly icon={<ArrowUp size={13} />} aria-label={`Mover ${l.name} arriba`} title="Mover arriba" disabled={i === 0 || drag !== null} onClick={() => move(key, l.id, "up")} />
+                  <Button size="sm" variant="ghost" iconOnly icon={<ArrowDown size={13} />} aria-label={`Mover ${l.name} abajo`} title="Mover abajo" disabled={i === lines.length - 1 || drag !== null} onClick={() => move(key, l.id, "down")} />
+                  <Button size="sm" variant="ghost" iconOnly icon={<ArrowDownToLine size={13} />} aria-label={`Mover ${l.name} al final`} title="Mover al final" disabled={i === lines.length - 1 || drag !== null} onClick={() => move(key, l.id, "last")} />
+                </span>
                 <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={13} />} aria-label={`Renombrar ${l.name}`} title="Renombrar" onClick={() => setRenaming(l)} />
                 {!l.role && (
                   <Button
@@ -215,7 +250,7 @@ export function FsCatalogPage() {
       <PageHeader
         eyebrow="Datos"
         title="Catálogo de cuentas de Estados Financieros"
-        description="Define en qué línea del ESF o del EERR aparece cada código PUC. Arrastra el asa ⠿ (o usa las flechas) para ordenar las líneas dentro de su sección: el orden se guarda al soltar y se usa en el Generador, la vista previa y el PDF."
+        description="Define en qué línea del ESF o del EERR aparece cada código PUC. Arrastra el asa ⠿ (o usa los botones Mover arriba / abajo / al inicio / al final) para ordenar las líneas dentro de su sección: el orden se guarda al soltar y se usa en el Generador, la vista previa y el PDF."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>
             Nueva línea
@@ -248,6 +283,12 @@ export function FsCatalogPage() {
               </div>
             }
           >
+            <div className="toolbar row--between">
+              <SegmentedFilter label="Filtrar códigos clasificados" options={MAPPED_FILTERS} value={mappedFilter} onChange={setMappedFilter} />
+              <span className="muted" style={{ fontSize: "var(--text-sm)" }}>
+                {mapped.length === 1 ? "1 código" : `${mapped.length} códigos`}
+              </span>
+            </div>
             <div className="table-wrap table-wrap--scroll" style={{ maxHeight: "50vh" }}>
               <table className="table">
                 <thead>
@@ -259,6 +300,13 @@ export function FsCatalogPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {mapped.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="muted" style={{ textAlign: "center", padding: "var(--space-5)" }}>
+                        Ningún código coincide con el filtro.
+                      </td>
+                    </tr>
+                  )}
                   {mapped.map((m) => {
                     const line = m.lineId ? lineById.get(m.lineId) : undefined;
                     return (

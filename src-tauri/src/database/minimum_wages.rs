@@ -14,9 +14,16 @@ pub fn list(conn: &Connection) -> AppResult<Vec<MinimumWage>> {
     Ok(rows)
 }
 
-/// Agrega un año nuevo. Un año ya registrado no se duplica ni se sobrescribe: se edita.
-pub fn create(conn: &Connection, year: i64, value_pesos: i64) -> AppResult<()> {
-    conn.execute("INSERT INTO minimum_wages (year, value_pesos, updated_at) VALUES (?1, ?2, ?3)", params![year, value_pesos, now_iso()])
+/// Agrega un año nuevo, completo (SMMLV y auxilio de transporte). Un año ya
+/// registrado no se duplica ni se sobrescribe: se edita.
+pub fn create(conn: &Connection, year: i64, value_pesos: i64, transport_allowance_pesos: i64) -> AppResult<()> {
+    if transport_allowance_pesos <= 0 {
+        return Err(AppError::user(format!("Escribe el auxilio de transporte de {year}: un año no se guarda incompleto.")));
+    }
+    conn.execute(
+        "INSERT INTO minimum_wages (year, value_pesos, updated_at, transport_allowance_pesos) VALUES (?1, ?2, ?3, ?4)",
+        params![year, value_pesos, now_iso(), transport_allowance_pesos],
+    )
         .map_err(|e| match &e {
             rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::ConstraintViolation => {
                 AppError::user(format!("El SMMLV de {year} ya está registrado: edita su valor."))
@@ -60,15 +67,17 @@ mod tests {
         run_pending(&mut conn).unwrap();
         let years = |c: &Connection| list(c).unwrap().into_iter().map(|w| (w.year, w.value_pesos)).collect::<Vec<_>>();
         assert_eq!(years(&conn), [(2026, 1_750_905)]);
-        create(&conn, 2027, 1_900_000).unwrap();
-        let dup = create(&conn, 2026, 1).unwrap_err();
+        // Un año nuevo exige el auxilio de transporte.
+        assert!(create(&conn, 2027, 1_900_000, 0).unwrap_err().0.contains("auxilio de transporte"));
+        create(&conn, 2027, 1_900_000, 255_000).unwrap();
+        let dup = create(&conn, 2026, 1, 1).unwrap_err();
         assert_eq!(dup.0, "El SMMLV de 2026 ya está registrado: edita su valor.");
         update(&conn, 2027, 1_850_000).unwrap();
         assert!(update(&conn, 2030, 1).is_err());
         assert_eq!(years(&conn), [(2026, 1_750_905), (2027, 1_850_000)]);
-        // Auxilio de transporte: 2026 viene configurado; un año nuevo queda sin configurar hasta que se escriba.
+        // Auxilio de transporte: 2026 viene configurado y 2027 se creó con el suyo.
         let aux = |c: &Connection| list(c).unwrap().into_iter().map(|w| w.transport_allowance_pesos).collect::<Vec<_>>();
-        assert_eq!(aux(&conn), [Some(249_095), None]);
+        assert_eq!(aux(&conn), [Some(249_095), Some(255_000)]);
         set_transport_allowance(&conn, 2027, Some(260_000)).unwrap();
         assert!(set_transport_allowance(&conn, 2031, Some(1)).is_err());
         assert_eq!(aux(&conn), [Some(249_095), Some(260_000)]);

@@ -8,6 +8,8 @@ import type {
   BankConceptMapping,
   BatchInput,
   BatchSummary,
+  EmptyPeriodOutcome,
+  EmptyPeriodSource,
   Employee,
   EmployeeUpdateInput,
   FsCatalog,
@@ -44,6 +46,10 @@ export const fsService = {
   // Movimientos
   send: (input: BatchInput) => call<SendOutcome>("send_fs_batch", { input }),
   batches: (companyId: number) => call<BatchSummary[]>("list_fs_batches", { companyId }),
+  /** Meses sin actividad (sin movimientos): cubren el Generador. `allowWithData`: el usuario aceptó la advertencia de datos reales. */
+  registerEmptyPeriod: (input: { companyId: number; source: EmptyPeriodSource; months: string[]; confirmation: string; allowWithData?: boolean }) =>
+    call<EmptyPeriodOutcome>("register_fs_empty_period", { input }),
+  voidEmptyPeriod: (batchId: number, reason: string) => call<void>("void_fs_empty_period", { batchId, reason }),
   movements: (companyId: number) => call<Movement[]>("list_fs_movements", { companyId }),
   reclassify: (companyId: number | null, ids: number[], pucCode: string) => call<number>("reclassify_fs_movements", { companyId, ids, pucCode }),
   editMovement: (input: MovementEditInput) => call<MovementEdit>("edit_fs_movement", { input }),

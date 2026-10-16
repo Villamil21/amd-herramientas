@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
-import { Alert, Button, Card, DateInput, Field, Input, PageHeader, useToast } from "../../../components/ui";
+import { CheckCircle2, Plus, Save, Trash2 } from "lucide-react";
+import { Alert, Button, Card, ConfirmDialog, DateInput, Field, Input, PageHeader, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import { SECTION_LABEL, type BatchInput } from "../../../types/fs";
+import { formatInteger } from "../../../utils/format";
 import { parseNumericText } from "../../../utils/numbers";
 import { ClassifyPucModal, lineLabel } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
@@ -38,10 +39,23 @@ export default function OpeningBalancesPage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [classifying, setClassifying] = useState<string | null>(null);
+  /** Fechas con saldos iniciales activos en Estados Financieros (historial). */
+  const [sentDates, setSentDates] = useState<Set<string>>(new Set());
+  const [removing, setRemoving] = useState<number | null>(null);
+
+  const loadSent = (id: number) =>
+    fsService.batches(id).then(
+      (b) => setSentDates(new Set(b.filter((x) => x.source === "opening" && x.status === "active" && x.periodStart).map((x) => x.periodStart!))),
+      () => setSentDates(new Set()),
+    );
 
   useEffect(() => {
-    if (companyId === null) return setDates([]);
+    if (companyId === null) {
+      setSentDates(new Set());
+      return setDates([]);
+    }
     fsService.openingDates(companyId).then(setDates, (e) => toast(errorMessage(e), "error"));
+    void loadSent(companyId);
   }, [companyId, toast]);
 
   useEffect(() => {
@@ -76,6 +90,12 @@ export default function OpeningBalancesPage() {
               : dirty
                 ? "Guarda los cambios antes de enviar"
                 : null;
+
+  const ready = companyId !== null && isIsoDate(date);
+  const removeRow = (i: number) => {
+    setRows((prev) => prev.filter((_, j) => j !== i));
+    setDirty(true);
+  };
 
   const update = (i: number, patch: Partial<Row>) => {
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -114,55 +134,70 @@ export default function OpeningBalancesPage() {
   return (
     <>
       <PageHeader eyebrow="Estados Financieros" title="Saldos iniciales" description="Saldos por código PUC a una fecha. El signo solo indica si suma o resta; la ubicación la define el Catálogo de cuentas." />
-      <Card>
-        <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
+      {/* Cabecera compacta: empresa, fecha, cuentas, total, estado y acciones; debajo, el historial de fechas guardadas. */}
+      <Card className="fs-opening-head">
+        <div className="fs-opening-head__row">
           <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
-          <Field label="Fecha" required>
+          <Field label="Fecha de saldos" required>
             {(id) => <DateInput id={id} value={date} onChange={setDate} />}
           </Field>
-          {dates.length > 0 && (
-            <div className="row" style={{ flexWrap: "wrap" }}>
-              <span className="field__hint">Guardados:</span>
-              {dates.map((d) => (
-                <button key={d} type="button" className="puc-chip" onClick={() => setDate(d)}>
-                  {formatIsoDate(d)}
-                </button>
-              ))}
+          {ready && (
+            <dl className="context-bar__items fs-opening-head__stats">
+              <div className="context-bar__item">
+                <dt>Cuentas</dt>
+                <dd>{formatInteger(filled.length)}</dd>
+              </div>
+              <div className="context-bar__item">
+                <dt>Total</dt>
+                <dd className="nowrap">{formatExactCents(total)}</dd>
+              </div>
+              <div className="context-bar__item">
+                <dt>Estado</dt>
+                <dd>{dirty ? <span className="amount--negative">Cambios sin guardar</span> : sentDates.has(date) ? "Enviado a EEFF" : dates.includes(date) ? "Guardado · sin enviar" : "Nuevo"}</dd>
+              </div>
+            </dl>
+          )}
+          {ready && (
+            <div className="context-bar__actions">
+              <Button size="sm" icon={<Plus size={14} />} onClick={() => setRows((r) => [...r, { pucCode: "", text: "" }])}>
+                Agregar fila
+              </Button>
+              <Button size="sm" variant="primary" icon={<Save size={14} />} onClick={() => void save()} loading={saving} disabled={!dirty || invalid.length > 0}>
+                Guardar
+              </Button>
             </div>
           )}
         </div>
+        {dates.length > 0 && (
+          <div className="fs-opening-history" role="group" aria-label="Fechas guardadas">
+            <span className="field__hint">Historial:</span>
+            {[...dates].sort().reverse().map((d) => (
+              <button key={d} type="button" className={`puc-chip${d === date ? " is-active" : ""}`} aria-pressed={d === date} onClick={() => setDate(d)} title={sentDates.has(d) ? "Enviado a Estados Financieros" : "Guardado, sin enviar"}>
+                {formatIsoDate(d)}
+                {sentDates.has(d) && <CheckCircle2 size={12} aria-label="Enviado" />}
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
 
-      {companyId !== null && isIsoDate(date) && (
+      {ready && (
         <>
           {/* Sin Excel propio: solo los botones de envío. Enviar de nuevo la misma fecha reemplaza el envío anterior. */}
           <SendToFs
             blocked={blocked}
             blockedStatus={unclassified.length && !invalid.length && !duplicated.length ? "Pendiente de clasificación" : "Requiere revisión"}
             build={build}
+            onSent={() => companyId !== null && void loadSent(companyId)}
             duplicateTitle="Los saldos iniciales de esta fecha ya fueron enviados."
           />
           {unclassified.length > 0 && (
-            <Alert tone="warning" title="Códigos PUC sin clasificar">
-              Clasifícalos (línea del ESF / EERR) o márcalos «No afecta Estados Financieros» para poder enviar.
+            <Alert tone="warning" title={unclassified.length === 1 ? "1 código PUC sin clasificar" : `${unclassified.length} códigos PUC sin clasificar`}>
+              {unclassified.join(", ")}: clasifícalos (línea del ESF / EERR) o márcalos «No afecta Estados Financieros» para poder enviar.
             </Alert>
           )}
           {toCapital.length > 0 && <Alert tone="info">El Capital social se toma automáticamente de Empresas → Capital suscrito; no es necesario importarlo aquí.</Alert>}
-          <Card
-            flush
-            title={`Saldos al ${formatIsoDate(date)}`}
-            description={`Total: ${formatExactCents(total)}`}
-            actions={
-              <>
-                <Button icon={<Plus size={14} />} onClick={() => setRows((r) => [...r, { pucCode: "", text: "" }])}>
-                  Agregar fila
-                </Button>
-                <Button variant="primary" icon={<Save size={14} />} onClick={() => void save()} loading={saving} disabled={!dirty || invalid.length > 0}>
-                  Guardar
-                </Button>
-              </>
-            }
-          >
+          <Card flush>
             <div className="table-wrap">
               <table className="table table--dense fs-opening-table">
                 <colgroup>
@@ -217,7 +252,7 @@ export default function OpeningBalancesPage() {
                           <Input aria-label={`Valor ${r.pucCode || `fila ${i + 1}`}`} className="input--right" value={r.text} invalid={r.text.trim() !== "" && r.cents === null} placeholder="-2.000.000" onChange={(e) => update(i, { text: e.target.value })} />
                         </td>
                         <td className="actions">
-                          <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar fila" onClick={() => { setRows((prev) => prev.filter((_, j) => j !== i)); setDirty(true); }} />
+                          <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar fila" onClick={() => (r.pucCode || r.text.trim() ? setRemoving(i) : removeRow(i))} />
                         </td>
                       </tr>
                     );
@@ -228,6 +263,18 @@ export default function OpeningBalancesPage() {
           </Card>
         </>
       )}
+      <ConfirmDialog
+        open={removing !== null}
+        danger
+        title="Eliminar fila"
+        confirmLabel="Eliminar"
+        message={removing !== null ? <>Se quita {rows[removing]?.pucCode || "la fila"} de los saldos. El cambio se aplica al guardar.</> : null}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => {
+          removeRow(removing!);
+          setRemoving(null);
+        }}
+      />
       <ClassifyPucModal
         open={classifying !== null}
         pucCode={classifying ?? ""}

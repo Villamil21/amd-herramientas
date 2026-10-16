@@ -18,12 +18,15 @@ function contain(asset: Asset, x: number, y: number, maxWidth: number, maxHeight
   return { x: x + (centered ? (maxWidth - width) / 2 : 0), y: y + (maxHeight - height) / 2, width, height };
 }
 
-export async function renderCompositionPdf(doc: CompositionDocument): Promise<Uint8Array> {
-  const [{ jsPDF }, logo, signature] = await Promise.all([import("jspdf"), loadAsset(doc.logo), loadAsset(doc.signature)]);
+type JsPdfCtor = typeof import("jspdf").jsPDF;
+
+/** Último punto útil de la hoja: el contenido nunca pasa a una segunda página. */
+const LAST_LINE = PAGE.height - PAGE.margin / 2;
+
+/** Dibuja el certificado con una escala de letra y espaciado; devuelve dónde terminó el contenido. */
+function draw(jsPDF: JsPdfCtor, doc: CompositionDocument, logo: Asset, signature: Asset, scale: number) {
   const pdf = new jsPDF({ unit: "pt", format: "letter", compress: true });
-  const { width, height, margin } = PAGE, right = width - margin;
-  const totalRows = doc.subscribed.rows.length + doc.paid.rows.length;
-  const scale = Math.max(0.46, Math.min(1.16, (height - margin * 2) / (455 + totalRows * 42)));
+  const { width, margin } = PAGE, right = width - margin;
   const S = (value: number) => value * scale;
   let y = margin;
   const text = (value: string, x: number, yPos: number, size: number, align: "left" | "center" = "left", bold = false) => {
@@ -91,5 +94,26 @@ export async function renderCompositionPdf(doc: CompositionDocument): Promise<Ui
   const signatureBox = contain(signature, margin, y, S(180), S(54), false);
   pdf.addImage(signature.data, signature.format, signatureBox.x, signatureBox.y, signatureBox.width, signatureBox.height, undefined, "FAST");
   y += S(64); text(doc.signer.name, margin, y, 9, "left", true); y += S(12); text(doc.signer.role, margin, y, 9, "left", true); y += S(12); text(`TP. T-${doc.professionalNumber} JUNTA CENTRAL DE CONTADORES`, margin, y, 9, "left", true);
-  return new Uint8Array(pdf.output("arraybuffer"));
+  return { pdf, bottom: y };
+}
+
+/**
+ * Certificado de una sola página: parte de una escala estimada por la cantidad
+ * de socios y, si el contenido no cabe (p. ej. nombres largos), reduce la letra
+ * y el espaciado hasta que quepa. `fits` = false solo si ni la escala mínima basta.
+ */
+export async function layoutCompositionPdf(doc: CompositionDocument): Promise<{ bytes: Uint8Array; scale: number; fits: boolean }> {
+  const [{ jsPDF }, logo, signature] = await Promise.all([import("jspdf"), loadAsset(doc.logo), loadAsset(doc.signature)]);
+  const totalRows = doc.subscribed.rows.length + doc.paid.rows.length;
+  let scale = Math.max(0.46, Math.min(1.16, (PAGE.height - PAGE.margin * 2) / (455 + totalRows * 42)));
+  for (;;) {
+    const { pdf, bottom } = draw(jsPDF, doc, logo, signature, scale);
+    const fits = bottom <= LAST_LINE;
+    if (fits || scale <= 0.4) return { bytes: new Uint8Array(pdf.output("arraybuffer")), scale, fits };
+    scale = Math.max(0.4, scale * 0.92);
+  }
+}
+
+export async function renderCompositionPdf(doc: CompositionDocument): Promise<Uint8Array> {
+  return (await layoutCompositionPdf(doc)).bytes;
 }

@@ -19,6 +19,8 @@ export const dropiModule: ModuleDef = {
       name: "Órdenes",
       description: "Resume ventas, costos y pedidos a partir del reporte de órdenes exportado desde Dropi.",
       icon: ClipboardList,
+      // Órdenes va primero: tiene prioridad funcional sobre el orden alfabético.
+      priority: 0,
       component: lazy(() => import("./orders/DropiOrdersPage")),
     },
     {

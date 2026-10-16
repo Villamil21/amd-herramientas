@@ -4,6 +4,7 @@ import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
 import { Breadcrumbs, type Crumb } from "../components/ui";
+import { sortByLabel } from "../utils/text";
 
 interface NavItem {
   key: string;
@@ -12,8 +13,12 @@ interface NavItem {
   path: string;
 }
 
-/** Menú por grupos: cada grupo con su encabezado (contraído queda un separador y el tooltip de cada ícono). */
-const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+/**
+ * Menú por grupos: cada grupo con su encabezado (contraído queda un separador y
+ * el tooltip de cada ícono). Dentro de cada grupo el orden es alfabético y
+ * automático (no el orden en que se declaran).
+ */
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = ([
   { title: "Inicio", items: [{ key: "tools", label: "Herramientas", icon: LayoutGrid, path: paths.tools }] },
   {
     title: "Datos maestros",
@@ -40,7 +45,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     ],
   },
   { title: "Sistema", items: [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }] },
-];
+] satisfies { title: string; items: NavItem[] }[]).map((g) => ({ ...g, items: sortByLabel(g.items) }));
 
 const COLLAPSE_KEY = "ui.sidebarCollapsed";
 

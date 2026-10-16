@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
-import { Alert, Button, Card, ConfirmDialog, Loader, Modal, PageHeader, useToast } from "../components/ui";
+import { Eye, EyeOff, ListTree, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Alert, Badge, Button, Card, ConfirmDialog, Loader, Modal, PageHeader, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { pucService } from "../services/pucService";
 import { errorMessage } from "../services/tauri";
@@ -16,7 +16,7 @@ import { useFsData } from "../modules/financial-statements/shared/useFsData";
 const IN_USE_DELETE = "Este código PUC ya tiene movimientos o referencias asociadas y no puede eliminarse. Puedes desactivarlo para que no aparezca en nuevas selecciones.";
 
 /** Ventana abierta sobre una fila. */
-type Dialog = { kind: "edit" | "classify" | "delete" | "deactivate" | "references"; code: string } | null;
+type Dialog = { kind: "sheet" | "edit" | "classify" | "delete" | "deactivate" | "references"; code: string } | null;
 
 /**
  * Datos → Tabla de Códigos PUC: catálogo global (oficial + personalizados)
@@ -32,6 +32,9 @@ export function PucTablePage() {
   const [creating, setCreating] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
+  /** Selección para la clasificación masiva. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const byCode = useMemo(() => new Map(data.codes.map((c) => [c.code, c])), [data.codes]);
   const usageMap = useMemo(() => new Map((usage.data ?? []).map((u) => [u.code, u.total])), [usage.data]);
@@ -46,7 +49,8 @@ export function PucTablePage() {
       ),
     [data.mappings, lineById],
   );
-  const selected = dialog ? byCode.get(dialog.code) : undefined;
+  const current = dialog ? byCode.get(dialog.code) : undefined;
+  const selected_ = (code: string) => byCode.get(code) ?? null;
   const uses = (code: string) => usageMap.get(code) ?? 0;
 
   async function reload() {
@@ -74,6 +78,17 @@ export function PucTablePage() {
     onClassify: (code) => setDialog({ kind: "classify", code }),
     onDelete: (code) => setDialog({ kind: uses(code) > 0 ? "references" : "delete", code }),
     onReferences: (code) => setDialog({ kind: "references", code }),
+    onOpen: (code) => setDialog({ kind: "sheet", code }),
+    selected,
+    onSelect: (codes, checked) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const c of codes) {
+          if (checked) next.add(c);
+          else next.delete(c);
+        }
+        return next;
+      }),
     onToggleActive: (code) => {
       if (byCode.get(code)?.active === false) void run(() => pucService.setActive(code, true), `Cuenta ${code} reactivada.`);
       else setDialog({ kind: "deactivate", code });
@@ -103,7 +118,20 @@ export function PucTablePage() {
           title="Catálogo de cuentas"
           description={`${formatInteger(data.index.all.length)} códigos · ${formatInteger(customCount)} personalizados${inactiveCount ? ` · ${inactiveCount === 1 ? "1 inactivo" : `${formatInteger(inactiveCount)} inactivos`}` : ""} · Global para todas las empresas. Las cuentas oficiales no se eliminan; un código con movimientos o referencias solo se desactiva.`}
         >
-          <PucCatalog index={data.index} admin={admin} maxHeight="calc(100vh - 340px)" />
+          {selected.size > 0 && (
+            <div className="bulk-bar" role="region" aria-label="Selección">
+              <span>
+                <strong>{selected.size === 1 ? "1 cuenta seleccionada" : `${formatInteger(selected.size)} cuentas seleccionadas`}</strong>
+              </span>
+              <Button size="sm" variant="primary" icon={<ListTree size={14} />} onClick={() => setBulkOpen(true)}>
+                Clasificar en EEFF
+              </Button>
+              <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={() => setSelected(new Set())}>
+                Quitar selección
+              </Button>
+            </div>
+          )}
+          <PucCatalog index={data.index} admin={admin} maxHeight="calc(100vh - 380px)" />
         </Card>
       )}
 
@@ -117,19 +145,38 @@ export function PucTablePage() {
           setCreating(false);
         }}
       />
-      <EditPucCodeModal code={dialog?.kind === "edit" ? (selected ?? null) : null} inUse={dialog ? uses(dialog.code) > 0 : false} index={data.index} onClose={() => setDialog(null)} onSaved={reload} />
+      <EditPucCodeModal code={dialog?.kind === "edit" ? (current ?? null) : null} inUse={dialog ? uses(dialog.code) > 0 : false} index={data.index} onClose={() => setDialog(null)} onSaved={reload} />
       <ClassifyPucModal
         open={dialog?.kind === "classify"}
         pucCode={dialog?.code ?? ""}
-        concept={selected?.concept ?? ""}
+        concept={current?.concept ?? ""}
         catalog={data.catalog}
         mappings={data.mappingMap}
         onClose={() => setDialog(null)}
         onSaved={data.reloadMappings}
       />
+      <ClassifyPucModal
+        open={bulkOpen}
+        pucCode=""
+        concept=""
+        bulk={[...selected].sort().map((code) => ({ code, concept: byCode.get(code)?.concept ?? "" }))}
+        catalog={data.catalog}
+        mappings={data.mappingMap}
+        onClose={() => setBulkOpen(false)}
+        onSaved={async () => {
+          setSelected(new Set());
+          await data.reloadMappings();
+        }}
+      />
+      <AccountSheet
+        code={dialog?.kind === "sheet" ? selected_(dialog.code) : null}
+        classification={dialog ? classification.get(dialog.code) : undefined}
+        onClose={() => setDialog(null)}
+        onAction={(kind) => dialog && (kind === "reactivate" ? void run(() => pucService.setActive(dialog.code, true), `Cuenta ${dialog.code} reactivada.`) : setDialog({ kind, code: dialog.code }))}
+      />
       <ConfirmDialog
         open={dialog?.kind === "delete"}
-        title={`¿Eliminar el código PUC ${dialog?.code ?? ""} — ${selected?.concept ?? ""}?`}
+        title={`¿Eliminar el código PUC ${dialog?.code ?? ""} — ${current?.concept ?? ""}?`}
         message="Esta acción eliminará el código del catálogo. No tiene movimientos ni referencias; si estaba clasificado en EEFF, su clasificación también se elimina."
         confirmLabel="Eliminar"
         danger
@@ -138,18 +185,94 @@ export function PucTablePage() {
         onCancel={() => setDialog(null)}
       />
       <DeactivateDialog
-        code={dialog?.kind === "deactivate" ? (selected ?? null) : null}
+        code={dialog?.kind === "deactivate" ? (current ?? null) : null}
         busy={busy}
         onConfirm={(code) => void run(() => pucService.setActive(code, false), `Cuenta ${code} desactivada.`)}
         onCancel={() => setDialog(null)}
       />
       <ReferencesModal
-        code={dialog?.kind === "references" ? (selected ?? null) : null}
+        code={dialog?.kind === "references" ? (current ?? null) : null}
         busy={busy}
         onDeactivate={(code) => void run(() => pucService.setActive(code, false), `Cuenta ${code} desactivada.`)}
         onClose={() => setDialog(null)}
       />
     </>
+  );
+}
+
+type SheetAction = "edit" | "classify" | "deactivate" | "reactivate" | "delete";
+
+/**
+ * Ficha de una cuenta: código y concepto, tipo, estado, clasificación EEFF,
+ * referencias y las acciones disponibles. «Eliminar» solo aparece si la cuenta
+ * se puede eliminar; si no, se explica el motivo y se ofrece Desactivar.
+ */
+function AccountSheet({ code, classification, onClose, onAction }: { code: PucCode | null; classification?: { label: string; excluded: boolean }; onClose: () => void; onAction: (kind: SheetAction) => void }) {
+  const { usage, error } = useCodeUsage(code);
+  const used = (usage?.total ?? 0) > 0;
+  const inactive = code?.active === false;
+  const assignable = Boolean(code && (code.custom || /^\d{6}$/.test(code.code)));
+  const deleteReason = !code ? "" : !code.custom ? "Las cuentas oficiales no se eliminan." : used ? IN_USE_DELETE : inactive ? "Reactívala para poder eliminarla." : "";
+  return (
+    <Modal
+      open={code !== null}
+      size="lg"
+      title={`${code?.code ?? ""} — ${code?.concept ?? ""}`}
+      onClose={onClose}
+      footer={
+        <>
+          {code?.custom && !deleteReason && (
+            <Button variant="danger" icon={<Trash2 size={14} />} onClick={() => onAction("delete")} style={{ marginRight: "auto" }}>
+              Eliminar
+            </Button>
+          )}
+          <Button icon={<Pencil size={14} />} onClick={() => onAction("edit")}>
+            Editar
+          </Button>
+          {assignable && (
+            <Button icon={inactive ? <Eye size={14} /> : <EyeOff size={14} />} onClick={() => onAction(inactive ? "reactivate" : "deactivate")}>
+              {inactive ? "Reactivar" : "Desactivar"}
+            </Button>
+          )}
+          {assignable && (
+            <Button variant="primary" icon={<ListTree size={14} />} onClick={() => onAction("classify")}>
+              {classification ? "Cambiar clasificación" : "Clasificar en EEFF"}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {code && (
+        <div className="stack">
+          <dl className="summary-grid" style={{ margin: 0 }}>
+            <div className="summary-item">
+              <span className="summary-item__label">Tipo</span>
+              <span className="summary-item__value">{code.custom ? "Personalizada" : "Oficial"}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-item__label">Estado</span>
+              <span className="summary-item__value">{inactive ? <Badge tone="warning">Inactiva</Badge> : <Badge tone="success">Activa</Badge>}</span>
+            </div>
+            <div className="summary-item" style={{ gridColumn: "span 2" }}>
+              <span className="summary-item__label">Clasificación EEFF</span>
+              <span className="summary-item__value">
+                {!assignable ? "No aplica (solo se clasifican subcuentas de 6 dígitos o personalizadas)" : classification ? (classification.excluded ? "No afecta Estados Financieros" : classification.label) : used ? "⚠ Sin clasificar · en uso" : "Sin clasificar · sin uso"}
+              </span>
+            </div>
+          </dl>
+          <div className="stack stack--sm">
+            <strong>Referencias</strong>
+            {error && <Alert tone="danger">{error}</Alert>}
+            {!usage && !error ? <Loader /> : usage && used ? <UsageList usage={usage} /> : usage ? <p className="muted" style={{ margin: 0 }}>Sin movimientos ni referencias.</p> : null}
+          </div>
+          {code.custom && deleteReason && (
+            <Alert tone="info" title="No se puede eliminar">
+              {deleteReason}
+            </Alert>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 

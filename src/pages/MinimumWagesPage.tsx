@@ -45,12 +45,12 @@ export function MinimumWagesPage() {
 
   async function save() {
     if (editing === null || !wage) return toast("Escribe el SMMLV en pesos, mayor que cero.", "error");
+    if (editing === "new" && !aux) return toast("Escribe el auxilio de transporte: un año no se guarda incompleto.", "error");
     setSaving(true);
     try {
       if (editing === "new") {
         if (yearNumber === null || duplicate) return;
-        await minimumWageService.create(yearNumber, wage);
-        if (aux) await minimumWageService.setTransportAllowance(yearNumber, aux);
+        await minimumWageService.create(yearNumber, wage, aux!);
         toast(`Año ${yearNumber} agregado.`);
       } else {
         const w = wages.find((x) => x.year === editing)!;
@@ -69,7 +69,7 @@ export function MinimumWagesPage() {
 
   const editActions = (
     <>
-      <Button size="sm" variant="primary" iconOnly icon={<Check size={14} />} aria-label="Guardar" title="Guardar" loading={saving} disabled={!wage || (editing === "new" && (yearNumber === null || duplicate))} onClick={() => void save()} />
+      <Button size="sm" variant="primary" iconOnly icon={<Check size={14} />} aria-label="Guardar" title="Guardar" loading={saving} disabled={!wage || (editing === "new" && (yearNumber === null || duplicate || !aux))} onClick={() => void save()} />
       <Button size="sm" variant="ghost" iconOnly icon={<X size={14} />} aria-label="Cancelar" title="Cancelar" onClick={() => setEditing(null)} disabled={saving} />
     </>
   );
@@ -110,10 +110,10 @@ export function MinimumWagesPage() {
                       <Input aria-label="Año" value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" invalid={duplicate} title={duplicate ? "Ese año ya está registrado" : undefined} autoFocus />
                     </td>
                     <td className="num">
-                      <MoneyInput aria-label="SMMLV" className="input--right" value={wage} onChange={setWage} />
+                      <MoneyInput aria-label="SMMLV" className="input--right" value={wage} onChange={setWage} invalid={!wage} title={!wage ? "Obligatorio" : undefined} />
                     </td>
                     <td className="num">
-                      <MoneyInput aria-label="Auxilio de transporte" className="input--right" value={aux} onChange={setAux} />
+                      <MoneyInput aria-label="Auxilio de transporte" className="input--right" value={aux} onChange={setAux} invalid={!aux} title={!aux ? "Obligatorio" : undefined} />
                     </td>
                     <td className="actions">{editActions}</td>
                   </tr>

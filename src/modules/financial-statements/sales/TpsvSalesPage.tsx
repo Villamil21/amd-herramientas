@@ -1,18 +1,30 @@
-import { useMemo, useState } from "react";
-import { FolderSearch, Settings2 } from "lucide-react";
-import { Alert, Button, Card, PageHeader, useToast } from "../../../components/ui";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarX2, FolderSearch, Settings2 } from "lucide-react";
+import { Alert, Button, Card, ContextBar, MetricBar, PageHeader, useToast } from "../../../components/ui";
 import { saveExcelSheets } from "../../bank-analysis/shared/excelExportService";
-import { Stat } from "../../bank-analysis/shared/components/Stat";
+import { fromBase64 } from "../../bank-analysis/shared/statementService";
+import { fileService } from "../../../services/fileService";
+import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
+import { EmptyPeriodModal } from "../shared/components/EmptyPeriodModal";
+import { SourceCoverage } from "../shared/components/SourceCoverage";
 import type { BatchInput } from "../../../types/fs";
 import { formatInteger } from "../../../utils/format";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import { SendToFs } from "../shared/components/SendToFs";
-import { formatExactCents, formatIsoDate, periodLabel } from "../shared/money";
+import { describeMonths, formatExactCents, formatIsoDate, periodLabel } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { readTpsvWorkbook } from "./readers";
-import { useWorkbook } from "./useWorkbook";
+import { readTpsvWorkbook, SalesFormatError, tpsvTextToWorkbook, type TpsvRead } from "./readers";
+
+/** TXT del reporte: UTF-8 y, si no lo es, Latin-1 (los archivos de la entidad no siempre declaran su codificación). */
+function decodeText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("latin1").decode(bytes);
+  }
+}
 
 const BUY_KEY = "tpsv.buy";
 const SELL_KEY = "tpsv.sell";
@@ -29,8 +41,41 @@ const ITEMS = [
 export default function TpsvSalesPage() {
   const toast = useToast();
   const data = useFsData();
-  const book = useWorkbook(readTpsvWorkbook);
+  const [book, setBook] = useState<{ result: { fileName: string; format: "Excel" | "TXT"; data: TpsvRead } | null; error: string | null; picking: boolean }>({ result: null, error: null, picking: false });
   const [companyId, setCompanyId] = useState<number | null>(null);
+  const [emptyOpen, setEmptyOpen] = useState(false);
+  const [sentKey, setSentKey] = useState(0);
+  /** Huellas ya enviadas (operaciones activas de la empresa) → importación: detecta el TXT y su Excel equivalente. */
+  const [sent, setSent] = useState<Map<string, number>>(new Map());
+
+  /** Importa el reporte en Excel (.xlsx / .xls) o TXT; ambos se normalizan a la misma estructura. */
+  async function pick() {
+    setBook((b) => ({ ...b, picking: true, error: null }));
+    try {
+      const picked = await fileService.pickExcelOrText("Importar reporte de operaciones");
+      if (!picked) return setBook((b) => ({ ...b, picking: false }));
+      try {
+        const result =
+          picked.kind === "excel"
+            ? { fileName: picked.workbook.fileName, format: "Excel" as const, data: readTpsvWorkbook(picked.workbook) }
+            : { fileName: picked.fileName, format: "TXT" as const, data: readTpsvWorkbook(tpsvTextToWorkbook(picked.fileName, decodeText(fromBase64(picked.dataBase64)))) };
+        setBook({ result, error: null, picking: false });
+      } catch (e) {
+        setBook({ result: null, picking: false, error: e instanceof SalesFormatError ? e.message : "No fue posible leer el archivo. Verifica que sea el reporte de operaciones." });
+      }
+    } catch (e) {
+      toast(errorMessage(e), "error");
+      setBook((b) => ({ ...b, picking: false }));
+    }
+  }
+
+  useEffect(() => {
+    if (companyId === null) return setSent(new Map());
+    fsService.movements(companyId).then(
+      (list) => setSent(new Map(list.filter((m) => m.source === "sales_tpsv" && m.status === "active").map((m) => [m.documentId, m.batchId]))),
+      () => setSent(new Map()),
+    );
+  }, [companyId, sentKey]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -50,6 +95,9 @@ export default function TpsvSalesPage() {
     m.count++;
     months.set(r.date!.slice(0, 7), m);
   }
+  const alreadySent = valid.filter((r) => sent.has(r.fingerprint));
+  const sentBatches = [...new Set(alreadySent.map((r) => sent.get(r.fingerprint)!))];
+  const detected = describeMonths(valid.map((r) => r.date!.slice(0, 7)));
   const missingKeys = [valid.some((r) => r.kind === "buy") && !data.settingsMap.get(BUY_KEY) && BUY_KEY, valid.some((r) => r.kind === "sell") && !data.settingsMap.get(SELL_KEY) && SELL_KEY].filter(Boolean) as string[];
   const blocked = !book.result ? "Selecciona el archivo" : companyId === null ? "Selecciona la empresa" : issues.length ? `${issues.length} filas con datos ilegibles` : missingKeys.length ? "Faltan cuentas PUC del reporte de operaciones" : valid.length === 0 ? "No hay operaciones para enviar" : null;
 
@@ -63,7 +111,7 @@ export default function TpsvSalesPage() {
       periodLabel: `Reporte de operaciones · ${book.result.fileName}`,
       periodStart: dates[0],
       periodEnd: dates[dates.length - 1],
-      metadata: { sheets: book.result.data.sheets, otherTypes: other.length, repeated: repeated.length },
+      metadata: { format: book.result.format, sheets: book.result.data.sheets, otherTypes: other.length, repeated: repeated.length },
       movements: valid.map((r) => ({
         accountingDate: r.date!,
         conceptKey: `tpsv.${r.kind}`,
@@ -107,7 +155,7 @@ export default function TpsvSalesPage() {
             rows: [...months.entries()].sort().map(([m, v]) => [periodLabel(m), v.buys / 100, v.sells / 100, (v.sells - v.buys) / 100]),
           },
         ],
-        `Operaciones_EEFF_${book.result.fileName.replace(/\.xlsx?$/i, "")}`,
+        `Operaciones_EEFF_${book.result.fileName.replace(/\.(xlsx?|txt)$/i, "")}`,
       );
       if (path) toast("Excel exportado.");
       return path;
@@ -124,24 +172,45 @@ export default function TpsvSalesPage() {
       <PageHeader
         eyebrow="Estados Financieros · Ventas"
         title="Reporte de operaciones"
-        description="Importa el reporte de operaciones (TPSV). Se revisan todas las hojas con la estructura válida y se suman todas las filas de «Monto Acumulado»."
+        description="Importa el reporte de operaciones (TPSV) en Excel o TXT. Se revisan todas las hojas con la estructura válida y se suman todas las filas de «Monto Acumulado»."
         actions={
-          <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
-            Cuentas PUC
-          </Button>
+          <>
+            <Button icon={<CalendarX2 size={15} />} onClick={() => setEmptyOpen(true)}>
+              Registrar periodo sin operaciones
+            </Button>
+            <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
+              Cuentas PUC
+            </Button>
+          </>
         }
       />
-      <Card>
-        <div className="row row--between" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
-          <div className="row">
-            {book.result && <span className="muted">{book.result.fileName} · Hojas: {book.result.data.sheets.join(", ")}</span>}
-            <Button variant="primary" icon={<FolderSearch size={15} />} onClick={() => void book.pick()} loading={book.picking}>
-              {book.result ? "Seleccionar otro Excel" : "Seleccionar Excel"}
+      {!book.result ? (
+        <Card>
+          <div className="row row--between" style={{ flexWrap: "wrap" }}>
+            <p className="muted">Acepta el reporte en Excel (.xlsx o .xls) o en TXT: ambos se leen con las mismas reglas.</p>
+            <Button variant="primary" icon={<FolderSearch size={15} />} onClick={() => void pick()} loading={book.picking}>
+              Importar reporte
             </Button>
           </div>
-        </div>
-      </Card>
+        </Card>
+      ) : (
+        <ContextBar
+          items={[
+            { label: "Periodo", value: detected || "—", hint: detected ? "Por la columna Fecha" : undefined },
+            { label: "Archivo", value: book.result.fileName, selectable: true, hint: `${book.result.format}${book.result.format === "Excel" ? ` · Hojas: ${book.result.data.sheets.join(", ")}` : ""}` },
+            { label: "Operaciones", value: formatInteger(valid.length) },
+          ]}
+          actions={
+            <Button size="sm" icon={<FolderSearch size={14} />} onClick={() => void pick()} loading={book.picking}>
+              Cambiar archivo
+            </Button>
+          }
+        >
+          <div className="bank-head__fields">
+            <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+          </div>
+        </ContextBar>
+      )}
       {book.error && <Alert tone="danger">{book.error}</Alert>}
       {book.result && (
         <>
@@ -152,7 +221,15 @@ export default function TpsvSalesPage() {
             onExport={exportExcel}
             exporting={exporting}
             duplicateTitle="Algunas operaciones ya fueron enviadas."
+            onSent={() => setSentKey((k) => k + 1)}
           />
+          <SourceCoverage companyId={companyId} source="sales_tpsv" year={valid.length ? Number(valid.map((r) => r.date!).sort().reverse()[0].slice(0, 4)) : new Date().getFullYear()} refreshKey={sentKey} />
+          {alreadySent.length > 0 && (
+            <Alert tone="warning" title="Posible duplicado">
+              {alreadySent.length === valid.length ? "Todas las operaciones" : `${formatInteger(alreadySent.length)} de ${formatInteger(valid.length)} operaciones`} de este archivo ya fueron enviadas (importación {sentBatches.map((id) => `#${id}`).join(", ")}),
+              posiblemente desde su {book.result.format === "TXT" ? "Excel" : "TXT"} equivalente. Al enviar se pedirá reemplazar; nunca se suman dos veces.
+            </Alert>
+          )}
           {issues.length > 0 && <Alert tone="danger" title="Filas con datos ilegibles" items={issues.slice(0, 8).map((r) => `Hoja ${r.sheet}, fila ${r.rowNumber}: ${r.issue}`)} />}
           {repeated.length > 0 && <Alert tone="warning">{formatInteger(repeated.length)} filas repetidas en el archivo (mismo N° Registro, Fecha, Código Tipo y Monto): no se suman dos veces.</Alert>}
           {other.length > 0 && <Alert tone="info">{formatInteger(other.length)} filas con otro Código Tipo (ni 2 ni 3): no se envían.</Alert>}
@@ -163,12 +240,39 @@ export default function TpsvSalesPage() {
               </Button>
             </Alert>
           )}
-          <div className="stat-row">
-            <Stat label="Compras de cripto" value={formatExactCents(buys)} />
-            <Stat label="Ventas de cripto" value={formatExactCents(sells)} />
-            <Stat label="Resultado propio" value={formatExactCents(sells - buys)} tone={sells - buys < 0 ? "negative" : "positive"} />
-            <Stat label="Operaciones" value={formatInteger(valid.length)} />
-          </div>
+          <MetricBar
+            label="Resumen del reporte"
+            metrics={[
+              { key: "ops", label: valid.length === 1 ? "operación" : "operaciones", value: formatInteger(valid.length) },
+              { key: "buys", label: "compras (Tipo 2)", value: formatExactCents(buys) },
+              { key: "sells", label: "ventas (Tipo 3)", value: formatExactCents(sells) },
+              { key: "result", label: "resultado propio", value: formatExactCents(sells - buys), tone: sells - buys < 0 ? "negative" : "positive" },
+            ]}
+          />
+          <Card flush title="Resumen por tipo" description="Se usa siempre «Monto Acumulado» (nunca «Monto Acumulado 2»).">
+            <div className="table-wrap">
+              <table className="table table--dense">
+                <thead>
+                  <tr>
+                    <th>Código Tipo</th>
+                    <th>Operación</th>
+                    <th className="num">Operaciones</th>
+                    <th className="num">Monto Acumulado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(["buy", "sell"] as const).map((kind) => (
+                    <tr key={kind}>
+                      <td>{kind === "buy" ? "2" : "3"}</td>
+                      <td>{kind === "buy" ? "Compra de cripto" : "Venta de cripto"}</td>
+                      <td className="num">{formatInteger(valid.filter((r) => r.kind === kind).length)}</td>
+                      <td className="num">{formatExactCents(sum(kind))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
           <Card flush title="Por mes (columna Fecha)" description="En el Generador, la presentación Banco u OTC decide cómo se muestran estas operaciones; el resultado es el mismo en ambas.">
             <div className="table-wrap">
               <table className="table">
@@ -203,6 +307,7 @@ export default function TpsvSalesPage() {
           </Card>
         </>
       )}
+      <EmptyPeriodModal open={emptyOpen} source="sales_tpsv" companies={data.companies} companyId={companyId} defaultMonth={valid.length ? valid.map((r) => r.date!.slice(0, 7)).sort()[0] : null} onClose={() => setEmptyOpen(false)} onChanged={() => setSentKey((k) => k + 1)} />
       <PucSettingsModal open={settingsOpen} title="Cuentas PUC del reporte de operaciones" items={ITEMS} index={data.index} settings={data.settingsMap} mappings={data.mappingMap} required={missingKeys} onClose={() => setSettingsOpen(false)} onSaved={data.reloadSettings} onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])} />
     </>
   );

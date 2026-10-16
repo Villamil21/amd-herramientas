@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Cell, Workbook } from "../../../types/excel";
-import { readEInvoiceWorkbook, readTpsvWorkbook, SalesFormatError } from "./readers";
+import { readEInvoiceWorkbook, readTpsvWorkbook, SalesFormatError, TPSV_TXT_COLUMNS, tpsvTextToWorkbook } from "./readers";
 
 const s = (v: string): Cell => ({ t: "s", v });
 const n = (v: number): Cell => ({ t: "n", v });
@@ -58,6 +58,47 @@ describe("reporte de operaciones", () => {
       ["1", "buy", 15_000_000, true],
       ["16", undefined, 10, false],
     ]);
+  });
+});
+
+describe("reporte de operaciones en TXT", () => {
+  const line = (n: number, date: string, type: number, amount: number, amount2: number) =>
+    [n, date, type, "41958607", "13", "41958607", "CLAUDIA", "CAPERA", "CO", "63001", "2", "W1", "W1", "USDT", "4005", amount, "4005", amount2, "W1", "31", "901418451", "BINANCE", "COLOMBIA SAS", "CO", "BINANCE", "CO"].join("|");
+  const txt = ["         0210012652026-01-31       3", line(1, "2026-01-02", 2, 15000000, 99999999), line(2, "2026-01-21", 3, 32017955, 0), line(3, "2026-01-21", 7, 10, 10), "         021001265       3XXXX"].join("\r\n");
+
+  it("se normaliza a la misma estructura del Excel: Tipo 2 compra, Tipo 3 venta, «Monto Acumulado» (nunca el 2)", () => {
+    const read = readTpsvWorkbook(tpsvTextToWorkbook("TPSV.txt", txt));
+    expect(read.sheets).toEqual(["TXT"]);
+    expect(read.rows.map((r) => [r.registro, r.date, r.kind, r.amountCents])).toEqual([
+      ["1", "2026-01-02", "buy", 1_500_000_000],
+      ["2", "2026-01-21", "sell", 3_201_795_500],
+      ["3", "2026-01-21", undefined, 1_000],
+    ]);
+  });
+
+  it("el TXT y su Excel equivalente producen las mismas huellas (detección de duplicado)", () => {
+    const fromTxt = readTpsvWorkbook(tpsvTextToWorkbook("TPSV.txt", txt)).rows.map((r) => r.fingerprint);
+    const excel: Workbook = {
+      fileName: "TPSV.xlsx",
+      sheets: [
+        {
+          name: "Transacciones",
+          rows: [
+            TPSV_TXT_COLUMNS.map(s),
+            ...txt
+              .split("\r\n")
+              .filter((l) => l.includes("|"))
+              .map((l) => l.split("|").map((v, i) => (i === 1 ? s(v) : /^\d+$/.test(v) ? n(Number(v)) : s(v)))),
+          ],
+        },
+      ],
+    };
+    expect(readTpsvWorkbook(excel).rows.map((r) => r.fingerprint)).toEqual(fromTxt);
+  });
+
+  it("un TXT sin la estructura no se adivina", () => {
+    expect(() => tpsvTextToWorkbook("x.txt", "hola\nmundo")).toThrow(SalesFormatError);
+    expect(() => tpsvTextToWorkbook("x.txt", "a|b|c")).toThrow(SalesFormatError);
   });
 });
 

@@ -401,6 +401,81 @@ pub fn set_resolution(conn: &mut Connection, id: i64, resolution: &str) -> AppRe
 // Configuración por empresa
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Periodos sin obligación
+// ---------------------------------------------------------------------------
+
+pub fn list_empty_periods(conn: &Connection, company_id: i64) -> AppResult<Vec<TaxEmptyPeriod>> {
+    Ok(conn
+        .prepare("SELECT id, company_id, tax_type, year, period, periodicity, confirmation, status, created_at, voided_at FROM fs_tax_empty_periods WHERE company_id = ?1 ORDER BY tax_type, year, period, id")?
+        .query_map([company_id], |r| {
+            Ok(TaxEmptyPeriod {
+                id: r.get(0)?,
+                company_id: r.get(1)?,
+                tax_type: r.get(2)?,
+                year: r.get(3)?,
+                period: r.get(4)?,
+                periodicity: r.get(5)?,
+                confirmation: r.get(6)?,
+                status: r.get(7)?,
+                created_at: r.get(8)?,
+                voided_at: r.get(9)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Registra un periodo sin obligación. No se permite si ya hay una declaración
+/// vigente de ese impuesto y periodo, ni si ya está registrado.
+pub fn register_empty_period(conn: &Connection, input: &TaxEmptyPeriodInput) -> AppResult<i64> {
+    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM companies WHERE id = ?1)", [input.company_id], |r| r.get(0))?;
+    if !exists {
+        return Err(AppError::user("La empresa no existe."));
+    }
+    let valid = match input.tax_type.as_str() {
+        "withholding" => input.periodicity == "monthly" && input.period.is_some_and(|p| (1..=12).contains(&p)),
+        "vat" => match input.periodicity.as_str() {
+            "bimonthly" => input.period.is_some_and(|p| (1..=6).contains(&p)),
+            "four_monthly" => input.period.is_some_and(|p| (1..=3).contains(&p)),
+            _ => false,
+        },
+        "income" => input.periodicity == "annual" && input.period.is_none(),
+        _ => false,
+    };
+    if !valid || !(2000..=2100).contains(&input.year) {
+        return Err(AppError::user("El periodo no es válido para este impuesto."));
+    }
+    if input.confirmation.trim().is_empty() {
+        return Err(AppError::user("Confirma explícitamente que no hubo obligación en el periodo."));
+    }
+    let declared: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM fs_tax_returns WHERE company_id = ?1 AND tax_type = ?2 AND year = ?3 AND IFNULL(period, 0) = IFNULL(?4, 0) AND periodicity = ?5 AND superseded_by IS NULL)",
+        params![input.company_id, input.tax_type, input.year, input.period, input.periodicity],
+        |r| r.get(0),
+    )?;
+    if declared {
+        return Err(AppError::user("Ese periodo ya tiene una declaración: no se puede registrar sin obligación."));
+    }
+    conn.execute(
+        "INSERT INTO fs_tax_empty_periods (company_id, tax_type, year, period, periodicity, confirmation, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)",
+        params![input.company_id, input.tax_type, input.year, input.period, input.periodicity, input.confirmation.trim(), now_iso()],
+    )
+    .map_err(|e| match &e {
+        rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => AppError::user("Ese periodo ya está registrado sin obligación."),
+        _ => e.into(),
+    })?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Anula un registro (queda «voided» con su fecha; no se borra).
+pub fn void_empty_period(conn: &Connection, id: i64) -> AppResult<()> {
+    let n = conn.execute("UPDATE fs_tax_empty_periods SET status = 'voided', voided_at = ?1 WHERE id = ?2 AND status = 'active'", params![now_iso(), id])?;
+    if n == 0 {
+        return Err(AppError::user("El registro ya no está vigente. Recarga la pantalla."));
+    }
+    Ok(())
+}
+
 pub fn get_settings(conn: &Connection, company_id: i64) -> AppResult<TaxCompanySettings> {
     let vat: Option<Option<String>> = conn.query_row("SELECT vat_periodicity FROM fs_tax_company_settings WHERE company_id = ?1", [company_id], |r| r.get(0)).optional()?;
     Ok(TaxCompanySettings { company_id, vat_periodicity: vat.flatten() })
@@ -620,4 +695,27 @@ mod tests {
         save(&mut conn, &withholding(a, 9, "1", 100)).unwrap();
         assert!(crate::database::companies::delete(&conn, a).unwrap_err().0.contains("Estados Financieros"));
     }
+
+    #[test]
+    fn empty_tax_periods_cover_without_returns() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::migrations::run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (razon_social, nit, created_at, updated_at) VALUES ('A', '900111111', 'x', 'x')", []).unwrap();
+        let input = |tax: &str, period: Option<i64>, periodicity: &str| TaxEmptyPeriodInput { company_id: 1, tax_type: tax.into(), year: 2026, period, periodicity: periodicity.into(), confirmation: "Sin obligación".into() };
+        let id = register_empty_period(&conn, &input("withholding", Some(3), "monthly")).unwrap();
+        assert!(register_empty_period(&conn, &input("withholding", Some(3), "monthly")).unwrap_err().0.contains("ya está registrado"));
+        assert!(register_empty_period(&conn, &input("withholding", Some(13), "monthly")).is_err());
+        assert!(register_empty_period(&conn, &input("vat", Some(4), "four_monthly")).is_err());
+        register_empty_period(&conn, &input("vat", Some(2), "bimonthly")).unwrap();
+        register_empty_period(&conn, &input("income", None, "annual")).unwrap();
+        assert!(register_empty_period(&conn, &TaxEmptyPeriodInput { confirmation: " ".into(), ..input("withholding", Some(4), "monthly") }).is_err());
+        void_empty_period(&conn, id).unwrap();
+        assert!(void_empty_period(&conn, id).is_err());
+        // Anulado, el periodo se puede volver a registrar.
+        register_empty_period(&conn, &input("withholding", Some(3), "monthly")).unwrap();
+        let list = list_empty_periods(&conn, 1).unwrap();
+        assert_eq!(list.iter().filter(|p| p.status == "active").count(), 3);
+        assert_eq!(list.len(), 4);
+    }
+
 }

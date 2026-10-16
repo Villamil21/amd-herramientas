@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, Eye, EyeOff, UserPlus, X, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, UserPlus, X, XCircle } from "lucide-react";
 import { Alert, Badge, Button, ConfirmDialog, Modal } from "../../../../components/ui";
 import { SupplierFormModal } from "../../../../pages/suppliers/SupplierFormModal";
 import type { PucCode, Supplier } from "../../../../types/models";
@@ -17,7 +17,7 @@ interface Props {
   row: DocRow | null;
   index: PucIndex;
   assignment?: DocAssignment;
-  /** Abierto desde «Ver productos»: la tabla queda a la vista. */
+  /** Abierto desde la tabla de productos: la vista baja hasta ella. */
   openProducts: boolean;
   /** Título del documento que aún no está clasificado. */
   unknownTitle?: UnknownTitle;
@@ -52,7 +52,8 @@ const assignable = (l: DocLine) => !l.issue;
  */
 export function DocumentDetailModal({ row, index, assignment = {}, openProducts, unknownTitle, supplier, onSupplierCreated, suggestions, onAssign, onChanged, onClose, remainingPending, onNextPending, onCodesChanged }: Props) {
   const [creatingCode, setCreatingCode] = useState<string | null>(null);
-  const [showProducts, setShowProducts] = useState(false);
+  /** Exclusión en espera de confirmación (acción secundaria). */
+  const [confirmExclude, setConfirmExclude] = useState<string | null>(null);
   const [editingCode, setEditingCode] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
   const [pickerKey, setPickerKey] = useState(0);
@@ -64,8 +65,8 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
   const mode = row?.mode;
 
   useEffect(() => {
-    setShowProducts(openProducts);
     setEditingCode(false);
+    setConfirmExclude(null);
     setConfirmSingle(false);
     setCreatingSupplier(false);
   }, [fileName, openProducts]);
@@ -81,7 +82,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
 
   useEffect(() => {
     if (fileName && openProducts) productsRef.current?.scrollIntoView({ block: "nearest" });
-  }, [fileName, openProducts, showProducts]);
+  }, [fileName, openProducts]);
 
   if (!row) return null;
   const assign = (next: DocAssignment, confirmedCode?: string) => onAssign(row.fileName, next, confirmedCode);
@@ -121,7 +122,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
 
   function problemActions(code: ProblemCode): ReactNode {
     const exclude = (
-      <Button size="sm" onClick={() => assign({ ...assignment, excluded: true })} title="El documento no se suma y deja de bloquear la exportación.">
+      <Button size="sm" onClick={() => setConfirmExclude("Excluir documento")} title="El documento no se suma y deja de bloquear la exportación.">
         Excluir documento
       </Button>
     );
@@ -129,7 +130,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
       case "duplicate":
         return (
           <>
-            <Button size="sm" variant="primary" onClick={() => assign({ ...assignment, excluded: true })}>
+            <Button size="sm" variant="primary" onClick={() => setConfirmExclude("Excluir duplicado")}>
               Excluir duplicado
             </Button>
             {row!.duplicateBy === "number" && (
@@ -184,7 +185,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
     <>
       <Button
         variant="ghost"
-        onClick={() => assign({ ...assignment, excluded: !excluded })}
+        onClick={() => (excluded ? assign({ ...assignment, excluded: false }) : setConfirmExclude("Excluir del análisis"))}
         title={excluded ? "Vuelve a tener en cuenta el documento." : "El documento no se suma y deja de bloquear la exportación."}
         style={{ marginRight: "auto" }}
       >
@@ -205,7 +206,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
   const allSelected = lines.some(assignable) && lines.filter(assignable).every((l) => selected.includes(l.index));
 
   return (
-    <Modal open size="xl" title={row.fileName} onClose={onClose} footer={footer} locked={confirmSingle || creatingSupplier}>
+    <Modal open size="xl" title={row.fileName} onClose={onClose} footer={footer} locked={confirmSingle || creatingSupplier || confirmExclude !== null}>
       <div className="stack">
         <div className="row">
           <ClassificationBadge row={row} />
@@ -376,14 +377,10 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
             <div className="stack stack--sm" ref={productsRef}>
               <div className="row row--between">
                 <strong>Detalle de productos</strong>
-                {mode !== "product" && (
-                  <Button size="sm" variant="ghost" icon={showProducts ? <EyeOff size={14} /> : <Eye size={14} />} onClick={() => setShowProducts((v) => !v)}>
-                    {showProducts ? "Ocultar productos" : "Ver productos"}
-                  </Button>
-                )}
+                {mode === "document" && lines.length > 0 && <span className="muted">Toda la factura usa {row.documentCode ?? "el código elegido"}: los productos se muestran como referencia.</span>}
               </div>
-              {(mode === "product" || showProducts) &&
-                (lines.length === 0 ? (
+              {/* Siempre a la vista: se clasifica viendo los productos (sin «Ver productos»). */}
+              {lines.length === 0 ? (
                   <Alert tone="info">No se encontraron productos en «Detalles de Productos».</Alert>
                 ) : (
                   <div className="table-wrap table-wrap--scroll" style={{ maxHeight: 360 }}>
@@ -424,9 +421,13 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
                               </td>
                               <td className="num selectable">{l.priceCents === undefined ? "—" : formatCop(l.priceCents)}</td>
                               <td className="selectable" style={{ whiteSpace: "nowrap" }}>
-                                {l.code ?? <span className="muted">Pendiente</span>}
+                                {mode === "document" ? row.documentCode ?? <span className="muted">Pendiente</span> : l.code ?? <span className="muted">Pendiente</span>}
                               </td>
-                              <td className="selectable">{l.concept ?? (l.code ? <span className="puc-line-issue">Código inválido</span> : <span className="muted">Pendiente</span>)}</td>
+                              <td className="selectable">
+                                {mode === "document"
+                                  ? row.documentConcept ?? <span className="muted">Pendiente</span>
+                                  : l.concept ?? (l.code ? <span className="puc-line-issue">Código inválido</span> : <span className="muted">Pendiente</span>)}
+                              </td>
                               {editable && (
                                 <td className="actions" onClick={(e) => e.stopPropagation()}>
                                   {assignable(l) && (
@@ -445,7 +446,7 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
                       </tbody>
                     </table>
                   </div>
-                ))}
+                )}
             </div>
           </>
         )}
@@ -469,6 +470,18 @@ export function DocumentDetailModal({ row, index, assignment = {}, openProducts,
         onSaved={() => {
           setCreatingSupplier(false);
           void onSupplierCreated();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmExclude !== null}
+        danger
+        title={confirmExclude ?? ""}
+        confirmLabel="Excluir"
+        message={<>El documento no se suma en el resumen ni se envía a Estados Financieros. Puedes volver a incluirlo desde este mismo detalle.</>}
+        onCancel={() => setConfirmExclude(null)}
+        onConfirm={() => {
+          setConfirmExclude(null);
+          assign({ ...assignment, excluded: true });
         }}
       />
       <ConfirmDialog

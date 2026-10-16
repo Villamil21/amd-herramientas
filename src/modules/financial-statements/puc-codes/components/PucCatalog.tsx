@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Eye, EyeOff, ListTree, Pencil, Search, Trash2 } from "lucide-react";
+import { Eye, EyeOff, ListTree, Pencil, Search, Trash2, TriangleAlert } from "lucide-react";
 import { Badge, Button, EmptyState, Input, Modal, Select } from "../../../../components/ui";
 import { useDebounced } from "../../../../hooks/useDebounced";
 import type { PucCode } from "../../../../types/models";
 import { formatInteger } from "../../../../utils/format";
+import { SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { catalogRows, isSelectableCode, pucClasses, type PucIndex, type PucRow } from "../services/pucCatalog";
 
 /** Filas que se dibujan a la vez; una búsqueda muy amplia se acota en vez de pintar todo el catálogo. */
@@ -20,7 +21,22 @@ export interface PucCatalogAdmin {
   onToggleActive: (code: string) => void;
   onDelete: (code: string) => void;
   onReferences: (code: string) => void;
+  /** Ficha de la cuenta (código, tipo, estado, clasificación, referencias y acciones). */
+  onOpen: (code: string) => void;
+  /** Selección para clasificación masiva (solo cuentas asignables). */
+  selected: Set<string>;
+  onSelect: (codes: string[], checked: boolean) => void;
 }
+
+/** Accesos rápidos de la tabla administrable. */
+type Quick = "" | "custom" | "unclassified" | "inuse" | "inactive";
+const QUICK: { id: Quick; label: string }[] = [
+  { id: "", label: "Todas" },
+  { id: "custom", label: "Personalizadas" },
+  { id: "unclassified", label: "Sin clasificar" },
+  { id: "inuse", label: "En uso" },
+  { id: "inactive", label: "Inactivas" },
+];
 
 type KindFilter = "" | "official" | "custom";
 type StatusFilter = "" | "active" | "inactive";
@@ -31,7 +47,7 @@ const assignable = (row: { code: string; custom?: boolean }) => Boolean(row.cust
 
 function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean; admin?: PucCatalogAdmin }) {
   const missing = row.concept === undefined;
-  const columns = admin ? 5 : 2;
+  const columns = admin ? 6 : 2;
   if (row.level === "class" || row.level === "group") {
     // Clase y grupo son títulos: organizan la tabla y no se pueden asignar. El código queda en el tooltip.
     return (
@@ -56,8 +72,17 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
   const icon = (label: string, Icon: typeof Pencil, onClick: () => void, extra?: string) => (
     <Button size="sm" variant="ghost" iconOnly icon={<Icon size={14} />} aria-label={`${label} ${row.code}`} title={label} className={extra} onClick={onClick} />
   );
+  const isSelected = admin?.selected.has(row.code) ?? false;
   return (
-    <tr className={`puc-row puc-row--${row.level}${row.inactive ? " is-inactive" : ""}`}>
+    <tr
+      className={`puc-row puc-row--${row.level}${row.inactive ? " is-inactive" : ""}${admin && !missing ? " is-clickable" : ""}${isSelected ? " is-selected" : ""}`}
+      onClick={admin && !missing ? () => admin.onOpen(row.code) : undefined}
+    >
+      {admin && (
+        <td onClick={(e) => e.stopPropagation()} style={{ width: 36 }}>
+          {canAssign && <input type="checkbox" aria-label={`Seleccionar ${row.code}`} checked={isSelected} onChange={(e) => admin.onSelect([row.code], e.target.checked)} />}
+        </td>
+      )}
       <td className="puc-row__code selectable" style={{ paddingLeft: 16 + depth * 16 }}>
         {row.code}
       </td>
@@ -70,7 +95,15 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
       {admin && (
         <>
           <td className="puc-row__fs" title={mapping && !mapping.excluded ? mapping.label : undefined}>
-            {!canAssign ? null : mapping ? mapping.excluded ? <Badge tone="dark">No afecta EEFF</Badge> : <span className="puc-row__line">{mapping.label}</span> : <span className="muted">Sin clasificar</span>}
+            {!canAssign ? null : mapping ? (
+              mapping.excluded ? <Badge tone="dark">No afecta EEFF</Badge> : <span className="puc-row__line">{mapping.label}</span>
+            ) : uses > 0 ? (
+              <span className="puc-row__unclassified-used" title="Tiene movimientos o referencias y no aparecerá en los Estados Financieros hasta clasificarla">
+                <TriangleAlert size={13} aria-hidden /> Sin clasificar · en uso
+              </span>
+            ) : (
+              <span className="muted">Sin clasificar · sin uso</span>
+            )}
           </td>
           <td className="puc-row__usage">
             {missing ? null : uses > 0 ? (
@@ -81,14 +114,14 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
               <span className="muted">—</span>
             )}
           </td>
-          <td className="actions">
+          <td className="actions" onClick={(e) => e.stopPropagation()}>
             {!missing && (
               <span className="puc-row__actions">
                 {icon("Editar", Pencil, () => admin.onEdit(row.code))}
                 {canAssign && icon("Clasificar en EEFF", ListTree, () => admin.onClassify(row.code))}
                 {canAssign && icon(row.inactive ? "Reactivar" : "Desactivar", row.inactive ? Eye : EyeOff, () => admin.onToggleActive(row.code))}
-                {/* Oficial: nunca. Personalizado con uso: explica por qué no y ofrece Desactivar. */}
-                {row.custom && !row.inactive && icon(uses > 0 ? "Tiene movimientos o referencias: no se puede eliminar" : "Eliminar", Trash2, () => admin.onDelete(row.code), uses > 0 ? "puc-row__delete is-muted" : "puc-row__delete")}
+                {/* Solo un personalizado sin uso se elimina; el motivo de los demás está en la ficha. */}
+                {row.custom && !row.inactive && uses === 0 && icon("Eliminar", Trash2, () => admin.onDelete(row.code), "puc-row__delete")}
               </span>
             )}
           </td>
@@ -111,10 +144,19 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
   const [kind, setKind] = useState<KindFilter>("");
   const [status, setStatus] = useState<StatusFilter>("");
   const [classified, setClassified] = useState<ClassFilter>("");
+  const [inUse, setInUse] = useState(false);
   const query = useDebounced(search.trim(), 150);
+  const quick: Quick | null = inUse ? (!kind && !status && !classified ? "inuse" : null) : kind === "custom" && !status && !classified ? "custom" : !kind && !status && classified === "unclassified" ? "unclassified" : !kind && status === "inactive" && !classified ? "inactive" : !kind && !status && !classified ? "" : null;
+  function chooseQuick(q: Quick) {
+    setKind(q === "custom" ? "custom" : "");
+    setStatus(q === "inactive" ? "inactive" : "");
+    setClassified(q === "unclassified" ? "unclassified" : "");
+    setInUse(q === "inuse");
+  }
   const filter = useMemo(() => {
-    if (!kind && !status && !classified) return undefined;
+    if (!kind && !status && !classified && !inUse) return undefined;
     return (c: PucCode) => {
+      if (inUse && !(admin?.usage.get(c.code) ?? 0)) return false;
       if (kind && (kind === "custom") !== Boolean(c.custom)) return false;
       if (status && (status === "inactive") !== (c.active === false)) return false;
       if (classified) {
@@ -124,14 +166,21 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
       }
       return true;
     };
-  }, [kind, status, classified, admin]);
+  }, [kind, status, classified, inUse, admin]);
   const rows = useMemo(() => catalogRows(index, { classCode, query, filter }), [index, classCode, query, filter]);
   const shown = rows.length > MAX_ROWS ? rows.slice(0, MAX_ROWS) : rows;
   const leaves = rows.filter((r) => r.level === "leaf").length;
-  const columns = admin ? 5 : 2;
+  const columns = admin ? 6 : 2;
+  const selectable = admin ? shown.filter((r) => r.level !== "class" && r.level !== "group" && r.concept !== undefined && assignable(r)).map((r) => r.code) : [];
+  const allSelected = selectable.length > 0 && selectable.every((c) => admin!.selected.has(c));
 
   return (
     <>
+      {admin && (
+        <div className="toolbar puc-quick">
+          <SegmentedFilter label="Accesos rápidos" options={QUICK} value={quick ?? ("none" as Quick)} onChange={chooseQuick} />
+        </div>
+      )}
       <div className="toolbar row--between puc-toolbar">
         <div className="search puc-toolbar__search">
           <Search size={14} aria-hidden />
@@ -179,6 +228,11 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
           <table className={`table table--dense puc-table${admin ? " puc-table--admin" : ""}`}>
             <thead>
               <tr>
+                {admin && (
+                  <th style={{ width: 36 }}>
+                    <input type="checkbox" aria-label="Seleccionar las cuentas visibles" checked={allSelected} disabled={selectable.length === 0} onChange={(e) => admin.onSelect(selectable, e.target.checked)} />
+                  </th>
+                )}
                 <th style={{ width: 128 }}>Código</th>
                 <th>Concepto</th>
                 {admin && (

@@ -12,6 +12,42 @@ use crate::state::AppState;
 
 const MAX_PDF_BYTES: usize = 20 * 1024 * 1024;
 
+/// Excel (.xlsx / .xls) o TXT en un mismo diálogo (p. ej. el Reporte de
+/// operaciones, que la entidad entrega en ambos formatos). El Excel se lee aquí;
+/// el TXT se entrega tal cual y se interpreta en el frontend.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum PickedExcelOrText {
+    #[serde(rename_all = "camelCase")]
+    Excel { workbook: Workbook },
+    #[serde(rename_all = "camelCase")]
+    Text { file_name: String, data_base64: String },
+}
+
+const MAX_TEXT_BYTES: u64 = 50 * 1024 * 1024;
+
+#[tauri::command]
+pub async fn pick_excel_or_txt(app: AppHandle, title: Option<String>) -> AppResult<Option<PickedExcelOrText>> {
+    let Some(fp) = app
+        .dialog()
+        .file()
+        .set_title(title.as_deref().unwrap_or("Importar archivo"))
+        .add_filter("Excel o TXT", &["xlsx", "xls", "txt"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = to_path(fp)?;
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
+        if std::fs::metadata(&path)?.len() > MAX_TEXT_BYTES {
+            return Err(AppError::user("El archivo TXT supera el tamaño máximo de 50 MB."));
+        }
+        let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "reporte.txt".into());
+        return Ok(Some(PickedExcelOrText::Text { file_name, data_base64: STANDARD.encode(std::fs::read(&path)?) }));
+    }
+    Ok(Some(PickedExcelOrText::Excel { workbook: excel::read_workbook(&path)? }))
+}
+
 #[tauri::command]
 pub async fn pick_excel_file(app: AppHandle) -> AppResult<Option<Workbook>> {
     let Some(fp) = app

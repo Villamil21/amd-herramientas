@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BookCheck, ChartNoAxesCombined, ClipboardList, FileChartColumn, Landmark, ListTree, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
 
@@ -45,6 +45,13 @@ export const financialStatementsModule: ModuleDef = {
         { id: "soi", name: "SOI", description: "", icon: ClipboardList },
         { id: "mi-planilla", name: "Mi Planilla", description: "", icon: ClipboardList },
       ],
+    },
+    {
+      id: "empleados",
+      name: "Empleados",
+      description: "Historial de empleados por empresa: áreas, vinculaciones y planillas procesadas.",
+      icon: Contact,
+      component: lazy(() => import("./payroll/EmployeesPage")),
     },
     {
       id: "ventas",

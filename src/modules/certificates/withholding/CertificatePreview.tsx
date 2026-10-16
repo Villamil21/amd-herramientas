@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { CertificateDocument } from "./logic/certificateModel";
-import { COLORS, FONT_SIZES, LAYOUT, PAGE } from "./pdf/layout";
+import { COLORS, FONT_SIZES, LAYOUT, PAGE, tableMetrics } from "./pdf/layout";
 
 /** Distancia aproximada línea base → borde superior en Helvetica. */
 const top = (baseline: number, size: number) => baseline - size * 0.8;
@@ -28,15 +28,18 @@ export function CertificatePreview({ doc }: { doc: CertificateDocument }) {
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => setScale(Math.min(1.3, Math.max(0.5, (entry.contentRect.width - 8) / PAGE.width))));
+    // Vista previa amplia: ocupa el ancho disponible (hasta 1,6×) con menos espacio gris alrededor.
+    const ro = new ResizeObserver(([entry]) => setScale(Math.min(1.6, Math.max(0.5, (entry.contentRect.width - 4) / PAGE.width))));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const t = LAYOUT.table;
   const issuerLines = [doc.issuer.razonSocial, doc.issuer.nit ? `NIT ${doc.issuer.nit}` : "", doc.issuer.telefono, doc.issuer.direccion].filter(Boolean);
-  const cell = { size: FONT_SIZES.tableText, color: COLORS.tableText };
-  const bodyMin = t.minBottom - t.headerBottom;
+  // Misma compactación que el PDF (líneas por concepto estimadas: ~52 caracteres por línea a 8 pt).
+  const m = tableMetrics(doc.rows.map((r) => Math.ceil(r.concepto.length / 52)));
+  const cell = { size: m.fontSize, color: COLORS.tableText };
+  const bodyMin = m.minBottom - t.headerBottom;
 
   return (
     <div className="paper-stage" ref={stageRef}>
@@ -94,18 +97,18 @@ export function CertificatePreview({ doc }: { doc: CertificateDocument }) {
                 <span key={x} className="paper__abs" style={{ left: x - t.left, top: 0, bottom: 0, width: 0, borderLeft: `0.6px solid ${COLORS.line}` }} />
               ))}
               {doc.rows.map((row) => (
-                <div key={row.index} style={{ position: "relative", fontSize: cell.size, color: cell.color, lineHeight: `${t.lineHeight}px`, marginBottom: t.rowGap, minHeight: t.lineHeight }}>
-                  <span className="paper__abs" style={{ left: t.concept.numberX - t.left, top: 0, lineHeight: `${t.lineHeight}px` }}>
+                <div key={row.index} style={{ position: "relative", fontSize: cell.size, color: cell.color, lineHeight: `${m.lineHeight}px`, marginBottom: m.rowGap, minHeight: m.lineHeight }}>
+                  <span className="paper__abs" style={{ left: t.concept.numberX - t.left, top: 0, lineHeight: `${m.lineHeight}px` }}>
                     {row.index}.
                   </span>
-                  <div style={{ marginLeft: t.concept.textX - t.left, width: t.concept.maxWidth, lineHeight: `${t.lineHeight}px` }}>{row.concepto}</div>
-                  <span className="paper__abs" style={{ left: t.rateX - t.left, top: 0, lineHeight: `${t.lineHeight}px` }}>
+                  <div style={{ marginLeft: t.concept.textX - t.left, width: t.concept.maxWidth, lineHeight: `${m.lineHeight}px` }}>{row.concepto}</div>
+                  <span className="paper__abs" style={{ left: t.rateX - t.left, top: 0, lineHeight: `${m.lineHeight}px` }}>
                     {row.tasa}
                   </span>
-                  <span className="paper__abs" style={{ left: t.baseX - t.left, top: 0, lineHeight: `${t.lineHeight}px` }}>
+                  <span className="paper__abs" style={{ left: t.baseX - t.left, top: 0, lineHeight: `${m.lineHeight}px` }}>
                     {row.base}
                   </span>
-                  <span className="paper__abs" style={{ right: t.right - t.valueRight, top: 0, lineHeight: `${t.lineHeight}px` }}>
+                  <span className="paper__abs" style={{ right: t.right - t.valueRight, top: 0, lineHeight: `${m.lineHeight}px` }}>
                     {row.valor}
                   </span>
                 </div>

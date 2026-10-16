@@ -114,6 +114,33 @@ pub struct TaxCompanySettings {
     pub vat_periodicity: Option<String>,
 }
 
+/// «Periodo sin obligación»: el periodo queda cubierto sin declaración ni valores.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxEmptyPeriod {
+    pub id: i64,
+    pub company_id: i64,
+    pub tax_type: String,
+    pub year: i64,
+    pub period: Option<i64>,
+    pub periodicity: String,
+    pub confirmation: String,
+    pub status: String,
+    pub created_at: String,
+    pub voided_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxEmptyPeriodInput {
+    pub company_id: i64,
+    pub tax_type: String,
+    pub year: i64,
+    pub period: Option<i64>,
+    pub periodicity: String,
+    pub confirmation: String,
+}
+
 pub fn is_iso_date(value: &str) -> bool {
     let b = value.as_bytes();
     b.len() == 10 && b[4] == b'-' && b[7] == b'-' && value.chars().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())

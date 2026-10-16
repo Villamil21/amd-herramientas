@@ -1,9 +1,8 @@
 import { PageHeader } from "../../../components/ui";
 import { TypedBankAccounting } from "../../financial-statements/bank/BankAccountingPanel";
-import { DebitCreditSummaryCards } from "../shared/components/DebitCreditSummaryCards";
-import { AccountDetails, StatementFileCard } from "../shared/components/StatementFileCard";
+import { CoopcentralGroupDetailModal } from "./components/CoopcentralGroupDetailModal";
+import { AccountDetails, StatementFileActions, StatementFileCard } from "../shared/components/StatementFileCard";
 import { useStatementImport } from "../shared/useStatementImport";
-import { CoopcentralGroupsTable } from "./components/CoopcentralGroupsTable";
 import { CoopcentralValidationPanel } from "./components/CoopcentralValidationPanel";
 import { analyzeCoopcentral, type CoopcentralAnalysis } from "./services/analysis";
 import { exportCoopcentralExcel } from "./services/excelExport";
@@ -23,6 +22,7 @@ export default function CoopcentralStatementPage() {
       <PageHeader eyebrow="Extractos bancarios" title="Coopcentral" description="Importa un extracto bancario en PDF para analizar sus movimientos." />
 
       <StatementFileCard
+        hideWhenDone
         state={state}
         details={state.status === "done" && <AccountDetails {...state.analysis.statement} />}
         picking={picking}
@@ -40,11 +40,11 @@ export default function CoopcentralStatementPage() {
           fileName={state.fileName}
           onExport={exportExcel}
           exporting={exporting}
-        >
-          <CoopcentralValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />
-          <DebitCreditSummaryCards summary={state.analysis.summary} finalBalanceCents={state.analysis.statement.closingBalanceCents} />
-          <CoopcentralGroupsTable groups={state.analysis.groups} />
-        </TypedBankAccounting>
+          validated={state.analysis.validation.validated}
+          validation={<CoopcentralValidationPanel statement={state.analysis.statement} validation={state.analysis.validation} />}
+          fileActions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} />}
+          renderDetail={(key, close) => <CoopcentralGroupDetailModal group={state.analysis.groups.find((g) => g.key === key) ?? null} onClose={close} />}
+        />
       )}
     </>
   );

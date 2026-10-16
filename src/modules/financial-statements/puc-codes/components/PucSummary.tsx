@@ -24,8 +24,8 @@ export function PucSummary({ report, partial }: { report: PucReport; partial: bo
   return (
     <Card
       flush
-      title="Resumen por código PUC"
-      description={partial ? "Resumen parcial: solo incluye lo que ya tiene código. Se recalcula con cada cambio." : "Valores consolidados: Factura electrónica suma, Nota crédito resta."}
+      title="Resumen contable por PUC"
+      description={partial ? "Parcial: solo lo que ya tiene código." : "Facturas suman, notas crédito restan."}
       actions={<SegmentedFilter label="Vista del resumen" options={VIEWS} value={view} onChange={setView} />}
     >
       {empty ? (
@@ -34,14 +34,14 @@ export function PucSummary({ report, partial }: { report: PucReport; partial: bo
         </p>
       ) : view === "code" ? (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table table--dense">
             <thead>
               <tr>
                 <th>Código</th>
                 <th>Concepto</th>
                 <th className="num">Facturas</th>
                 <th className="num">Notas crédito</th>
-                <th className="num">Total neto</th>
+                <th className="num">Neto</th>
               </tr>
             </thead>
             <tbody>

@@ -1,29 +1,28 @@
 import { navigate, paths } from "../../../../app/router";
-import { Alert, Button, Card } from "../../../../components/ui";
+import { Button, Card } from "../../../../components/ui";
 import { formatInteger } from "../../../../utils/format";
 import { type DocCompany, PROBLEM_TEXT } from "../services/accounting";
 
 interface Props {
   docs: DocCompany[];
-  pendingActions: number;
   onDecide: (fileName: string, decision: "ignore" | "process") => void;
   onOpen: (fileName: string) => void;
 }
 
 /**
- * Estado del envío a Estados Financieros: empresa por NIT del adquiriente,
- * alertas NIT / nombre y bloqueo por pendientes. El estado y los botones de
- * exportar y enviar están en la zona de acciones, al inicio de los resultados.
+ * Alertas de empresa del envío a Estados Financieros (NIT del adquiriente
+ * desconocido, nombre distinto…), junto al estado y las acciones de EEFF. La
+ * empresa y la cantidad de documentos están en la cabecera; sin alertas ni
+ * decisiones no se muestra nada.
  */
-export function PurchasesFsCard({ docs, pendingActions, onDecide, onOpen }: Props) {
+export function PurchasesFsCard({ docs, onDecide, onOpen }: Props) {
   const problems = docs.filter((d) => d.problem);
-  const sendable = docs.filter((d) => !d.problem && d.decision !== "ignore");
-  const company = sendable[0]?.company;
+  const ignored = docs.filter((d) => d.decision === "ignore").length;
+  if (problems.length === 0 && ignored === 0) return null;
 
   return (
-    <Card title="Estados Financieros" description={company ? `Empresa (por NIT del adquiriente): ${company.razonSocial} — NIT ${company.nit} · ${formatInteger(sendable.length)} facturas para enviar` : "La empresa de cada factura se identifica por el NIT del adquiriente."}>
-      <div className="stack">
-        {pendingActions > 0 && <Alert tone="warning">{pendingActions === 1 ? "1 pendiente" : `${formatInteger(pendingActions)} pendientes`}: resuélvelos para enviar a Estados Financieros.</Alert>}
+    <Card flush title="Alertas de empresa" description="La empresa de cada factura se identifica por el NIT del adquiriente.">
+      <div className="stack stack--sm">
         {problems.length > 0 && (
           <div className="table-wrap">
             <table className="table">
@@ -67,9 +66,9 @@ export function PurchasesFsCard({ docs, pendingActions, onDecide, onOpen }: Prop
             </table>
           </div>
         )}
-        {docs.some((d) => d.decision === "ignore") && (
-          <span className="field__hint">
-            {formatInteger(docs.filter((d) => d.decision === "ignore").length)} facturas ignoradas por diferencia de nombre: no se envían (la decisión queda registrada).
+        {ignored > 0 && (
+          <span className="field__hint" style={{ padding: "0 var(--space-5) var(--space-3)" }}>
+            {formatInteger(ignored)} facturas ignoradas por diferencia de nombre: no se envían (la decisión queda registrada).
           </span>
         )}
       </div>

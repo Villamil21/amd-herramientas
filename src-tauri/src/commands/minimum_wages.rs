@@ -12,9 +12,10 @@ pub fn list_minimum_wages(db: State<'_, Db>) -> AppResult<Vec<MinimumWage>> {
 }
 
 #[tauri::command]
-pub fn create_minimum_wage(db: State<'_, Db>, year: i64, value_pesos: i64) -> AppResult<()> {
+pub fn create_minimum_wage(db: State<'_, Db>, year: i64, value_pesos: i64, transport_allowance_pesos: i64) -> AppResult<()> {
     validate_minimum_wage(year, value_pesos)?;
-    db.with(|c| minimum_wages::create(c, year, value_pesos))
+    validate_transport_allowance(Some(transport_allowance_pesos))?;
+    db.with(|c| minimum_wages::create(c, year, value_pesos, transport_allowance_pesos))
 }
 
 #[tauri::command]

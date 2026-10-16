@@ -75,10 +75,11 @@ export function CompaniesPage() {
               <thead>
                 <tr>
                   <th>Empresa</th>
-                  <th>NIT</th>
                   <th>Código CIIU</th>
                   <th>Ciudad</th>
-                  <th />
+                  <th>Documento representante</th>
+                  <th>Nombre representante</th>
+                  <th className="actions">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -87,15 +88,20 @@ export function CompaniesPage() {
                     <td>
                       <div className="company-cell">
                         <LogoThumb logoFile={c.logoFile} />
-                        <div className="table__primary">{c.razonSocial}</div>
+                        <div>
+                          <div className="table__primary">{c.razonSocial}</div>
+                          {/* El NIT sigue a la vista (y en el buscador) sin ocupar una columna. */}
+                          <div className="table__secondary nowrap selectable">
+                            NIT {c.nit}
+                            {c.dv ? `-${c.dv}` : ""}
+                          </div>
+                        </div>
                       </div>
-                    </td>
-                    <td className="nowrap selectable">
-                      {c.nit}
-                      {c.dv ? `-${c.dv}` : ""}
                     </td>
                     <td>{c.ciiuCode || <span className="muted">—</span>}</td>
                     <td>{c.ciudad || <span className="muted">—</span>}</td>
+                    <td className="nowrap selectable">{c.legalRepDocument || <span className="muted">—</span>}</td>
+                    <td>{c.legalRepName || <span className="muted">—</span>}</td>
                     <td className="actions" onClick={(e) => e.stopPropagation()}>
                       <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => setEditing(c)} />
                       <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setDeleting(c)} />
