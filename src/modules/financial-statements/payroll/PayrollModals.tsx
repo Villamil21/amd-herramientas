@@ -38,13 +38,13 @@ const footer = (saving: boolean, onClose: () => void, onSave: () => void, label:
   </>
 );
 
-/** Ficha obligatoria de un empleado que aparece por primera vez. La fecha de ingreso la escribe el usuario. */
-export function EmployeeFormModal({ open, companyId, docType, docNumber, name, period, onClose, onSaved }: { open: boolean; companyId: number; docType: string; docNumber: string; name: string; period: string; onClose: () => void; onSaved: () => void | Promise<unknown> }) {
+/** Ficha obligatoria de un empleado que aparece por primera vez. La fecha de ingreso puede venir sugerida, pero siempre es editable. */
+export function EmployeeFormModal({ open, companyId, docType, docNumber, name, period, suggestedHireDate = "", onClose, onSaved }: { open: boolean; companyId: number; docType: string; docNumber: string; name: string; period: string; suggestedHireDate?: string; onClose: () => void; onSaved: () => void | Promise<unknown> }) {
   const [values, setValues] = useState({ name: "", hireDate: "", area: "" });
   const { saving, error, run } = useSave(onSaved);
   useEffect(() => {
-    if (open) setValues({ name, hireDate: "", area: "" });
-  }, [open, name]);
+    if (open) setValues({ name, hireDate: suggestedHireDate, area: "" });
+  }, [open, name, suggestedHireDate]);
   const ready = values.name.trim() && /^\d{4}-\d{2}-\d{2}$/.test(values.hireDate) && values.area;
   const save = () => void run(() => fsService.createEmployee({ companyId, docType, docNumber, name: values.name, hireDate: values.hireDate, area: values.area, effectiveFrom: period }), "Ficha del empleado creada.");
   return (
@@ -57,7 +57,7 @@ export function EmployeeFormModal({ open, companyId, docType, docNumber, name, p
           <Field label="Nombre" required className="span-2">
             {(id) => <Input id={id} value={values.name} onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))} />}
           </Field>
-          <Field label="Fecha de ingreso" required hint="Escríbela tal como figura en el contrato.">
+          <Field label="Fecha de ingreso" required hint={suggestedHireDate ? "Sugerida por los días cotizados (meses de 30 días). Corrígela según el contrato." : "Escríbela tal como figura en el contrato."}>
             {(id) => <DateInput id={id} value={values.hireDate} onChange={(hireDate) => setValues((v) => ({ ...v, hireDate }))} />}
           </Field>
           <Field label="Área contable" required hint={`Vigente desde ${periodLabel(period)}.`}>

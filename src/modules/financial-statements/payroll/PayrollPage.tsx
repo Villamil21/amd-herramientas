@@ -20,6 +20,7 @@ import { formatInteger } from "../../../utils/format";
 import { findCompanyByNit, namesMatch } from "../shared/companyMatch";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal, type PucSettingItem } from "../shared/components/PucSettingsModal";
+import { SourceCoverage } from "../shared/components/SourceCoverage";
 import { SendToFs } from "../shared/components/SendToFs";
 import { formatExactCents, lastDayOfMonth, periodLabel, slashToIso } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
@@ -34,7 +35,9 @@ import {
   MORA_KEY,
   openEmployment,
   parseIdentification,
+  previousPeriod,
   requiredKeys,
+  suggestedHireDate,
   wagesFor,
   type EmployeeMonth,
 } from "./calc";
@@ -81,7 +84,7 @@ export default function PayrollPage() {
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [wages, setWages] = useState<MinimumWage[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [creating, setCreating] = useState<{ docType: string; docNumber: string; name: string } | null>(null);
+  const [creating, setCreating] = useState<{ docType: string; docNumber: string; name: string; suggestedHireDate?: string } | null>(null);
   const [rehire, setRehire] = useState<Employee | null>(null);
   const [liquidate, setLiquidate] = useState<{ employee: Employee; lastPeriod: string } | null>(null);
   const [justify, setJustify] = useState<Employee | null>(null);
@@ -93,6 +96,7 @@ export default function PayrollPage() {
   const [query, setQuery] = useState("");
   /** Empleado abierto en el detalle (tipo + número de documento). */
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [sentKey, setSentKey] = useState(0);
 
   useEffect(() => {
     minimumWageService.list().then(setWages, (e) => toast(errorMessage(e), "error"));
@@ -177,6 +181,13 @@ export default function PayrollPage() {
       (statusFilter === "all" || (statusFilter === "pending") === Boolean(rowIssue(m))) &&
       (!query || normalizeKey(`${m.employee?.name ?? m.source.name} ${m.docNumber}`).includes(normalizeKey(query))),
   );
+  /** Fecha de ingreso sugerida para quien aún no tiene ficha y no estaba en la nómina del periodo anterior. */
+  const suggestHire = (m: EmployeeMonth) => {
+    const previous = previousPeriod(period);
+    const known = employees.find((e) => e.docType === m.docType && e.docNumber === m.docNumber);
+    const inPrevious = known ? rows.some((r) => r.period === previous && r.employeeId === known.id) : false;
+    return known ? undefined : suggestedHireDate(period, m.calc.days, inPrevious);
+  };
   const detail = months.find((m) => `${m.docType}${m.docNumber}` === detailKey) ?? null;
 
   const blocking = [
@@ -294,8 +305,12 @@ export default function PayrollPage() {
             onExport={exportExcel}
             exporting={exportingSheets}
             duplicateTitle="Esta planilla ya fue enviada."
-            onSent={() => void reloadPayroll()}
+            onSent={() => {
+              void reloadPayroll();
+              setSentKey((k) => k + 1);
+            }}
           />
+          <SourceCoverage companyId={companyId} source="payroll" year={Number(period.slice(0, 4))} refreshKey={sentKey} />
           <MetricBar
             label="Resumen de la planilla"
             metrics={[
@@ -422,7 +437,7 @@ export default function PayrollPage() {
                         <td className="num">{formatExactCents(benefitsOf(m))}</td>
                         <td onClick={(e) => e.stopPropagation()}>
                           {!m.employee ? (
-                            <Button size="sm" variant="primary" onClick={() => setCreating({ docType: m.docType, docNumber: m.docNumber, name: m.source.name })}>
+                            <Button size="sm" variant="primary" onClick={() => setCreating({ docType: m.docType, docNumber: m.docNumber, name: m.source.name, suggestedHireDate: suggestHire(m) })}>
                               Crear ficha
                             </Button>
                           ) : !m.employmentId ? (
@@ -523,32 +538,43 @@ export default function PayrollPage() {
         }
       >
         {detail && (
-          <div className="table-wrap">
-            <table className="table table--dense">
-              <tbody>
-                {(
-                  [
-                    ["Días", formatInteger(detail.calc.days)],
-                    ["Sueldo base", formatExactCents(detail.calc.baseSalaryCents)],
-                    ["Sueldo del mes", formatExactCents(detail.calc.salaryCents)],
-                    ["Auxilio de transporte", detail.calc.transportApplies ? formatExactCents(detail.calc.transportCents) : "No aplica"],
-                    ["Pensión", formatExactCents(detail.social.pension)],
-                    ["EPS", formatExactCents(detail.social.health)],
-                    ["ARL", formatExactCents(detail.social.arl)],
-                    ["CCF", formatExactCents(detail.social.ccf)],
-                    ["Prima", formatExactCents(detail.calc.primaCents)],
-                    ["Cesantías", formatExactCents(detail.calc.cesantiasCents)],
-                    ["Intereses de cesantías", formatExactCents(detail.calc.interesesCents)],
-                    ["Vacaciones", formatExactCents(detail.calc.vacacionesCents)],
-                  ] as const
-                ).map(([label, value]) => (
-                  <tr key={label}>
-                    <td>{label}</td>
-                    <td className="num">{value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="stack">
+            {(
+              [
+                { title: "Resumen del período", rows: [["Días", formatInteger(detail.calc.days)], ["Sueldo base", formatExactCents(detail.calc.baseSalaryCents)], ["Sueldo del mes", formatExactCents(detail.calc.salaryCents)]] },
+                { title: "Devengados", rows: [["Auxilio de transporte", detail.calc.transportApplies ? formatExactCents(detail.calc.transportCents) : "No aplica"]] },
+                { title: "Seguridad social", total: socialOf(detail), rows: [["Pensión", formatExactCents(detail.social.pension)], ["EPS", formatExactCents(detail.social.health)], ["ARL", formatExactCents(detail.social.arl)], ["CCF", formatExactCents(detail.social.ccf)]] },
+                { title: "Prestaciones sociales", total: benefitsOf(detail), rows: [["Prima", formatExactCents(detail.calc.primaCents)], ["Cesantías", formatExactCents(detail.calc.cesantiasCents)], ["Intereses de cesantías", formatExactCents(detail.calc.interesesCents)], ["Vacaciones", formatExactCents(detail.calc.vacacionesCents)]] },
+              ] as { title: string; total?: number; rows: (readonly [string, string])[] }[]
+            ).map((section) => (
+              <section key={section.title} aria-label={section.title}>
+                <h4 className="eyebrow" style={{ margin: "0 0 var(--space-2)" }}>
+                  {section.title}
+                </h4>
+                <div className="table-wrap">
+                  <table className="table table--dense">
+                    <tbody>
+                      {section.rows.map(([label, value]) => (
+                        <tr key={label}>
+                          <td>{label}</td>
+                          <td className="num">{value}</td>
+                        </tr>
+                      ))}
+                      {section.total !== undefined && (
+                        <tr>
+                          <td>
+                            <strong>Subtotal</strong>
+                          </td>
+                          <td className="num">
+                            <strong>{formatExactCents(section.total)}</strong>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </Modal>

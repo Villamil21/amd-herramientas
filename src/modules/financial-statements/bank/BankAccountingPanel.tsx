@@ -464,7 +464,7 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
                       <td onClick={(e) => e.stopPropagation()}>
                         <Select aria-label={`Destino de ${c.description}`} value={destination} onChange={(e) => decide(c.key, c.description, e.target.value as Destination)} style={{ width: "auto" }}>
                           <option value="select">Seleccionar</option>
-                          <option value="send">Enviar a Estados Financieros</option>
+                          <option value="send">Enviar</option>
                           <option value="skip">No enviar</option>
                         </Select>
                       </td>

@@ -4434,7 +4434,8 @@ body.is-reordering * {
 }
 
 .fs-period-config {
-  align-items: flex-end;
+  /* Etiquetas alineadas arriba: las ayudas/errores debajo no desplazan el control de Presentación. */
+  align-items: flex-start;
 }
 
 .fs-period-config__company {

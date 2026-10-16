@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Employee, PayrollRow } from "../../../types/fs";
-import { areaFor, computeMonth, employeeMovements, findAbsences, parseIdentification, primaPaymentDate, requiredKeys, type EmployeeMonth } from "./calc";
+import { areaFor, computeMonth, employeeMovements, findAbsences, parseIdentification, previousPeriod, primaPaymentDate, requiredKeys, suggestedHireDate, type EmployeeMonth } from "./calc";
 
 const SMMLV = 1_750_905;
 const AUX = 249_095;
@@ -111,5 +111,30 @@ describe("empleados", () => {
     expect(findAbsences("2026-03", present, [justified, ana], rows)).toHaveLength(0);
     // Primera planilla: no hay con qué comparar.
     expect(findAbsences("2026-01", present, [carlos], rows)).toHaveLength(0);
+  });
+});
+
+describe("fecha de ingreso sugerida", () => {
+  it("día 31 − días cotizados del periodo actual", () => {
+    expect(suggestedHireDate("2026-05", 30, false)).toBe("2026-05-01");
+    expect(suggestedHireDate("2026-05", 27, false)).toBe("2026-05-04");
+    expect(suggestedHireDate("2026-05", 1, false)).toBe("2026-05-30");
+  });
+
+  it("no sugiere si ya estaba en el periodo anterior o los días no son válidos", () => {
+    expect(suggestedHireDate("2026-05", 30, true)).toBeUndefined();
+    expect(suggestedHireDate("2026-05", 0, false)).toBeUndefined();
+    expect(suggestedHireDate("2026-05", 31, false)).toBeUndefined();
+    expect(suggestedHireDate("2026-05", 12.5, false)).toBeUndefined();
+  });
+
+  it("no pasa del último día de febrero", () => {
+    expect(suggestedHireDate("2026-02", 1, false)).toBe("2026-02-28");
+    expect(suggestedHireDate("2024-02", 2, false)).toBe("2024-02-29");
+  });
+
+  it("periodo anterior cruza el año", () => {
+    expect(previousPeriod("2026-01")).toBe("2025-12");
+    expect(previousPeriod("2026-05")).toBe("2026-04");
   });
 });

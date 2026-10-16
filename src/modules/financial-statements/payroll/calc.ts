@@ -115,6 +115,25 @@ export function areaFor(employee: Employee, period: string): Area | undefined {
 /** Vinculación abierta (sin liquidación) del empleado. */
 export const openEmployment = (employee: Employee) => employee.employments.find((j) => !j.endDate);
 
+/** Periodo (AAAA-MM) inmediatamente anterior. */
+export function previousPeriod(period: string): string {
+  const year = Number(period.slice(0, 4));
+  const month = Number(period.slice(5, 7));
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, "0")}`;
+}
+
+/**
+ * Fecha de ingreso sugerida para un empleado que aparece por primera vez:
+ * con meses de 30 días, el día `31 − días cotizados` del periodo actual.
+ * Solo aplica si no estaba en la nómina del periodo anterior y los días están
+ * entre 1 y 30; en otro caso no se sugiere nada. Es un valor inicial editable.
+ */
+export function suggestedHireDate(period: string, days: number, inPreviousPeriod: boolean): string | undefined {
+  if (inPreviousPeriod || !Number.isInteger(days) || days < 1 || days > 30) return undefined;
+  const day = Math.min(31 - days, Number(lastDayOfMonth(period).slice(8, 10)));
+  return `${period}-${String(day).padStart(2, "0")}`;
+}
+
 /** Fecha en que se paga la prima del semestre del periodo: 30 de junio o 31 de diciembre. */
 export const primaPaymentDate = (period: string) => `${period.slice(0, 4)}-${Number(period.slice(5, 7)) <= 6 ? "06-30" : "12-31"}`;
 
