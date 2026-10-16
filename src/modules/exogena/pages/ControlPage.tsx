@@ -67,7 +67,7 @@ export default function ControlPage() {
       return rec!.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">Diferencia {formatMoneyCents(rec!.differenceCents)}</Badge>;
     if (code === "1008") {
       const r8 = c8.model!.reconciliation;
-      return r8.difference === 0 && blocking(c8.model!.problems).length === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{r8.difference !== 0 ? `Diferencia ${formatMoneyCents(r8.difference * 100)}` : `${blocking(c8.model!.problems).length} pendientes`}</Badge>;
+      return r8.difference === 0 && (c8.model!.deudores?.differenceCents ?? 0) === 0 && blocking(c8.model!.problems).length === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{r8.difference !== 0 ? `Diferencia ${formatMoneyCents(r8.difference * 100)}` : (c8.model!.deudores?.differenceCents ?? 0) !== 0 ? `Diferencia con Deudores ${formatMoneyCents(c8.model!.deudores!.differenceCents)}` : `${blocking(c8.model!.problems).length} pendientes`}</Badge>;
     }
     const stoppers = blocking(a.model!.problems);
     return stoppers.length === 0 ? <Badge tone="success">Sin pendientes</Badge> : <Badge tone="danger">{stoppers.length} pendientes</Badge>;
@@ -162,6 +162,40 @@ export default function ControlPage() {
                 <span>
                   Diferencia: <strong>{formatMoneyCents(c8.model.reconciliation.difference * 100)}</strong>
                 </span>
+              </div>
+            </Card>
+          )}
+          {c8.model?.deudores && (
+            <Card flush title="Conciliación de Deudores (ESF) con el 1008" description={`Deudores corrientes + no corrientes del Estado de Situación Financiera frente al total del formato al 31/12/${selection.year}.`}>
+              <div className="table-wrap">
+                <table className="table table--dense">
+                  <thead>
+                    <tr>
+                      <th>Fuente</th>
+                      <th className="num">ESF</th>
+                      <th className="num">1008</th>
+                      <th className="num">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {c8.model.deudores.rows.map((row) => (
+                      <tr key={row.key}>
+                        <td>{row.label}</td>
+                        <td className="num">{formatMoneyCents(row.eeffCents)}</td>
+                        <td className="num">{formatMoneyCents(row.exogenaCents)}</td>
+                        <td className="num">{row.differenceCents === 0 ? <span className="muted">—</span> : <span className="amount--negative">{formatMoneyCents(row.differenceCents)}</span>}</td>
+                      </tr>
+                    ))}
+                    <tr className="fs-row--subtotal">
+                      <td>
+                        <strong>Total Deudores</strong>
+                      </td>
+                      <td className="num">{formatMoneyCents(c8.model.deudores.eeffCents)}</td>
+                      <td className="num">{formatMoneyCents(c8.model.deudores.exogenaCents)}</td>
+                      <td className="num">{c8.model.deudores.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{formatMoneyCents(c8.model.deudores.differenceCents)}</Badge>}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </Card>
           )}

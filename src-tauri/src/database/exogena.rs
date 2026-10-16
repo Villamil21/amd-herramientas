@@ -671,6 +671,48 @@ mod tests {
     }
 
     #[test]
+    fn dian_1317_manual_balance_survives_sync_when_the_favor_balances_disappear() {
+        let mut conn = db();
+        let key = "dian-cxc:800197268";
+        let sync = |conn: &mut Connection, balance: i64, trace: Value, overwrite: bool| {
+            let mut i = input(vec![proposal(key, json!({"concept": "1317", "balance": balance, "taxTrace": trace}))]);
+            i.format_code = "1008".into();
+            if overwrite {
+                i.overwrite_manual = vec![key.into()];
+            }
+            apply_sync(conn, &i).unwrap()
+        };
+        let record = |conn: &Connection| list_records(conn, 1, 2025, "1008").unwrap().into_iter().next().unwrap();
+
+        // Sin cambios manuales: el registro automático se actualiza, con su desglose.
+        sync(&mut conn, 1_500_000, json!([{"kind": "vat_favor", "resultCents": 30_000_000}, {"kind": "income_favor", "resultCents": 120_000_000}]), false);
+        let out = sync(&mut conn, 1_600_000, json!([{"kind": "vat_favor", "resultCents": 40_000_000}, {"kind": "income_favor", "resultCents": 120_000_000}]), false);
+        assert_eq!((out.updated, out.conflicts.len()), (1, 0));
+        assert_eq!(record(&conn).data["balance"], 1_600_000);
+
+        // El usuario edita el saldo.
+        let id = record(&conn).id;
+        update_record(&mut conn, id, &json!({"balance": 2_000_000})).unwrap();
+        assert_eq!(record(&conn).manual_fields, vec!["balance".to_string()]);
+
+        // Desaparecen los saldos a favor: la propuesta es $0 con desglose vacío. Se conserva el valor manual,
+        // se avisa el conflicto y el desglose sí se actualiza.
+        let out = sync(&mut conn, 0, json!([]), false);
+        assert_eq!(out.conflicts, vec![SyncConflict { source_key: key.into(), fields: vec!["balance".into()] }]);
+        let r = record(&conn);
+        assert_eq!(r.data["balance"], 2_000_000);
+        assert_eq!(r.data["taxTrace"], json!([]));
+        assert_eq!(r.manual_fields, vec!["balance".to_string()]);
+
+        // Reemplazo explícitamente confirmado: vuelve al cálculo ($0) y se limpia la marca manual.
+        let out = sync(&mut conn, 0, json!([]), true);
+        assert_eq!(out.conflicts.len(), 0);
+        let r = record(&conn);
+        assert_eq!(r.data["balance"], 0);
+        assert!(r.manual_fields.is_empty() && r.manually_modified_at.is_none());
+    }
+
+    #[test]
     fn records_missing_from_the_source_are_removed_unless_manually_corrected() {
         let mut conn = db();
         apply_sync(&mut conn, &input(vec![proposal("a", json!({"v": 1})), proposal("b", json!({"v": 2})), proposal("c", json!({"v": 3}))])).unwrap();

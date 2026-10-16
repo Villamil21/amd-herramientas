@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { Alert, Badge, Button, ConfirmDialog, DateInput, Field, Input, Modal, useToast } from "../../../components/ui";
+import { Alert, Badge, Button, ConfirmDialog, DateInput, Field, Input, Modal, Tabs, useToast } from "../../../components/ui";
+import { navigate, paths } from "../../../app/router";
 import { errorMessage } from "../../../services/tauri";
 import { formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
 import { formatDateTimeForDisplay, parseTaxPaymentDate } from "../../../utils/dates";
 import { TAX_FORM_LABEL } from "./parser/taxReturnParser";
 import { parseNumericText } from "../../../utils/numbers";
-import { anomalies, effectiveValues, paidCents, pendingCents, periodName, STATUS_LABEL, taxStatus, type TaxStatus } from "./services/effects";
+import { anomalies, effectiveValues, paidCents, pendingCents, periodName, STATUS_LABEL, type TaxStatus } from "./services/effects";
 import { draftBlockers, draftInput, withExisting, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
 import { PERIODICITY_LABEL, TAX_LABEL, type TaxPayment, type TaxReturn, type VatPeriodicity } from "./types";
+import { returnView } from "./services/view";
 
 const STATUS_TONE: Record<TaxStatus, "success" | "warning" | "danger" | "gold" | undefined> = {
   pending: "warning",
@@ -25,13 +27,21 @@ export function StatusBadge({ status }: { status: TaxStatus }) {
   return <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
 }
 
-const item = (label: string, value: React.ReactNode) =>
-  value === null || value === undefined || value === "" ? null : (
-    <div className="summary-item">
-      <span className="summary-item__label">{label}</span>
-      <span className="summary-item__value selectable">{value}</span>
-    </div>
+/** Ficha compacta: solo los datos que existen, en columnas que se ajustan (sin celdas vacías). */
+function Facts({ rows, tone }: { rows: [string, React.ReactNode][]; tone?: "result" }) {
+  const shown = rows.filter(([, v]) => v !== null && v !== undefined && v !== "" && v !== false);
+  if (!shown.length) return null;
+  return (
+    <dl className={`tax-facts${tone ? ` tax-facts--${tone}` : ""}`}>
+      {shown.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd className="selectable">{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
+}
 
 // ---------------------------------------------------------------------------
 // Importar
@@ -99,7 +109,7 @@ export function ImportModal({
   return (
     <Modal
       open
-      size="lg"
+      size="md"
       title={`Importar ${TAX_FORM_LABEL[p.taxType]}`}
       description={draft.fileName}
       onClose={onClose}
@@ -116,50 +126,46 @@ export function ImportModal({
       }
     >
       <div className="stack">
-        <div className="summary-grid">
-          {item("Empresa", draft.company ? `${draft.company.razonSocial} (NIT ${draft.company.nit})` : <Badge tone="danger">Sin empresa con ese NIT</Badge>)}
-          {item("NIT y razón social del formulario", `${p.nit}${p.dv ? `-${p.dv}` : ""} · ${p.companyName || "—"}`)}
-          {item("Número de formulario", p.formNumber || "—")}
-          {item("Formulario anterior (corrección)", p.previousFormNumber)}
-          {!yearEditable && item("Año", draft.year)}
-          {p.taxType !== "income" && item("Periodo", draft.year && p.period ? periodName({ taxType: p.taxType, year: draft.year, period: p.period, periodicity: draft.periodicity ?? "monthly" }) : p.period ?? "—")}
-          {p.taxType === "vat" && item("Periodicidad", draft.periodicity ? PERIODICITY_LABEL[draft.periodicity] + (p.periodicity ? " (según el formulario)" : " (configuración de la empresa)") : "—")}
-          {item("Fecha de presentación", p.presentedOn ? `${formatIsoDate(p.presentedOn)} (no es la fecha de pago)` : null)}
-        </div>
+        <Facts
+          rows={[
+            ["Empresa", draft.company ? `${draft.company.razonSocial} · NIT ${draft.company.nit}` : <Badge tone="danger">Sin empresa con ese NIT</Badge>],
+            ["Formulario", `${p.formNumber || "sin número"}${p.previousFormNumber ? ` · corrige el ${p.previousFormNumber}` : ""}`],
+            ["Según el formulario", `${p.nit}${p.dv ? `-${p.dv}` : ""} · ${p.companyName || "—"}`],
+            [p.taxType === "income" ? "Año gravable" : "Periodo", !yearEditable || p.taxType !== "income" ? (p.taxType !== "income" && draft.year && p.period ? periodName({ taxType: p.taxType, year: draft.year, period: p.period, periodicity: draft.periodicity ?? "monthly" }) : String(draft.year ?? "—")) : null],
+            ["Periodicidad", p.taxType === "vat" && draft.periodicity ? PERIODICITY_LABEL[draft.periodicity] + (p.periodicity ? " (según el formulario)" : " (configuración de la empresa)") : null],
+            ["Presentación", p.presentedOn ? `${formatIsoDate(p.presentedOn)} · no es la fecha de pago` : null],
+          ]}
+        />
         {yearEditable && (
           <Field label="Año gravable" required hint={p.yearSource === "presentation" ? "El formulario no trae el año como texto: se propone el año anterior a la presentación. Confírmalo." : "No se pudo leer el año."}>
             {(id) => <Input id={id} inputMode="numeric" value={yearText} onChange={(e) => changeYear(e.target.value.replace(/\D/g, "").slice(0, 4))} style={{ maxWidth: 120 }} />}
           </Field>
         )}
-
-        <div className="summary-grid">
-          {p.taxType === "withholding" && item("Total retenciones más sanciones", v("withholdingTotal"))}
-          {p.taxType === "vat" && (
-            <>
-              {item("Total saldo a pagar", v("vatPayable"))}
-              {item("Total saldo a favor", v("vatFavor"))}
-            </>
-          )}
-          {p.taxType === "income" && (
-            <>
-              {item("Renta líquida ordinaria del ejercicio", v("incomeOrdinary"))}
-              {item("Pérdida líquida del ejercicio", v("incomeLoss"))}
-              {item("Total saldo a pagar", v("incomePayable"))}
-              {item("Total saldo a favor", v("incomeFavor"))}
-              {item(`Anticipo renta año siguiente (${draft.year ? draft.year + 1 : "—"})`, v("incomeAdvanceNext"))}
-              {item("Saldo a pagar por impuesto (informativo)", v("incomeTaxBalance"))}
-            </>
-          )}
-        </div>
+        <Facts
+          tone="result"
+          rows={
+            p.taxType === "withholding"
+              ? [["Total retenciones más sanciones", v("withholdingTotal")]]
+              : p.taxType === "vat"
+                ? [["Total saldo a pagar", v("vatPayable")], ["Total saldo a favor", v("vatFavor")]]
+                : [
+                    ["Renta líquida ordinaria", v("incomeOrdinary")],
+                    ["Pérdida líquida", v("incomeLoss")],
+                    ["Total saldo a pagar", v("incomePayable")],
+                    ["Total saldo a favor", v("incomeFavor")],
+                    [`Anticipo año siguiente (${draft.year ? draft.year + 1 : "—"})`, v("incomeAdvanceNext")],
+                  ]
+          }
+        />
 
         {p.warnings.length > 0 && <Alert tone="warning" title="Revisa la lectura" items={p.warnings} />}
         {draft.duplicate && <Alert tone="danger">El formulario {p.formNumber} ya fue importado ({periodName(draft.duplicate)}). No se duplica.</Alert>}
         {draft.periodicityMismatch && (
           <Alert tone="warning" title="La periodicidad no coincide">
-            El formulario es {PERIODICITY_LABEL[p.periodicity!].toLowerCase()} y la empresa está configurada como {PERIODICITY_LABEL[vatPeriodicity!].toLowerCase()}. Se guarda con la del formulario y queda «Requiere revisión» hasta corregir la configuración de la empresa.
+            El formulario es {PERIODICITY_LABEL[p.periodicity!].toLowerCase()} y la empresa está configurada como {PERIODICITY_LABEL[vatPeriodicity!].toLowerCase()} en Empresas. Se guarda con la del formulario y queda «Requiere revisión» hasta corregir la configuración en Empresas.
           </Alert>
         )}
-        {willSetPeriodicity && <Alert tone="info">La empresa no tenía periodicidad de IVA: se guardará {PERIODICITY_LABEL[draft.periodicity!].toLowerCase()} (la del formulario).</Alert>}
+        {willSetPeriodicity && <Alert tone="info">La empresa no tiene periodicidad de IVA en Empresas: se guardará allí como {PERIODICITY_LABEL[draft.periodicity!].toLowerCase()} (la del formulario).</Alert>}
         {draft.nameMismatch && (
           <label className="checkbox">
             <input type="checkbox" checked={confirmName} onChange={(e) => setConfirmName(e.target.checked)} />
@@ -222,12 +228,15 @@ export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChang
 
   return (
     <div className="stack stack--sm">
-      <div className="summary-grid">
-        {item("Total saldo a pagar", formatExactCents(payable))}
-        {item("Total pagado", formatExactCents(paid))}
-        {item("Saldo pendiente", <span className={pending > 0 ? "amount--negative" : undefined}>{formatExactCents(pending)}</span>)}
-        {item("Pagos registrados", String(r.payments.length))}
-      </div>
+      <Facts
+        tone="result"
+        rows={[
+          ["Total a pagar", formatExactCents(payable)],
+          ["Total pagado", formatExactCents(paid)],
+          ["Saldo pendiente", <span key="p" className={pending > 0 ? "amount--negative" : undefined}>{formatExactCents(pending)}</span>],
+          ["Pagos registrados", String(r.payments.length)],
+        ]}
+      />
       <div className="row row--between" style={{ flexWrap: "wrap" }}>
         <strong>Pagos</strong>
         {editable && (
@@ -362,10 +371,10 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
           {editing && <span className="muted"> (sin contar este pago: {formatExactCents(available)})</span>}
         </span>
         <div className="form-grid">
-          <Field label="Fecha de pago" required>
+          <Field label="Fecha de pago" required hint="Esta fecha es la que reduce el pasivo en los Estados Financieros (no la de presentación).">
             {(id) => <DateInput id={id} value={date} onChange={setDate} parse={parseTaxPaymentDate} placeholder="DD/MM/AAAA o AAAAMMDD" errorText="Fecha inválida. Usa DD/MM/AAAA o AAAAMMDD (ej. 20260429)." />}
           </Field>
-          <Field label="Valor pagado" required error={amountError ?? undefined}>
+          <Field label="Valor pagado" required error={amountError ?? undefined} hint={cents !== null && cents > 0 && !amountError ? formatExactCents(cents) : undefined}>
             {(id) => <Input id={id} className="input--right" inputMode="decimal" value={amount} invalid={amountError !== null} placeholder="5.000.000" onChange={(e) => setAmount(e.target.value)} />}
           </Field>
           <Field label="Referencia / comprobante">{(id) => <Input id={id} value={reference} maxLength={200} onChange={(e) => setReference(e.target.value)} />}</Field>
@@ -383,27 +392,49 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
 
 const EVENT_LABEL: Record<string, string> = { imported: "Importada", correction: "Corrección", superseded: "Reemplazada", payment: "Pago", resolution: "Revisión" };
 
+type DetailTab = "summary" | "payments" | "boxes" | "history" | "fiscal" | "settlement" | "info";
+
+const TABS: Record<TaxReturn["taxType"], { id: DetailTab; label: string }[]> = {
+  withholding: [{ id: "summary", label: "Resumen" }, { id: "payments", label: "Pagos" }, { id: "boxes", label: "Casillas del formulario" }, { id: "history", label: "Historial" }],
+  vat: [{ id: "summary", label: "Resumen" }, { id: "payments", label: "Pagos" }, { id: "boxes", label: "Casillas del formulario" }, { id: "history", label: "Historial" }],
+  income: [{ id: "fiscal", label: "Resumen fiscal" }, { id: "settlement", label: "Liquidación y pagos" }, { id: "info", label: "Datos informativos" }, { id: "history", label: "Historial" }],
+};
+
 export function ReturnDetailModal({
   item: r,
   vatPeriodicity,
+  versions,
+  cut,
   onClose,
   onChanged,
-  onPeriodicity,
+  onOpenVersion,
 }: {
   item: TaxReturn | null;
   vatPeriodicity: VatPeriodicity | null;
+  /** Todas las versiones del mismo periodo (la vigente y las reemplazadas). */
+  versions: TaxReturn[];
+  cut: string;
   onClose: () => void;
   onChanged: () => Promise<void>;
-  onPeriodicity: (p: VatPeriodicity) => void;
+  onOpenVersion: (r: TaxReturn) => void;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("summary");
+  const id = r?.id;
+  useEffect(() => {
+    if (r) setTab(TABS[r.taxType][0].id);
+    // Al cambiar de declaración se vuelve a la primera pestaña.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   if (!r) return <Modal open={false} title="" onClose={onClose} />;
   const d = r.detail ?? {};
   const why = r.supersededBy === null ? anomalies(r, vatPeriodicity) : [];
   const both = r.payableCents > 0 && r.favorCents > 0;
   const values = Object.values(d.values ?? {});
   const eff = effectiveValues(r);
+  const view = returnView(r, cut, vatPeriodicity, []);
+  const tabs = TABS[r.taxType];
 
   async function resolve(resolution: "" | "payable" | "favor") {
     setBusy(true);
@@ -418,8 +449,38 @@ export function ReturnDetailModal({
     }
   }
 
+  const boxes = values.length > 0 && (
+    <table className="table table--dense">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Casilla leída</th>
+          <th>Casilla esperada</th>
+          <th style={{ textAlign: "right" }}>Valor</th>
+        </tr>
+      </thead>
+      <tbody>
+        {values.map((x) => (
+          <tr key={x.label}>
+            <td>
+              {x.label}
+              {x.foundBy === "position" && <div className="table__secondary">Sin etiqueta en el texto: fila siguiente a la renta líquida ordinaria.</div>}
+            </td>
+            <td className="mono">{x.casilla ?? "—"}</td>
+            <td className="mono">{x.expectedCasilla ?? "—"}</td>
+            <td className="nowrap" style={{ textAlign: "right" }}>
+              {formatExactCents(x.cents)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  const payments = eff.payable > 0 ? <PaymentsPanel item={r} onChanged={onChanged} /> : <p className="muted">Esta declaración no tiene saldo a pagar: no admite pagos.</p>;
+
   return (
-    <Modal open size="xl" title={`${TAX_LABEL[r.taxType]} · ${periodName(r)}`} description={`Formulario ${r.formNumber || "sin número"} · ${r.fileName}`} onClose={onClose} locked={busy}>
+    <Modal open size="xl" title={`${TAX_LABEL[r.taxType]} · ${periodName(r)}`} description={`Formulario ${r.formNumber || "sin número"}${r.fileName ? ` · ${r.fileName}` : ""}`} onClose={onClose} locked={busy}>
       <div className="stack">
         {r.supersededBy !== null && <Alert tone="info">Reemplazada por una corrección: ya no cuenta en los Estados Financieros. Se conserva para la trazabilidad.</Alert>}
         {why.length > 0 && (
@@ -436,8 +497,8 @@ export function ReturnDetailModal({
                 </>
               )}
               {r.taxType === "vat" && r.periodicity !== "monthly" && r.periodicity !== "annual" && r.periodicity !== vatPeriodicity && (
-                <Button size="sm" onClick={() => onPeriodicity(r.periodicity as VatPeriodicity)}>
-                  Configurar la empresa como {PERIODICITY_LABEL[r.periodicity].toLowerCase()}
+                <Button size="sm" onClick={() => navigate(paths.companies)}>
+                  Configurar la periodicidad en Empresas
                 </Button>
               )}
             </div>
@@ -452,28 +513,46 @@ export function ReturnDetailModal({
           </Alert>
         )}
 
-        <div className="summary-grid">
-          {item("Empresa (según el formulario)", `${r.companyName || "—"} · NIT ${r.nit || "—"}`)}
-          {item("Periodo fiscal", `${formatIsoDate(r.periodStart)} a ${formatIsoDate(r.periodEnd)}`)}
-          {r.taxType === "vat" && item("Periodicidad", PERIODICITY_LABEL[r.periodicity])}
-          {item("Formulario anterior", r.previousFormNumber)}
-          {item("Fecha de presentación", d.presentedOn ? formatIsoDate(d.presentedOn) : null)}
-          {item("Estado", <StatusBadge status={taxStatus(r, vatPeriodicity)} />)}
-          {item("Año", `${r.year}${d.yearSource === "presentation" ? " (deducido de la presentación)" : d.yearSource === "manual" ? " (escrito por el usuario)" : ""}`)}
-        </div>
+        <Facts
+          rows={[
+            ["Estado", <StatusBadge key="s" status={view.status} />],
+            ["Periodo fiscal", `${formatIsoDate(r.periodStart)} a ${formatIsoDate(r.periodEnd)}`],
+            ["Presentación", d.presentedOn ? `${formatIsoDate(d.presentedOn)} · no es la fecha de pago` : null],
+            ["Periodicidad", r.taxType === "vat" ? PERIODICITY_LABEL[r.periodicity] : null],
+            ["Formulario anterior", r.previousFormNumber],
+            ["Año", `${r.year}${d.yearSource === "presentation" ? " (deducido de la presentación)" : d.yearSource === "manual" ? " (escrito por el usuario)" : ""}`],
+          ]}
+        />
 
-        {r.taxType === "income" ? (
-          <div className="fs-grid">
+        <Tabs tabs={tabs} value={tab} onChange={setTab} label="Secciones de la declaración" />
+        <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+          {tab === "summary" && (
             <div className="stack stack--sm">
-              <strong>Resultado fiscal</strong>
-              <ValueTable
+              <Facts
+                tone="result"
                 rows={[
-                  ["Renta líquida ordinaria del ejercicio", r.incomeOrdinaryCents ?? 0],
-                  ["Pérdida líquida del ejercicio", r.incomeLossCents ?? 0],
-                  ["Resultado histórico (renta − pérdida)", (r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0), true],
+                  [r.taxType === "withholding" ? "Total retenciones más sanciones" : "IVA por pagar", eff.payable > 0 || r.taxType === "withholding" ? formatExactCents(eff.payable) : null],
+                  ["Saldo a favor", r.taxType === "vat" && (eff.favor > 0 || eff.payable === 0) ? formatExactCents(eff.favor) : null],
+                  ["Pagado al corte", eff.payable > 0 ? formatExactCents(view.paidCents) : null],
+                  ["Saldo al corte", eff.payable > 0 ? (view.due ? formatExactCents(view.balanceCents) : "Posterior al corte") : null],
                 ]}
               />
-              <strong>Liquidación</strong>
+              {both && <span className="field__hint">Trae saldo a pagar y a favor a la vez. Cuenta: a pagar {formatExactCents(eff.payable)} · a favor {formatExactCents(eff.favor)}.</span>}
+            </div>
+          )}
+          {tab === "payments" && payments}
+          {tab === "boxes" && (boxes || <p className="muted">No se guardaron casillas para esta declaración.</p>)}
+          {tab === "fiscal" && (
+            <ValueTable
+              rows={[
+                ["Renta líquida ordinaria del ejercicio", r.incomeOrdinaryCents ?? 0],
+                ["Pérdida líquida del ejercicio", r.incomeLossCents ?? 0],
+                ["Resultado histórico (renta − pérdida)", (r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0), true],
+              ]}
+            />
+          )}
+          {tab === "settlement" && (
+            <div className="stack">
               <ValueTable
                 rows={[
                   ["Total saldo a pagar", r.payableCents],
@@ -481,75 +560,64 @@ export function ReturnDetailModal({
                   [`Anticipo renta para el año gravable siguiente (${r.advanceTargetYear})`, r.advanceNextCents ?? 0],
                 ]}
               />
+              {payments}
             </div>
+          )}
+          {tab === "info" && (
             <div className="stack stack--sm">
-              <strong>Patrimonio declarado</strong>
-              <span className="field__hint">Solo informativo: no se envía al Estado de Situación Financiera ni reemplaza sus valores.</span>
-              <table className="table">
-                <tbody>
-                  {(d.equity ?? []).map((e) => (
-                    <tr key={e.key} className={e.key === "grossEquity" || e.key === "netEquity" ? "fs-row--subtotal" : undefined}>
-                      <td>{e.label}</td>
-                      <td className="mono muted">{e.casilla ?? ""}</td>
-                      <td className="nowrap" style={{ textAlign: "right" }}>
-                        {e.cents === null ? "—" : formatExactCents(e.cents)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Badge>Informativo · no modifica los Estados Financieros</Badge>
+              <details>
+                <summary className="muted">Patrimonio declarado ({(d.equity ?? []).length} conceptos)</summary>
+                <span className="field__hint">No se envía al Estado de Situación Financiera ni reemplaza sus valores.</span>
+                <table className="table table--dense">
+                  <tbody>
+                    {(d.equity ?? []).map((e) => (
+                      <tr key={e.key} className={e.key === "grossEquity" || e.key === "netEquity" ? "fs-row--subtotal" : undefined}>
+                        <td>{e.label}</td>
+                        <td className="mono muted">{e.casilla ?? ""}</td>
+                        <td className="nowrap" style={{ textAlign: "right" }}>
+                          {e.cents === null ? "—" : formatExactCents(e.cents)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+              <details>
+                <summary className="muted">Casillas leídas del formulario ({values.length})</summary>
+                {boxes}
+              </details>
             </div>
-          </div>
-        ) : (
-          <div className="summary-grid">
-            {item("Saldo a pagar", formatExactCents(r.payableCents))}
-            {r.taxType === "vat" && item("Saldo a favor", formatExactCents(r.favorCents))}
-            {both && item("Valor que cuenta", `A pagar ${formatExactCents(eff.payable)} · A favor ${formatExactCents(eff.favor)}`)}
-          </div>
-        )}
-
-        {eff.payable > 0 && <PaymentsPanel item={r} onChanged={onChanged} />}
-
-        {values.length > 0 && (
-          <details>
-            <summary className="muted">Conceptos leídos del formulario (casillas)</summary>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Concepto</th>
-                  <th>Casilla leída</th>
-                  <th>Casilla esperada</th>
-                  <th style={{ textAlign: "right" }}>Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {values.map((x) => (
-                  <tr key={x.label}>
-                    <td>
-                      {x.label}
-                      {x.foundBy === "position" && <div className="table__secondary">Sin etiqueta en el texto: fila siguiente a la renta líquida ordinaria.</div>}
-                    </td>
-                    <td className="mono">{x.casilla ?? "—"}</td>
-                    <td className="mono">{x.expectedCasilla ?? "—"}</td>
-                    <td className="nowrap" style={{ textAlign: "right" }}>
-                      {formatExactCents(x.cents)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </details>
-        )}
-        {(d.warnings ?? []).length > 0 && <Alert tone="warning" title="Avisos de la lectura" items={d.warnings} />}
-
-        <div className="stack stack--sm">
-          <strong>Historial</strong>
-          {r.events.map((e) => (
-            <span key={e.id} className="muted">
-              {formatDateTimeForDisplay(e.createdAt)} · {EVENT_LABEL[e.action] ?? e.action}
-              {e.note ? ` · ${e.note}` : ""}
-            </span>
-          ))}
+          )}
+          {tab === "history" && (
+            <div className="stack stack--sm">
+              {versions.length > 1 && (
+                <div className="stack stack--sm">
+                  <strong>Versiones del {r.taxType === "income" ? "año gravable" : "periodo"}</strong>
+                  <ul className="tax-versions">
+                    {versions.map((v) => (
+                      <li key={v.id}>
+                        <button type="button" className="link-button" disabled={v.id === r.id} onClick={() => onOpenVersion(v)}>
+                          Formulario {v.formNumber || "sin número"}
+                        </button>
+                        {v.supersededBy === null ? <Badge tone="success">Vigente</Badge> : <Badge>Reemplazada</Badge>}
+                        {v.id === r.id && <span className="muted">(esta)</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {r.fileName && <span className="muted">PDF original: {r.fileName}</span>}
+              {(d.warnings ?? []).length > 0 && <Alert tone="warning" title="Avisos de la lectura" items={d.warnings} />}
+              <strong>Eventos</strong>
+              {r.events.map((e) => (
+                <span key={e.id} className="muted">
+                  {formatDateTimeForDisplay(e.createdAt)} · {EVENT_LABEL[e.action] ?? e.action}
+                  {e.note ? ` · ${e.note}` : ""}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </Modal>

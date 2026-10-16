@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.34.0",
+    "date": "2026-10-16",
+    "notes": [
+      "Obligaciones tributarias (Retención en la fuente, IVA y Renta) rediseñadas: barra común con empresa, fecha de corte y acciones, indicadores por impuesto, cobertura desde el año de constitución de la empresa, tabla de declaraciones con correcciones agrupadas, detalle por pestañas y pestaña «Conciliación y reportes».",
+      "El saldo al corte es siempre el total declarado menos los pagos con fecha igual o anterior al corte; el anticipo de renta es un activo temporal del año siguiente que se consume el 31/12 y nunca se propone al 1008. La periodicidad de IVA solo se edita en Empresas.",
+      "Exógena: el 1009 conserva la trazabilidad (impuesto, periodo, formulario, valor declarado, pagos y corte); el 1008 propone un único registro DIAN (concepto 1317) con los saldos a favor de IVA y Renta y su desglose por origen, y concilia con todos los Deudores del ESF. Un saldo editado a mano nunca se sobrescribe: se marca «Revisar saldo» y bloquea el formato hasta resolver la diferencia."
+    ]
+  },
+  {
     "version": "1.33.0",
     "date": "2026-10-16",
     "notes": [

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarX2, Eye, FileUp, Settings2, Undo2 } from "lucide-react";
-import { Alert, Badge, Button, Card, ConfirmDialog, DateInput, EmptyState, Field, MetricBar, Modal, PageHeader, Select, useToast } from "../../../components/ui";
+import { CalendarX2, FileUp, Settings2 } from "lucide-react";
+import { navigate, paths } from "../../../app/router";
+import { Alert, Button, Card, ConfirmDialog, DateInput, EmptyState, Field, MetricBar, Modal, PageHeader, Select, Tabs, useToast } from "../../../components/ui";
 import { SearchBox, SegmentedFilter } from "../../bank-analysis/shared/components/tableControls";
 import { normalizeKey } from "../../../utils/text";
 import { formatDateForDisplay } from "../../../utils/dates";
@@ -10,24 +11,26 @@ import { errorMessage } from "../../../services/tauri";
 import { formatInteger } from "../../../utils/format";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
-import { formatAccountingCents, formatExactCents, formatIsoDate, isIsoDate } from "../shared/money";
+import { formatExactCents, isIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
-import { ImportModal, ReturnDetailModal, StatusBadge } from "./components";
-import { periodicityOf, taxPeriodCoverage, type TaxPeriodCell } from "./services/coverage";
+import { ImportModal, ReturnDetailModal } from "./components";
+import { CoverageGrid, EmptyReturns, ReconciliationTab, ReturnsTable } from "./sections";
+import { coverageYears, periodicityOf, taxPeriodCoverage, type TaxPeriodCell } from "./services/coverage";
 import { parseTaxReturn, TAX_FORM_LABEL, TaxReturnError } from "./parser/taxReturnParser";
-import { anomalies, effectiveValues, paidCents, pendingCents, periodName, taxEffects, taxStatus } from "./services/effects";
+import { fiscalResult, periodName, taxEffects, type TaxStatus } from "./services/effects";
 import { buildDraft, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
+import { periodsAffectedByPuc, returnView, versionsOf } from "./services/view";
 import { PERIODICITY_LABEL, PUC_KEYS_BY_TAX, TAX_LABEL, TAX_PUC_ITEMS, type TaxEmptyPeriod, type TaxReturn, type TaxType, type VatPeriodicity } from "./types";
-import type { TaxStatus } from "./services/effects";
 
 const DESCRIPTION: Record<TaxType, string> = {
-  withholding: "Declaraciones mensuales (Formulario 350). El valor es «Total retenciones más sanciones»: es cuenta por pagar desde el fin del mes declarado por el saldo que siga pendiente (admite pagos parciales).",
-  vat: "Declaraciones bimestrales o cuatrimestrales (Formulario 300). El saldo a pagar es cuenta por pagar por lo que siga pendiente (admite pagos parciales); el saldo a favor es una foto del último periodo terminado (nunca se suman periodos).",
-  income: "Declaraciones anuales (Formulario 110). Saldo a pagar y a favor, anticipo para el año siguiente y resultado fiscal para «Resultados de ejercicios anteriores». El patrimonio declarado es solo informativo.",
+  withholding: "Formulario 350: el total declarado (retenciones más sanciones) es cuenta por pagar hasta su fecha de pago.",
+  vat: "Formulario 300: IVA por pagar hasta su fecha de pago y saldo a favor del último periodo terminado y declarado.",
+  income: "Formulario 110: renta por pagar, saldo a favor, anticipo del año siguiente y resultado fiscal.",
 };
 
 type ReturnFilter = "all" | "pending" | "partial" | "paid" | "favor" | "superseded";
+type PageTab = "returns" | "reconciliation";
 
 /** Estados de cada filtro (Pendientes incluye «Requiere revisión»). */
 const FILTER_STATUS: Record<Exclude<ReturnFilter, "all">, TaxStatus[]> = {
@@ -69,7 +72,9 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
   const [empties, setEmpties] = useState<TaxEmptyPeriod[]>([]);
   const [filter, setFilter] = useState<ReturnFilter>("all");
   const [query, setQuery] = useState("");
-  const [coverageYear, setCoverageYear] = useState(() => new Date().getFullYear());
+  const [tab, setTab] = useState<PageTab>("returns");
+  const currentYear = new Date().getFullYear();
+  const [coverageYear, setCoverageYear] = useState(currentYear);
   const [emptyCell, setEmptyCell] = useState<TaxPeriodCell | null>(null);
   const [emptyConfirmed, setEmptyConfirmed] = useState(false);
   const [voiding, setVoiding] = useState<TaxEmptyPeriod | null>(null);
@@ -99,38 +104,73 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
     void load(companyId);
   }, [companyId, load]);
 
+  const company = data.companies?.find((c) => c.id === companyId);
+  const constitution = company?.constitutionDate || null;
+  const years = useMemo(() => coverageYears(constitution, currentYear), [constitution, currentYear]);
   const own = useMemo(() => returns.filter((r) => r.taxType === taxType).sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || b.id - a.id), [returns, taxType]);
   const pucKeys = PUC_KEYS_BY_TAX[taxType];
   const missingPuc = pucKeys.filter((k) => !data.settingsMap.get(k));
   const effects = useMemo(() => (isIsoDate(cut) ? taxEffects({ returns, puc: data.settingsMap, vatPeriodicity }, cut) : null), [returns, data.settingsMap, vatPeriodicity, cut]);
-  const ownEffects = effects?.effects.filter((e) => pucKeys.includes(e.pucKey)) ?? [];
+  const ownEffects = useMemo(() => effects?.effects.filter((e) => (taxType === "withholding" ? e.kind === "withholding_payable" : taxType === "vat" ? e.kind.startsWith("vat") : e.kind.startsWith("income"))) ?? [], [effects, taxType]);
   const ownIssues = effects?.issues.filter((i) => i.taxType === taxType) ?? [];
-  const company = data.companies?.find((c) => c.id === companyId);
   const fresh = (id: number) => returns.find((r) => r.id === id) ?? null;
-  const statusOf = (r: TaxReturn) => taxStatus(r, vatPeriodicity);
-  const live = own.filter((r) => r.supersededBy === null);
+  const allEffects = effects?.effects ?? [];
+  const views = useMemo(() => own.map((r) => returnView(r, cut, vatPeriodicity, allEffects)), [own, cut, vatPeriodicity, allEffects]);
+  const live = views.filter((v) => v.r.supersededBy === null);
+  const sum = (kind: string) => ownEffects.filter((e) => e.kind === kind).reduce((n, e) => n + e.cents, 0);
+  const latestIncome = taxType === "income" ? live.map((v) => v.r).sort((a, b) => b.year - a.year)[0] : undefined;
   const counts = {
-    pending: live.filter((r) => ["pending", "review"].includes(statusOf(r))).length,
-    partial: live.filter((r) => statusOf(r) === "partial").length,
-    paid: live.filter((r) => statusOf(r) === "paid").length,
-    favor: live.filter((r) => statusOf(r) === "favor").length,
-    superseded: own.length - live.length,
+    pending: live.filter((v) => v.status === "pending" || v.status === "review").length,
+    partial: live.filter((v) => v.status === "partial").length,
+    favor: live.filter((v) => v.status === "favor").length,
+    superseded: views.length - live.length,
   };
-  const pendingTotal = live.reduce((n, r) => n + (effectiveValues(r).payable > 0 ? pendingCents(r) : 0), 0);
-  const paidTotal = live.reduce((n, r) => n + paidCents(r), 0);
-  const visible = own.filter((r) => (filter === "all" || FILTER_STATUS[filter].includes(statusOf(r))) && (!query || normalizeKey(`${periodName(r)} ${r.formNumber} ${r.year}`).includes(normalizeKey(query))));
+  const paidTotal = live.reduce((n, v) => n + v.paidCents, 0);
+  const metrics =
+    taxType === "withholding"
+      ? [
+          { key: "returns", label: live.length === 1 ? "declaración vigente" : "declaraciones vigentes", value: formatInteger(live.length), onClick: () => setFilter("all"), active: filter === "all" },
+          { key: "pending", label: "saldo pendiente", value: formatExactCents(sum("withholding_payable")), tone: sum("withholding_payable") ? ("negative" as const) : undefined, onClick: () => setFilter("pending"), active: filter === "pending" },
+          { key: "paid", label: "pagado", value: formatExactCents(paidTotal), tone: "positive" as const, onClick: () => setFilter("paid"), active: filter === "paid" },
+          { key: "partial", label: "con pago parcial", value: formatInteger(counts.partial), onClick: () => setFilter("partial"), active: filter === "partial" },
+        ]
+      : taxType === "vat"
+        ? [
+            { key: "returns", label: live.length === 1 ? "declaración vigente" : "declaraciones vigentes", value: formatInteger(live.length), onClick: () => setFilter("all"), active: filter === "all" },
+            { key: "pending", label: "IVA por pagar pendiente", value: formatExactCents(sum("vat_payable")), tone: sum("vat_payable") ? ("negative" as const) : undefined, onClick: () => setFilter("pending"), active: filter === "pending" },
+            { key: "favor", label: "saldo a favor vigente", value: formatExactCents(sum("vat_favor")), onClick: () => setFilter("favor"), active: filter === "favor" },
+            { key: "paid", label: "pagado", value: formatExactCents(paidTotal), tone: "positive" as const, onClick: () => setFilter("paid"), active: filter === "paid" },
+          ]
+        : [
+            { key: "pending", label: "renta por pagar pendiente", value: formatExactCents(sum("income_payable")), tone: sum("income_payable") ? ("negative" as const) : undefined, onClick: () => setFilter("pending"), active: filter === "pending" },
+            { key: "favor", label: "saldo a favor de renta", value: formatExactCents(sum("income_favor")), onClick: () => setFilter("favor"), active: filter === "favor" },
+            { key: "advance", label: latestIncome?.advanceTargetYear ? `anticipo para ${latestIncome.advanceTargetYear}` : "anticipo año siguiente", value: formatExactCents(latestIncome?.advanceNextCents ?? 0), title: "El anticipo es un activo temporal del año siguiente; se consume el 31/12 de ese año." },
+            { key: "result", label: "resultado fiscal acumulado", value: formatExactCents(live.reduce((n, v) => n + fiscalResult(v.r), 0)), title: "Renta líquida menos pérdida líquida de las declaraciones vigentes." },
+          ];
   const FILTERS: { id: ReturnFilter; label: string }[] = [
     { id: "all", label: "Todas" },
     { id: "pending", label: `Pendientes (${counts.pending})` },
     { id: "partial", label: "Pago parcial" },
     { id: "paid", label: "Pagadas" },
     ...(taxType === "withholding" ? [] : [{ id: "favor" as const, label: "Saldo a favor" }]),
-    { id: "superseded", label: "Reemplazadas" },
+    ...(counts.superseded ? [{ id: "superseded" as const, label: `Reemplazadas (${counts.superseded})` }] : []),
   ];
+  const q = normalizeKey(query);
+  const visible = views
+    .filter((v) => (filter === "superseded" ? v.status === "superseded" : v.r.supersededBy === null && (filter === "all" || FILTER_STATUS[filter].includes(v.status))))
+    .filter((v) => !q || normalizeKey(`${periodName(v.r)} ${v.r.formNumber} ${v.r.year}`).includes(q))
+    .map((v) => v.r);
+
   const periodicity = periodicityOf(taxType, vatPeriodicity);
-  const coverageYears = taxType === "income" ? [coverageYear - 3, coverageYear - 2, coverageYear - 1, coverageYear] : [coverageYear];
-  const cells = taxPeriodCoverage(taxType, periodicity, coverageYears, returns, empties);
-  const latest = live[0];
+  const today = todayIso();
+  const allCells = useMemo(
+    () => (constitution ? taxPeriodCoverage(taxType, periodicity, years, returns, empties, { constitutionDate: constitution, today }) : []),
+    [constitution, taxType, periodicity, years, returns, empties, today],
+  );
+  const cells = taxType === "income" ? allCells : allCells.filter((c) => c.year === coverageYear);
+  const missingCount = allCells.filter((c) => c.state === "missing").length;
+  const range = years.length ? `${years[0]}–${years[years.length - 1]}` : null;
+  const coverageYearOptions = years.length ? years : [currentYear];
 
   async function registerEmpty() {
     if (!emptyCell || companyId === null || !periodicity) return;
@@ -186,90 +226,87 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
     }
   }
 
-  async function changePeriodicity(value: VatPeriodicity | null) {
-    if (companyId === null) return;
-    try {
-      await taxService.saveSettings({ companyId, vatPeriodicity: value });
-      toast("Periodicidad de IVA guardada.");
-      await load(companyId);
-    } catch (e) {
-      toast(errorMessage(e), "error");
-    }
-  }
+  const noRange = companyId !== null && !!company && !constitution;
 
   return (
     <>
-      <PageHeader
-        eyebrow="Estados Financieros · Obligaciones tributarias"
-        title={TAX_LABEL[taxType]}
-        description={DESCRIPTION[taxType]}
-        actions={
-          <>
+      <PageHeader eyebrow="Estados Financieros · Obligaciones tributarias" title={TAX_LABEL[taxType]} description={DESCRIPTION[taxType]} />
+      <Card className="tax-bar">
+        <div className="tax-bar__row">
+          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+          <Field label="Fecha de corte" hint="Pagos hasta esta fecha reducen el saldo.">
+            {(id) => <DateInput id={id} value={cut} onChange={setCut} />}
+          </Field>
+          {companyId !== null && (
+            <dl className="context-bar__items tax-bar__context">
+              <div className="context-bar__item">
+                <dt>Cobertura</dt>
+                <dd>{range ?? "Pendiente"}</dd>
+              </div>
+              {taxType === "vat" && (
+                <div className="context-bar__item">
+                  <dt>Periodicidad (Empresas)</dt>
+                  <dd>
+                    {vatPeriodicity ? PERIODICITY_LABEL[vatPeriodicity] : "Sin configurar"}{" "}
+                    <button type="button" className="link-button" onClick={() => navigate(paths.companies)}>
+                      Configurar en Empresas
+                    </button>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
+          <div className="tax-bar__actions">
             <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
-              Cuentas PUC
+              Configuración PUC
             </Button>
             <Button
               icon={<CalendarX2 size={15} />}
-              disabled={companyId === null || !cells.some((c) => c.state === "missing")}
-              title={companyId === null ? "Selecciona la empresa" : undefined}
+              disabled={companyId === null || !allCells.some((c) => c.state === "missing")}
+              title={companyId === null ? "Selecciona la empresa" : !allCells.some((c) => c.state === "missing") ? "No hay periodos faltantes" : undefined}
               onClick={() => {
-                const first = cells.find((c) => c.state === "missing");
+                const first = cells.find((c) => c.state === "missing") ?? allCells.find((c) => c.state === "missing");
                 if (first) {
                   setEmptyConfirmed(false);
                   setEmptyCell(first);
                 }
               }}
             >
-              Registrar periodo sin obligación
+              Registrar sin obligación
             </Button>
             <Button variant="primary" icon={<FileUp size={15} />} loading={picking} onClick={() => void importReturn()}>
               Importar declaración
             </Button>
-          </>
-        }
-      />
-      <Card className="fs-opening-head">
-        <div className="fs-opening-head__row">
-          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
-          {taxType === "vat" && companyId !== null && (
-            <Field label="Periodicidad de IVA de la empresa" hint="Define cómo se interpreta el periodo de cada declaración.">
-              {(id) => (
-                <Select id={id} value={vatPeriodicity ?? ""} onChange={(e) => void changePeriodicity((e.target.value || null) as VatPeriodicity | null)}>
-                  <option value="">Sin configurar</option>
-                  <option value="bimonthly">Bimestral (6 periodos)</option>
-                  <option value="four_monthly">Cuatrimestral (3 periodos)</option>
-                </Select>
-              )}
-            </Field>
-          )}
-          {companyId !== null && (
-            <dl className="context-bar__items fs-opening-head__stats">
-              <div className="context-bar__item">
-                <dt>Último periodo</dt>
-                <dd>{latest ? periodName(latest) : "—"}</dd>
-              </div>
-              {taxType === "vat" && (
-                <div className="context-bar__item">
-                  <dt>Periodicidad</dt>
-                  <dd>{vatPeriodicity ? PERIODICITY_LABEL[vatPeriodicity] : "Sin configurar"}</dd>
-                </div>
-              )}
-            </dl>
-          )}
+          </div>
         </div>
       </Card>
       {error && <Alert tone="danger">{error}</Alert>}
       {missingPuc.length > 0 && (
-        <Alert tone="warning" title="Faltan cuentas PUC de este impuesto">
+        <Alert tone="warning" title="Falta configurar cuentas PUC">
           <div className="row row--between" style={{ flexWrap: "wrap" }}>
-            <span>
-              {TAX_PUC_ITEMS.filter((i) => missingPuc.includes(i.key))
-                .map((i) => i.label)
-                .join(" · ")}
-              . Sin ellas el Generador no puede incluir estos valores.
-            </span>
+            <ul className="tax-puc-missing">
+              {TAX_PUC_ITEMS.filter((i) => missingPuc.includes(i.key)).map((i) => {
+                const n = periodsAffectedByPuc(returns.filter((r) => r.taxType === taxType), i.key);
+                return (
+                  <li key={i.key}>
+                    {i.label}
+                    {n > 0 && <span className="muted"> · {n} {n === 1 ? "periodo afectado" : "periodos afectados"}</span>}
+                  </li>
+                );
+              })}
+            </ul>
             <Button size="sm" onClick={() => setSettingsOpen(true)}>
               Configurar
+            </Button>
+          </div>
+        </Alert>
+      )}
+      {noRange && (
+        <Alert tone="warning" title="Falta la fecha de constitución">
+          <div className="row row--between" style={{ flexWrap: "wrap" }}>
+            <span>La cobertura va desde el año de constitución. Complétala en Empresas (Cámara de Comercio) para ver qué periodos faltan; no se infiere.</span>
+            <Button size="sm" onClick={() => navigate(paths.companies)}>
+              Ir a Empresas
             </Button>
           </div>
         </Alert>
@@ -281,164 +318,76 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
         </Card>
       ) : (
         <>
-          <MetricBar
-            label="Resumen de declaraciones"
-            metrics={[
-              { key: "returns", label: live.length === 1 ? "declaración vigente" : "declaraciones vigentes", value: formatInteger(live.length), onClick: () => setFilter("all"), active: filter === "all" },
-              { key: "pending", label: counts.pending === 1 ? "pendiente" : "pendientes", value: formatInteger(counts.pending), tone: counts.pending ? "attention" : undefined, onClick: () => setFilter("pending"), active: filter === "pending" },
-              { key: "pendingTotal", label: "saldo pendiente", value: formatExactCents(pendingTotal), tone: pendingTotal ? "negative" : undefined },
-              { key: "partial", label: "con pago parcial", value: formatInteger(counts.partial), onClick: () => setFilter("partial"), active: filter === "partial" },
-              { key: "paid", label: "pagado", value: formatExactCents(paidTotal), tone: "positive", onClick: () => setFilter("paid"), active: filter === "paid" },
-              ...(taxType === "withholding" ? [] : [{ key: "favor", label: "con saldo a favor", value: formatInteger(counts.favor), onClick: () => setFilter("favor"), active: filter === "favor" }]),
-              ...(counts.superseded ? [{ key: "superseded", label: counts.superseded === 1 ? "reemplazada" : "reemplazadas", value: formatInteger(counts.superseded), onClick: () => setFilter("superseded"), active: filter === "superseded" }] : []),
+          <Tabs
+            label="Secciones"
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { id: "returns", label: "Declaraciones" },
+              { id: "reconciliation", label: "Conciliación y reportes", badge: ownIssues.length ? ownIssues.length : undefined },
             ]}
           />
-
-          <Card
-            flush
-            title="Cobertura por periodo"
-            description={periodicity ? "Declarado, sin obligación o faltante. Haz clic en un periodo faltante para registrarlo sin obligación." : "Configura la periodicidad de IVA de la empresa para ver la cobertura."}
-            actions={
-              <Select aria-label="Año de la cobertura" value={coverageYear} onChange={(e) => setCoverageYear(Number(e.target.value))} style={{ width: "auto" }}>
-                {Array.from({ length: 8 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-                  <option key={y} value={y}>
-                    {taxType === "income" ? `${y - 3}–${y}` : y}
-                  </option>
-                ))}
-              </Select>
-            }
-          >
-            {cells.length > 0 && (
-              <ol className="tax-coverage">
-                {cells.map((c) => (
-                  <li key={`${c.year}-${c.period}`} className={`tax-coverage__cell is-${c.state}`}>
-                    <span className="tax-coverage__label">{c.label}</span>
-                    {c.state === "declared" ? (
-                      <button type="button" className="link-button" onClick={() => setDetail(c.returns[0])}>
-                        ✓ <StatusBadge status={taxStatus(c.returns[0], vatPeriodicity)} />
-                      </button>
-                    ) : c.state === "empty" ? (
-                      <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-                        <strong>✓ Sin obligación</strong>
-                        <Button size="sm" variant="ghost" iconOnly icon={<Undo2 size={12} />} aria-label={`Anular «sin obligación» de ${c.label}`} title="Anular registro" onClick={() => setVoiding(c.empty)} />
-                      </span>
-                    ) : (
-                      <button type="button" className="link-button" onClick={() => (setEmptyConfirmed(false), setEmptyCell(c))} title="Registrar este periodo sin obligación">
-                        — Falta
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Card>
-
-          <Card flush title="Declaraciones" description="Historial completo: las pagadas y las reemplazadas por una corrección siguen visibles. «Ver» reúne el detalle y los pagos.">
-            <div className="toolbar row--between">
-              <SegmentedFilter label="Filtrar declaraciones" options={FILTERS} value={filter} onChange={setFilter} />
-              <SearchBox placeholder="Periodo o formulario" value={query} onChange={setQuery} />
+          {tab === "reconciliation" ? (
+            <div role="tabpanel" id="panel-reconciliation" aria-labelledby="tab-reconciliation">
+              <ReconciliationTab taxType={taxType} companyId={companyId} cut={cut} effects={allEffects} issues={ownIssues} />
             </div>
-            {visible.length === 0 ? (
-              <p className="muted" style={{ padding: 16 }}>
-                {own.length === 0 ? `No hay declaraciones de ${TAX_LABEL[taxType]} para ${company?.razonSocial ?? "esta empresa"}.` : "Ninguna declaración coincide con el filtro."}
-              </p>
-            ) : (
-              <div className="table-wrap table-wrap--scroll">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Periodo</th>
-                      <th>Formulario</th>
-                      <th className="num">Saldo a pagar</th>
-                      {taxType !== "withholding" && <th className="num">Saldo a favor</th>}
-                      {taxType === "income" && <th className="num">Resultado fiscal</th>}
-                      <th className="num">Pagado</th>
-                      <th className="num">Saldo pendiente</th>
-                      <th>Estado</th>
-                      <th className="actions" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((r) => {
-                      const status = statusOf(r);
-                      const payable = effectiveValues(r).payable;
-                      return (
-                        <tr key={r.id} className={["is-clickable", status === "superseded" ? "muted" : status === "review" ? "row-attention--blocking" : ""].filter(Boolean).join(" ")} onClick={() => setDetail(r)}>
-                          <td className="nowrap">
-                            {periodName(r)}
-                            {r.taxType === "vat" && <div className="table__secondary">{PERIODICITY_LABEL[r.periodicity]}</div>}
-                          </td>
-                          <td className="mono">
-                            {r.formNumber || "—"}
-                            {r.isCorrection && <div className="table__secondary">Corrección{r.previousFormNumber ? ` de ${r.previousFormNumber}` : ""}</div>}
-                          </td>
-                          <td className="num">{formatExactCents(r.payableCents)}</td>
-                          {taxType !== "withholding" && <td className="num">{formatExactCents(r.favorCents)}</td>}
-                          {taxType === "income" && (
-                            <td className={(r.incomeLossCents ?? 0) > 0 ? "num amount--negative" : "num"}>{formatAccountingCents((r.incomeOrdinaryCents ?? 0) - (r.incomeLossCents ?? 0))}</td>
-                          )}
-                          <td className="num">
-                            {payable > 0 ? formatExactCents(paidCents(r)) : "—"}
-                            {r.payments.length > 0 && <div className="table__secondary">{r.payments.length === 1 ? `1 pago · ${formatIsoDate(r.payments[0].paymentDate)}` : `${r.payments.length} pagos · último ${formatIsoDate(r.payments[r.payments.length - 1].paymentDate)}`}</div>}
-                          </td>
-                          <td className="num">{payable > 0 ? formatExactCents(pendingCents(r)) : "—"}</td>
-                          <td>
-                            <StatusBadge status={status} />
-                            {status === "review" && <div className="table__secondary">{anomalies(r, vatPeriodicity)[0]}</div>}
-                          </td>
-                          <td className="actions" onClick={(e) => e.stopPropagation()}>
-                            <Button size="sm" icon={<Eye size={14} />} onClick={() => setDetail(r)}>
-                              Ver
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
+          ) : (
+            <div role="tabpanel" id="panel-returns" aria-labelledby="tab-returns" className="stack">
+              <MetricBar label="Resumen" metrics={metrics} />
 
-          <Card
-            flush
-            title="Efecto en Estados Financieros"
-            description="Lo que el Generador incluye de este impuesto a la fecha de corte (ESF). Se recalcula siempre desde las declaraciones guardadas."
-            actions={<Field label="Fecha de corte">{(id) => <DateInput id={id} value={cut} onChange={setCut} />}</Field>}
-          >
-            <div className="stack stack--sm" style={{ padding: "var(--space-3) var(--space-5)" }}>
-              {ownIssues.map((i, n) => (
-                <Alert key={n} tone={i.level === "blocking" ? "danger" : "warning"}>
-                  {i.message}
-                </Alert>
-              ))}
-              {ownEffects.length === 0 ? (
-                <p className="muted" style={{ margin: 0 }}>Ningún valor de {TAX_LABEL[taxType]} a esta fecha de corte.</p>
-              ) : (
-                <div className="table-wrap">
-                  <table className="table table--dense">
-                    <thead>
-                      <tr>
-                        <th>Concepto</th>
-                        <th>Código PUC</th>
-                        <th className="num">Valor</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ownEffects.map((e, n) => (
-                        <tr key={n}>
-                          <td>{e.label}</td>
-                          <td className="mono">{e.pucCode ?? <Badge tone="danger">Sin configurar</Badge>}</td>
-                          <td className={e.cents < 0 ? "num amount--negative" : "num"}>{formatExactCents(e.cents)}</td>
-                        </tr>
+              <Card
+                flush
+                title="Cobertura por periodo"
+                description={
+                  noRange
+                    ? "Se necesita la fecha de constitución de la empresa."
+                    : !periodicity
+                      ? "Configura la periodicidad de IVA en Empresas para ver la cobertura."
+                      : `Desde ${years[0] ?? "—"} hasta ${currentYear}. ${missingCount ? `${missingCount} ${missingCount === 1 ? "periodo falta" : "periodos faltan"} en total.` : "Sin periodos faltantes."} Pulsa un periodo para ver su detalle o registrarlo sin obligación.`
+                }
+                actions={
+                  taxType !== "income" && years.length > 1 ? (
+                    <Select aria-label="Año de la cobertura" value={coverageYear} onChange={(e) => setCoverageYear(Number(e.target.value))} style={{ width: "auto" }}>
+                      {coverageYearOptions.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
                       ))}
-                    </tbody>
-                  </table>
+                    </Select>
+                  ) : undefined
+                }
+              >
+                {cells.length > 0 && (
+                  <CoverageGrid
+                    cells={cells}
+                    cut={cut}
+                    vatPeriodicity={vatPeriodicity}
+                    onOpen={setDetail}
+                    onEmpty={(c) => (setEmptyConfirmed(false), setEmptyCell(c))}
+                    onVoid={(c) => setVoiding(c.empty)}
+                  />
+                )}
+              </Card>
+
+              <Card flush title="Declaraciones" description="Las correcciones se agrupan bajo la declaración vigente; las versiones anteriores siguen disponibles.">
+                <div className="toolbar row--between">
+                  <SegmentedFilter label="Filtrar declaraciones" options={FILTERS} value={filter} onChange={setFilter} />
+                  <SearchBox placeholder="Periodo o formulario" value={query} onChange={setQuery} />
                 </div>
-              )}
-              {taxType === "income" && <span className="field__hint">El patrimonio declarado se consulta en «Ver» y nunca se envía al Estado de Situación Financiera.</span>}
+                {visible.length === 0 ? (
+                  own.length === 0 ? (
+                    <EmptyReturns taxType={taxType} company={company?.razonSocial ?? "esta empresa"} />
+                  ) : (
+                    <p className="muted" style={{ padding: 16 }}>
+                      Ninguna declaración coincide con el filtro.
+                    </p>
+                  )
+                ) : (
+                  <ReturnsTable taxType={taxType} returns={visible} all={own} cut={cut} vatPeriodicity={vatPeriodicity} effects={allEffects} onOpen={setDetail} />
+                )}
+              </Card>
             </div>
-          </Card>
+          )}
         </>
       )}
 
@@ -453,13 +402,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
           await load(id);
         }}
       />
-      <ReturnDetailModal
-        item={detail && fresh(detail.id)}
-        vatPeriodicity={vatPeriodicity}
-        onClose={() => setDetail(null)}
-        onChanged={() => load(companyId)}
-        onPeriodicity={(p) => void changePeriodicity(p)}
-      />
+      <ReturnDetailModal item={detail && fresh(detail.id)} vatPeriodicity={vatPeriodicity} versions={detail ? versionsOf(detail, returns) : []} cut={cut} onClose={() => setDetail(null)} onChanged={() => load(companyId)} onOpenVersion={setDetail} />
       <Modal
         open={emptyCell !== null}
         title="Registrar periodo sin obligación"
@@ -484,8 +427,8 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
             </p>
             <Field label="Periodo">
               {(id) => (
-                <Select id={id} value={`${emptyCell.year}-${emptyCell.period}`} onChange={(e) => setEmptyCell(cells.find((c) => `${c.year}-${c.period}` === e.target.value) ?? emptyCell)}>
-                  {cells
+                <Select id={id} value={`${emptyCell.year}-${emptyCell.period}`} onChange={(e) => setEmptyCell(allCells.find((c) => `${c.year}-${c.period}` === e.target.value) ?? emptyCell)}>
+                  {allCells
                     .filter((c) => c.state === "missing")
                     .map((c) => (
                       <option key={`${c.year}-${c.period}`} value={`${c.year}-${c.period}`}>
@@ -514,8 +457,8 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
       />
       <PucSettingsModal
         open={settingsOpen}
-        title="Cuentas PUC de obligaciones tributarias"
-        description="Configuración global: aplica a todas las empresas. La ubicación en el ESF sigue dependiendo del catálogo PUC → Estados Financieros."
+        title="Configuración PUC de obligaciones tributarias"
+        description="Una cuenta por concepto, global para todas las empresas. Al cambiarla se recalculan los efectos sin borrar declaraciones ni pagos."
         items={TAX_PUC_ITEMS}
         index={data.index}
         settings={data.settingsMap}

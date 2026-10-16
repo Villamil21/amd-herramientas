@@ -115,8 +115,11 @@ describe("prueba obligatoria — IVA saldo a pagar", () => {
 
 describe("prueba obligatoria — anticipo de renta", () => {
   const dr2024 = ret("income", 2024, null, "annual", { advanceNextCents: pesos(748_000) });
-  it("DR 2024: CxC en EEFF 2025, no en 2026 ni en 2024", () => {
-    expect(total(run([dr2024], "2025-12-31"), "income_advance")).toBe(pesos(748_000));
+  it("DR 2024: activo temporal en EEFF 2025 (visible antes del 31/12), no en 2026 ni en 2024", () => {
+    expect(total(run([dr2024], "2025-11-30"), "income_advance")).toBe(pesos(748_000));
+    expect(total(run([dr2024], "2025-12-30"), "income_advance")).toBe(pesos(748_000));
+    // El 31/12 se consume para la liquidación de renta del año: deja de aparecer como anticipo.
+    expect(total(run([dr2024], "2025-12-31"), "income_advance")).toBe(0);
     expect(total(run([dr2024], "2026-06-30"), "income_advance")).toBe(0);
     expect(total(run([dr2024], "2024-12-31"), "income_advance")).toBe(0);
   });

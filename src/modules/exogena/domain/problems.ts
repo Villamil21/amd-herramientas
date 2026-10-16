@@ -6,6 +6,8 @@ export interface Problem {
   recordKey?: string;
   /** Campo afectado, si aplica. */
   field?: string;
+  /** Tipo de pendiente que la interfaz distingue (p. ej. «manual_balance»: saldo editado a mano que difiere del calculado). */
+  code?: "manual_balance";
   /** A dónde ir a resolverlo. */
   action?: { label: string; path: string };
 }

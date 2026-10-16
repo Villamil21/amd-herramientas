@@ -13,7 +13,7 @@ import { PERIODICITY_LABEL, SHORT_TAX_LABEL, TAX_PUC, type TaxPeriodicity, type 
  *   PUC no cambia: solo su ubicación en el ESF).
  * - Saldo a favor de IVA y de Renta: FOTO de la declaración del último periodo
  *   terminado al corte (la siguiente ya incorpora el saldo anterior: nunca se suman).
- * - Anticipo de renta: solo el de la declaración del año anterior al corte.
+ * - Anticipo de renta: solo el de la declaración del año anterior al corte y antes del 31/12 (ese día se consume).
  * - Resultados de ejercicios anteriores: suma algebraica de la renta líquida
  *   ordinaria (+) y la pérdida líquida (−) de los años anteriores al del corte.
  * - El patrimonio declarado en Renta es solo informativo: nunca se envía.
@@ -73,7 +73,7 @@ export const STATUS_LABEL: Record<TaxStatus, string> = {
   partial: "Pago parcial",
   paid: "Pagado",
   favor: "Saldo a favor",
-  none: "Sin saldo",
+  none: "Declarada",
   review: "Requiere revisión",
   superseded: "Reemplazada (corrección)",
 };
@@ -129,6 +129,22 @@ export const fiscalResult = (r: TaxReturn) => (r.incomeOrdinaryCents ?? 0) - (r.
 
 export type TaxEffectKind = "withholding_payable" | "vat_payable" | "vat_favor" | "income_payable" | "income_favor" | "income_advance" | "prior_results";
 
+/** Origen de un efecto para que Exógena (1008/1009) y los reportes lo expliquen: impuesto, periodo, formulario, valor declarado, pagos y corte. */
+export interface TaxTrace {
+  returnId: number;
+  taxType: TaxType;
+  kind: TaxEffectKind;
+  year: number;
+  period: number | null;
+  periodLabel: string;
+  formNumber: string;
+  declaredCents: number;
+  paidCents: number;
+  cut: string;
+  /** Saldo resultante al corte (pendiente por pagar o saldo a favor vigente). */
+  resultCents: number;
+}
+
 export interface TaxEffect {
   kind: TaxEffectKind;
   pucKey: TaxPucKey;
@@ -140,6 +156,8 @@ export interface TaxEffect {
   returnIds: number[];
   /** Se presenta en el pasivo no corriente (Retefuente de un año anterior al del corte). */
   noncurrent?: boolean;
+  /** Presente en los efectos de una sola declaración (por pagar, saldo a favor, anticipo). */
+  trace?: TaxTrace;
 }
 
 export interface TaxIssue {
@@ -170,6 +188,24 @@ const PUC_LABEL: Record<TaxPucKey, string> = {
   [TAX_PUC.priorResults]: "Resultados de ejercicios anteriores",
 };
 
+function traceOf(kind: TaxEffectKind, r: TaxReturn, resultCents: number, cut: string): TaxTrace {
+  const v = effectiveValues(r);
+  const payable = kind === "withholding_payable" || kind === "vat_payable" || kind === "income_payable";
+  return {
+    returnId: r.id,
+    taxType: r.taxType,
+    kind,
+    year: r.year,
+    period: r.period,
+    periodLabel: periodName(r),
+    formNumber: r.formNumber,
+    declaredCents: payable ? v.payable : kind === "income_advance" ? (r.advanceNextCents ?? 0) : v.favor,
+    paidCents: payable ? paidCents(r, cut) : 0,
+    cut,
+    resultCents,
+  };
+}
+
 export function taxEffects(input: TaxInput, cut: string): TaxEffects {
   const effects: TaxEffect[] = [];
   const issues: TaxIssue[] = [];
@@ -179,16 +215,21 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
     if (why.length) issues.push({ level: "blocking", taxType: r.taxType, message: `${SHORT_TAX_LABEL[r.taxType]} ${periodName(r)} (formulario ${r.formNumber || "sin número"}) requiere revisión: ${why.join(" ")}` });
     return why.length === 0;
   });
+  const missingPuc = new Set<TaxPucKey>();
   const add = (kind: TaxEffectKind, pucKey: TaxPucKey, label: string, cents: number, returns: TaxReturn[], noncurrent = false) => {
     if (cents === 0) return;
     const pucCode = input.puc.get(pucKey) || null;
-    effects.push({ kind, pucKey, pucCode, label, cents, returnIds: returns.map((r) => r.id), ...(noncurrent && { noncurrent }) });
-    if (!pucCode)
+    const trace = returns.length === 1 && kind !== "prior_results" ? traceOf(kind, returns[0], cents, cut) : undefined;
+    effects.push({ kind, pucKey, pucCode, label, cents, returnIds: returns.map((r) => r.id), ...(noncurrent && { noncurrent }), ...(trace && { trace }) });
+    // Un solo aviso por cuenta sin configurar (no uno por declaración).
+    if (!pucCode && !missingPuc.has(pucKey)) {
+      missingPuc.add(pucKey);
       issues.push({
         level: "blocking",
         taxType: returns[0].taxType,
-        message: `Configura la cuenta PUC «${PUC_LABEL[pucKey]}» en Obligaciones tributarias: ${label} no se incluye en los Estados Financieros.`,
+        message: `Configura la cuenta PUC «${PUC_LABEL[pucKey]}» en Obligaciones tributarias: sus valores no se incluyen en los Estados Financieros.`,
       });
+    }
   };
 
   // Por pagar: el saldo pendiente al corte de cada declaración terminada al corte.
@@ -229,7 +270,8 @@ export function taxEffects(input: TaxInput, cut: string): TaxEffects {
     const { favor } = effectiveValues(latest);
     if (favor > 0) add("income_favor", TAX_PUC.incomeFavor, `Saldo a favor de Renta ${latest.year}`, favor, [latest]);
   }
-  for (const r of income.filter((x) => x.advanceTargetYear === cutYear && (x.advanceNextCents ?? 0) > 0))
+  // El anticipo es un activo temporal del año siguiente: el 31/12 se consume en la liquidación de ese año y deja de aparecer.
+  for (const r of income.filter((x) => x.advanceTargetYear === cutYear && cut < `${cutYear}-12-31` && (x.advanceNextCents ?? 0) > 0))
     add("income_advance", TAX_PUC.incomeAdvance, `Anticipo de Renta ${cutYear} (declaración ${r.year})`, r.advanceNextCents!, [r]);
   const prior = income.filter((r) => r.year < cutYear);
   if (prior.length) add("prior_results", TAX_PUC.priorResults, `Resultados fiscales ${prior.map((r) => r.year).join(", ")}`, prior.reduce((s, r) => s + fiscalResult(r), 0), prior);

@@ -1,11 +1,14 @@
-import type { Company } from "../../../types/models";
+import { taxEffects, type TaxInput, type TaxTrace } from "../../financial-statements/tax-obligations/services/effects";
+import type { Company, Supplier } from "../../../types/models";
 import type { ExoRecord, RecordData, SyncProposal } from "../../../types/exogena";
 import { capitalSummary } from "../../../pages/companies/capitalSummary";
 import { allocateCapital } from "./capital";
 import type { CatalogIndex } from "./catalogIndex";
+import { DIAN_NIT, thirdPartyFields } from "./form1009";
 import { shareholderRow } from "./form1010";
 import type { Problem } from "./problems";
 import { checkThirdPartyData } from "./thirdPartyCheck";
+import { nitDigits } from "./text";
 
 /**
  * Formato 1008 — Saldo de cuentas por cobrar al 31 de diciembre.
@@ -28,7 +31,15 @@ export const SYSTEM_CONCEPTS_1008 = [
   { code: "1318", description: "Valor total del saldo fiscal del deterioro de cartera, identificándolo con el NIT del deudor" },
 ];
 
+/** Concepto para el saldo a favor de la DIAN (IVA y Renta): «Otras cuentas por cobrar». El anticipo de renta nunca se propone. */
+export const CONCEPT_DIAN = "1317";
+export const DESCRIPTION_DIAN = "Otras cuentas por cobrar";
+export const sourceKeyDian1008 = `dian-cxc:${DIAN_NIT}`;
+
 export interface Data1008 extends RecordData {
+  /** Saldos a favor de IVA / Renta de los que sale el valor (impuesto, periodo, formulario, valor, corte). */
+  taxTrace?: TaxTrace[];
+  supplierId?: number | null;
   shareholderId: number | null;
   shareholderName: string;
   personType: "PJ" | "PN" | null;
@@ -88,11 +99,41 @@ export function buildProposals1008(company: Company): SyncProposal[] {
   });
 }
 
-export type RowOrigin1008 = "Calculado desde capital" | "Manual" | "Modificado manualmente";
+/**
+ * Saldos a favor de IVA y Renta vigentes al 31/12 → un registro a nombre de la DIAN (1317). Un solo registro por empresa y año:
+ * volver a sincronizar lo actualiza, nunca lo duplica. Sin saldo a favor no hay propuesta. El anticipo de renta nunca entra.
+ * Los datos del tercero salen de la ficha de proveedores (sin inventar DV, dirección ni ubicación).
+ */
+export function buildTaxProposals1008(src: { tax: TaxInput; year: number; suppliers: Supplier[]; /** El registro DIAN tiene el saldo editado a mano: se sigue proponiendo (en $0 si ya no hay saldos) para que su desglose se actualice sin tocar el valor editado. */ keepManualDian?: boolean }): { proposals: SyncProposal[]; issues: Problem[] } {
+  const effects = taxEffects(src.tax, `${src.year}-12-31`);
+  const issues: Problem[] = effects.issues
+    .filter((i) => i.level === "blocking")
+    .map((i) => ({ level: "blocking" as const, message: i.message, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } }));
+  const favors = effects.effects.filter((e) => (e.kind === "vat_favor" || e.kind === "income_favor") && e.pucCode && e.trace);
+  const cents = favors.reduce((n, e) => n + e.cents, 0);
+  if (cents <= 0 && !src.keepManualDian) return { proposals: [], issues };
+  const supplier = src.suppliers.find((s) => nitDigits(s.nit) === DIAN_NIT);
+  const base = thirdPartyFields(DIAN_NIT, "DIAN", supplier);
+  const traces = favors.map((e) => e.trace!).sort((a, b) => a.returnId - b.returnId);
+  const data: Data1008 = {
+    ...base,
+    shareholderId: null,
+    shareholderName: "",
+    concept: CONCEPT_DIAN,
+    conceptDescription: DESCRIPTION_DIAN,
+    taxTrace: traces,
+    balance: Math.round(Math.max(0, cents) / 100),
+  };
+  const ref = favors.length ? favors.map((e) => e.label).join(" · ") : "sin saldos a favor";
+  return { proposals: [{ sourceKey: sourceKeyDian1008, origin: "estados_financieros", originRef: `Obligaciones tributarias · ${ref}`, data }], issues };
+}
 
-export function rowOrigin1008(r: Pick<ExoRecord, "origin" | "manualFields">): RowOrigin1008 {
+export type RowOrigin1008 = "Calculado desde capital" | "Calculado desde obligaciones tributarias" | "Manual" | "Modificado manualmente";
+
+export function rowOrigin1008(r: Pick<ExoRecord, "origin" | "manualFields"> & { sourceKey?: string }): RowOrigin1008 {
   if (r.origin === "manual") return "Manual";
-  return r.manualFields.length > 0 ? "Modificado manualmente" : "Calculado desde capital";
+  if (r.manualFields.length > 0) return "Modificado manualmente";
+  return r.sourceKey?.startsWith("dian-cxc:") ? "Calculado desde obligaciones tributarias" : "Calculado desde capital";
 }
 
 export interface ConceptOption {
@@ -143,7 +184,26 @@ export function check1008(records: Pick<ExoRecord, "sourceKey" | "data">[], comp
     out.push({ level: "blocking", message: rec.companyReceivable && rec.companyReceivable > 0 ? "No hay registros en el formato. Sincroniza desde Empresas o marca el formato como «No aplica»." : "La empresa no tiene cuentas por cobrar a socios. Marca el formato como «No aplica» (con el motivo) o agrega registros manuales." });
     return out;
   }
-  for (const r of records) out.push(...checkRecord1008(r, catalog, concepts));
+  for (const r of records) {
+    out.push(...checkRecord1008(r, catalog, concepts));
+    if (r.sourceKey === sourceKeyDian1008 && (r.data.supplierId === null || r.data.supplierId === undefined))
+      out.push({ level: "blocking", message: `Falta el proveedor DIAN (NIT ${DIAN_NIT}): créalo o búscalo en Proveedores para completar sus datos.`, recordKey: r.sourceKey, field: "supplierId", action: { label: "Crear o buscar proveedor DIAN", path: `/proveedores/${DIAN_NIT}` } });
+  }
   if (rec.difference !== 0) out.push({ level: "blocking", message: `La CxC a socios en Empresas (${rec.companyReceivable ?? 0}) no coincide con el total 1008 del concepto ${CONCEPT_SOCIOS} (${rec.total}); diferencia ${rec.difference}.` });
+  return out;
+}
+
+/**
+ * Saldos editados a mano que difieren de lo que calculan las fuentes (si la fuente ya no propone el registro, el cálculo es $0).
+ * Son pendientes bloqueantes: el formato no puede quedar «listo» ni exportarse hasta revisarlos o restaurar el cálculo.
+ */
+export function manualBalanceProblems(records: Pick<ExoRecord, "sourceKey" | "origin" | "manualFields" | "data">[], proposals: Pick<SyncProposal, "sourceKey" | "data">[]): Problem[] {
+  const out: Problem[] = [];
+  for (const r of records) {
+    if (r.origin === "manual" || !r.manualFields.includes("balance")) continue;
+    const calculated = proposals.find((p) => p.sourceKey === r.sourceKey)?.data.balance ?? 0;
+    if (r.data.balance !== calculated)
+      out.push({ level: "blocking", message: `${text(r.data.businessName) || text(r.data.shareholderName) || r.sourceKey}: el saldo editado a mano (${r.data.balance}) difiere del calculado por las fuentes (${calculated}). Revísalo o restaura el cálculo.`, recordKey: r.sourceKey, field: "balance", code: "manual_balance" });
+  }
   return out;
 }

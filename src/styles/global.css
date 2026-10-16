@@ -5318,6 +5318,116 @@ body.is-reordering * {
   color: var(--color-muted);
 }
 
+/* Obligaciones tributarias: barra común, fichas compactas y conciliación */
+.tax-bar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+}
+
+.tax-bar__context {
+  align-self: center;
+}
+
+.tax-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.tax-coverage__cell.is-s-pending,
+.tax-coverage__cell.is-s-partial {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.tax-coverage__cell.is-s-review {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.tax-coverage__cell.is-upcoming {
+  background: transparent;
+  border-style: dashed;
+  color: var(--color-muted);
+}
+
+.tax-coverage__note {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.tax-puc-missing {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.tax-row--old td {
+  font-size: var(--text-sm);
+}
+
+.tax-versions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tax-versions li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tax-recon {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Ficha de datos detectados / resultado: solo los datos que existen, sin celdas vacías. */
+.tax-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 6px var(--space-5);
+  margin: 0;
+  padding: 0;
+}
+
+.tax-facts > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tax-facts dt {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.tax-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tax-facts--result {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.tax-facts--result dd {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Stepper compacto (certificados): menos alto, y en ventanas muy estrechas solo el paso activo lleva nombre. */
 .stepper .step {
   min-height: 30px;

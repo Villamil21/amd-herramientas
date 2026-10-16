@@ -1,6 +1,6 @@
 import { bankAccountingCents } from "../../financial-statements/generator/engine";
 import type { Statements } from "../../financial-statements/generator/engine";
-import { taxEffects, type TaxInput } from "../../financial-statements/tax-obligations/services/effects";
+import { taxEffects, type TaxInput, type TaxTrace } from "../../financial-statements/tax-obligations/services/effects";
 import type { ExoRecord, RecordData, SyncProposal } from "../../../types/exogena";
 import type { BatchSummary, FsCatalog, FsPucMapping, Movement } from "../../../types/fs";
 import type { Company, Supplier } from "../../../types/models";
@@ -17,7 +17,7 @@ import { nitDigits } from "./text";
  *
  * Es un ESTADO por tercero al cierre anual (no una lista de pagos). Se arma, para el año y el corte seleccionados, de:
  *  - Compras y demás movimientos activos con tercero cuya deuda existe al corte (settlesOn vacío o posterior).
- *  - Obligaciones tributarias (IVA, retención en la fuente y renta causados y no pagados al corte) → proveedor DIAN.
+ *  - Obligaciones tributarias (IVA, retención en la fuente y renta: saldo declarado — sanciones incluidas — menos pagos con fecha ≤ corte) → proveedor DIAN.
  *  - Seguridad social: el valor liquidado de cada entidad de las planillas pagadas después del corte o pendientes.
  *
  * Nada se calcula con datos posteriores al 31 de diciembre del año informado: un informe 2025 nunca muestra deudas de 2026.
@@ -80,6 +80,8 @@ export interface Data1009 extends RecordData, ThirdFields1009 {
   thirdKey: string;
   /** De dónde sale el saldo: «compras», «tributaria», «seguridad_social». */
   sources: string[];
+  /** Obligaciones tributarias de las que sale el saldo (impuesto, periodo, formulario, valor declarado, pagos y corte). Las correcciones manuales no las alteran. */
+  taxTrace?: TaxTrace[];
   /** Saldo exacto en centavos y en pesos enteros (lo que se exporta). */
   balanceCents: number;
   balance: number;
@@ -123,7 +125,7 @@ function supplierByNit(suppliers: Supplier[]): Map<string, Supplier> {
 }
 
 /** Datos del tercero tomados de su ficha (o de lo que traiga la fuente, si aún no tiene ficha). */
-function thirdPartyFields(nit: string, fallbackName: string, supplier: Supplier | undefined, fallback?: Partial<ThirdFields1009>): ThirdFields1009 {
+export function thirdPartyFields(nit: string, fallbackName: string, supplier: Supplier | undefined, fallback?: Partial<ThirdFields1009>): ThirdFields1009 {
   if (supplier) {
     const t = thirdPartyOf(supplier);
     const legal = t.personType === "PJ";
@@ -192,6 +194,7 @@ interface Group {
   sources: Set<string>;
   refs: Set<string>;
   fallback?: Partial<ThirdFields1009>;
+  traces: TaxTrace[];
 }
 
 /**
@@ -205,9 +208,10 @@ export function build1009(src: Sources1009): Built1009 {
   const groups = new Map<string, Group>();
   const unmatched: UnmatchedItem[] = [];
   const issues: Problem[] = [];
-  const add = (nit: string, concept: string, name: string, cents: number, source: string, ref: string, fallback?: Partial<ThirdFields1009>) => {
+  const add = (nit: string, concept: string, name: string, cents: number, source: string, ref: string, fallback?: Partial<ThirdFields1009>, trace?: TaxTrace) => {
     const key = `nit:${nit}|${concept}`;
-    const g = groups.get(key) ?? { nit, concept, name, cents: 0, sources: new Set(), refs: new Set(), fallback };
+    const g = groups.get(key) ?? { nit, concept, name, cents: 0, sources: new Set(), refs: new Set(), fallback, traces: [] };
+    if (trace) g.traces.push(trace);
     g.cents += cents;
     g.sources.add(source);
     if (ref) g.refs.add(ref);
@@ -240,7 +244,7 @@ export function build1009(src: Sources1009): Built1009 {
   }
   unmatched.push(...[...withoutThird.values()].filter((i) => i.cents !== 0));
 
-  // 2. Obligaciones tributarias causadas y no pagadas al corte → DIAN (concepto 2204). Sin intereses ni sanciones.
+  // 2. Obligaciones tributarias pendientes al corte → DIAN (concepto 2204): el mismo saldo del ESF (el total declarado ya incluye las sanciones del formulario).
   const tax = taxEffects(src.tax, end);
   let taxTotal = 0;
   for (const issue of tax.issues) if (issue.level === "blocking") issues.push({ level: "blocking", message: issue.message, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } });
@@ -251,7 +255,7 @@ export function build1009(src: Sources1009): Built1009 {
       continue;
     }
     taxTotal += effect.cents;
-    add(DIAN_NIT, "2204", bySupplier.get(DIAN_NIT)?.businessName ?? "DIAN", effect.cents, "tributaria", effect.label);
+    add(DIAN_NIT, "2204", bySupplier.get(DIAN_NIT)?.businessName ?? "DIAN", effect.cents, "tributaria", effect.label, undefined, effect.trace);
   }
 
   // 3. Seguridad social: valor liquidado por entidad de las planillas pagadas después del corte o pendientes.
@@ -287,7 +291,7 @@ export function build1009(src: Sources1009): Built1009 {
     if (g.cents === 0) continue;
     const supplier = bySupplier.get(g.nit);
     const base = thirdPartyFields(g.nit, g.name, supplier, g.fallback);
-    const data: Data1009 = { concept: g.concept, thirdKey: `nit:${g.nit}`, ...base, sources: [...g.sources].sort(), balanceCents: g.cents, balance: centsToPesos(g.cents) };
+    const data: Data1009 = { concept: g.concept, thirdKey: `nit:${g.nit}`, ...base, sources: [...g.sources].sort(), ...(g.traces.length && { taxTrace: g.traces.sort((a, b) => a.returnId - b.returnId) }), balanceCents: g.cents, balance: centsToPesos(g.cents) };
     proposals.push({ sourceKey: key, origin: "estados_financieros", originRef: [...g.refs].slice(0, 6).join(" · ") || "Estados Financieros", data });
   }
   proposals.sort((a, b) => a.sourceKey.localeCompare(b.sourceKey));

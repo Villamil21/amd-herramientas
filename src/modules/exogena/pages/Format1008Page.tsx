@@ -56,12 +56,12 @@ export default function Format1008Page() {
         companyId: company.id,
         year: selection.year,
         formatCode: FORMAT_1008,
-        source: "Empresas",
+        source: "Empresas y Obligaciones tributarias",
         proposals: model.proposals,
         removeMissing: true,
         sourceFingerprint: overview.sourceFingerprint,
         overwriteManual: overwrite,
-        summary: { shareholders: model.proposals.length, cxcSocios: rec?.companyReceivable ?? 0 },
+        summary: { proposals: model.proposals.length, cxcSocios: rec?.companyReceivable ?? 0 },
       });
       const parts = [outcome.created && `${outcome.created} nuevos`, outcome.updated && `${outcome.updated} actualizados`, outcome.removed && `${outcome.removed} retirados`].filter(Boolean);
       toast(parts.length ? `Actualizado desde Empresas: ${parts.join(", ")}.` : "Sin cambios: el formato ya coincide con Empresas.");
@@ -125,7 +125,7 @@ export default function Format1008Page() {
       <PageHeader
         eyebrow={`Información Exógena · ${selection.year}`}
         title="1008 · Saldo de cuentas por cobrar al 31 de diciembre"
-        description="Cuentas por cobrar a socios (capital suscrito − pagado) repartidas por participación. El origen está en Empresas; cada fila se puede ajustar."
+        description="Cuentas por cobrar a socios (Empresas) y saldos a favor de IVA y Renta vigentes al 31/12 a nombre de la DIAN (Obligaciones tributarias). El anticipo de renta nunca se incluye; cada fila se puede ajustar."
         actions={
           <>
             <Button icon={<ListChecks size={15} />} onClick={() => setManaging(true)}>
@@ -135,7 +135,7 @@ export default function Format1008Page() {
               Agregar registro
             </Button>
             <Button variant="primary" icon={<RefreshCcw size={15} />} loading={syncing} disabled={!company || !model} onClick={() => void sync()}>
-              Actualizar desde Empresas
+              Actualizar desde fuentes
             </Button>
           </>
         }
@@ -157,12 +157,14 @@ export default function Format1008Page() {
               <div className="stat">CxC a socios en Empresas<strong>{money(rec!.companyReceivable)}</strong></div>
               <div className="stat">Total 1008 (concepto {CONCEPT_SOCIOS})<strong>{money(rec!.total)}</strong></div>
               <div className="stat">Diferencia<strong>{rec!.difference === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{money(rec!.difference)}</Badge>}</strong></div>
+              {model!.deudores && <div className="stat">Deudores del ESF (cte. + no cte.)<strong>{money(model!.deudores.eeffCents / 100)}</strong></div>}
+              {model!.deudores && <div className="stat">Diferencia con el ESF<strong>{model!.deudores.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{money(model!.deudores.differenceCents / 100)}</Badge>}</strong></div>}
             </div>
           </Card>
           <StatusPanel row={status} problems={problems} onSetStatus={setStatus} />
           {changes.length > 0 && (
-            <Alert tone="warning" title="Hay cambios en Empresas sin actualizar">
-              La CxC a socios o los socios cambiaron desde la última sincronización ({changes.length} {changes.length === 1 ? "registro" : "registros"}). Usa «Actualizar desde Empresas»; tus ajustes manuales no se pierden.
+            <Alert tone="warning" title="Hay cambios en Empresas u Obligaciones tributarias sin actualizar">
+              La CxC a socios, los socios o los saldos a favor de la DIAN cambiaron desde la última sincronización ({changes.length} {changes.length === 1 ? "registro" : "registros"}). Usa «Actualizar desde fuentes»; tus ajustes manuales no se pierden.
             </Alert>
           )}
           <ProblemsPanel problems={problems} okText="Sin pendientes: el 1008 se puede marcar como listo." />
@@ -185,7 +187,7 @@ export default function Format1008Page() {
             }
           >
             {empty ? (
-              <EmptyState icon={<Building2 size={20} />} title="Aún no hay registros en este formato" description={rec!.companyReceivable && rec!.companyReceivable > 0 ? "Usa «Actualizar desde Empresas» para traer la CxC a socios, o agrega registros manuales." : "La empresa no tiene CxC a socios (suscrito − pagado). Agrega registros manuales o marca el formato como «No aplica» con su motivo."} />
+              <EmptyState icon={<Building2 size={20} />} title="Aún no hay registros en este formato" description={rec!.companyReceivable && rec!.companyReceivable > 0 ? "Usa «Actualizar desde fuentes» para traer la CxC a socios y los saldos a favor de la DIAN, o agrega registros manuales." : "La empresa no tiene CxC a socios (suscrito − pagado). Agrega registros manuales o marca el formato como «No aplica» con su motivo."} />
             ) : (
               <div className="table-wrap">
                 <table className="table">
@@ -222,14 +224,27 @@ export default function Format1008Page() {
                           <td className="table__primary">
                             {nameOf(d)}
                             <div className="muted">{d.personType === "PJ" ? "Persona jurídica" : d.personType === "PN" ? "Persona natural" : "Tipo sin definir"}</div>
+                            {Array.isArray(d.taxTrace) &&
+                              (d.taxTrace as { returnId: number; kind: string; periodLabel: string; formNumber: string; resultCents: number }[]).map((t) => (
+                                <div key={t.returnId + t.kind} className="muted">
+                                  {t.kind === "vat_favor" ? "IVA a favor" : "Renta a favor"} · {t.periodLabel} · form. {t.formNumber || "s/n"} · $ {formatPesosPlain(Math.round(t.resultCents / 100))}
+                                </div>
+                              ))}
                           </td>
                           <td>{str(d.address) || <span className="muted">—</span>}</td>
                           <td>{muni ?? (str(d.countryCode) && str(d.countryCode) !== "169" ? (index.country(str(d.countryCode)) ?? str(d.countryCode)) : <span className="muted">Sin definir</span>)}</td>
                           <td className="num">{typeof d.balance === "number" ? formatPesosPlain(d.balance) : <span className="muted">—</span>}</td>
                           <td>
-                            <Badge tone={origin === "Calculado desde capital" ? undefined : "warning"}>{origin}</Badge>
+                            <Badge tone={origin.startsWith("Calculado") ? undefined : "warning"}>{origin}</Badge>
                           </td>
-                          <td>{pending ? <Badge tone="danger">{pending} {pending === 1 ? "pendiente" : "pendientes"}</Badge> : <Badge tone="success">Completo</Badge>}</td>
+                          <td>
+                            {pending ? <Badge tone="danger">{pending} {pending === 1 ? "pendiente" : "pendientes"}</Badge> : <Badge tone="success">Completo</Badge>}
+                            {problems.some((p) => p.recordKey === r.sourceKey && p.code === "manual_balance") && (
+                              <div>
+                                <Badge tone="warning">⚠ Revisar saldo</Badge>
+                              </div>
+                            )}
+                          </td>
                           <td className="actions" onClick={(e) => e.stopPropagation()}>
                             <Menu
                               label={`Acciones del registro ${nameOf(d)}`}
