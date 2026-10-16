@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Modal, useToast } from "../../../../components/ui";
 import { fsService } from "../../../../services/fsService";
 import { errorMessage } from "../../../../services/tauri";
-import type { FsPucMapping } from "../../../../types/fs";
+import type { FsCatalog, FsPucMapping } from "../../../../types/fs";
 import type { PucIndex } from "../../puc-codes/services/pucCatalog";
+import { presentationOf } from "../presentation";
 import { PucField } from "./PucField";
 
 export interface PucSettingItem {
@@ -20,6 +21,10 @@ interface Props {
   index: PucIndex;
   settings: Map<string, string>;
   mappings?: Map<string, FsPucMapping>;
+  /** Con el catálogo se muestra la ubicación en EEFF de cada cuenta (por familia de cuatro dígitos). */
+  catalog?: FsCatalog | null;
+  /** Clasificar la familia de una cuenta sin ubicación (abre el clasificador). */
+  onClassify?: (familyCode: string, concept: string) => void;
   /** Claves que se necesitan ahora (se resaltan si faltan). */
   required?: string[];
   onClose: () => void;
@@ -28,7 +33,7 @@ interface Props {
 }
 
 /** Cuentas PUC globales de un submódulo (no son por empresa). Si la cuenta no existe se puede crear. */
-export function PucSettingsModal({ open, title, description, items, index, settings, mappings, required = [], onClose, onSaved, onCodesChanged }: Props) {
+export function PucSettingsModal({ open, title, description, items, index, settings, mappings, catalog, onClassify, required = [], onClose, onSaved, onCodesChanged }: Props) {
   const toast = useToast();
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -96,6 +101,9 @@ export function PucSettingsModal({ open, title, description, items, index, setti
                         </td>
                         <td>
                           <PucField index={index} value={values[i.key] || undefined} onChange={(code) => setValues((v) => ({ ...v, [i.key]: code }))} title={i.label} mappings={mappings} onCodesChanged={onCodesChanged} />
+                          {values[i.key] && catalog && mappings && (
+                            <PresentationNote code={values[i.key]} index={index} catalog={catalog} mappings={mappings} onClassify={onClassify} />
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -106,5 +114,22 @@ export function PucSettingsModal({ open, title, description, items, index, setti
         ))}
       </div>
     </Modal>
+  );
+}
+
+function PresentationNote({ code, index, catalog, mappings, onClassify }: { code: string; index: PucIndex; catalog: FsCatalog; mappings: Map<string, FsPucMapping>; onClassify?: (family: string, concept: string) => void }) {
+  const p = presentationOf(code, catalog, mappings);
+  return (
+    <div className="field__hint">
+      Presentación en EEFF (familia {p.family}): {p.state === "none" ? <span className="amount--negative">{p.text}</span> : p.text}
+      {p.state === "none" && onClassify && (
+        <>
+          {" "}
+          <button type="button" className="link-button" onClick={() => onClassify(p.family, index.concepts.get(p.family) ?? "")}>
+            Clasificar {p.family}
+          </button>
+        </>
+      )}
+    </div>
   );
 }

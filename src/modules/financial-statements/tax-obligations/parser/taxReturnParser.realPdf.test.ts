@@ -11,6 +11,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readDocumentText } from "../../../bank-analysis/shared/pdf/pdfText";
+import { whBreakdown } from "../withholding/detail";
 import { parseTaxReturn } from "./taxReturnParser";
 
 const files = (process.env.TAX_RETURN_PDF ?? "").split(":").filter(Boolean);
@@ -28,6 +29,8 @@ describe.skipIf(files.length === 0)("declaraciones reales", () => {
       expect(r.nit).toMatch(/^\d{9,10}$/);
       expect(r.formNumber).toMatch(/^\d{12,14}$/);
       expect(r.year).toBeGreaterThan(2015);
+      // Formulario 350: retenciones positivas − casilla 129 + sanciones = casilla 138.
+      if (r.withholdingCasillas) expect(whBreakdown(r.withholdingCasillas).differenceCents).toBe(0);
       for (const v of Object.values(r.values)) if (v.casilla && v.expectedCasilla) expect(v.casilla).toBe(v.expectedCasilla);
     });
   }

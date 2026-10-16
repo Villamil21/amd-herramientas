@@ -8,7 +8,7 @@ import type { Supplier } from "../../types/models";
 import { buildStatements } from "../financial-statements/generator/engine";
 import { useFsData } from "../financial-statements/shared/useFsData";
 import { taxService } from "../financial-statements/tax-obligations/services/taxService";
-import type { TaxReturn, VatPeriodicity } from "../financial-statements/tax-obligations/types";
+import { CAPITAL_RECEIVABLE_KEY, type TaxReturn, type VatPeriodicity } from "../financial-statements/tax-obligations/types";
 
 export interface Ledger {
   movements: Movement[];
@@ -73,6 +73,7 @@ export function useExogenaLedger(companyId: number | null, year: number) {
       end: `${year}-12-31`,
       presentation: "bank",
       tax,
+      capitalReceivablePuc: data.settingsMap.get(CAPITAL_RECEIVABLE_KEY) ?? null,
     });
   }, [company, ledger, data.catalog, data.mappings, data.index, tax, year]);
 

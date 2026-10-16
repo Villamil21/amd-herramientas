@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarX2, FileUp, Settings2 } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
-import { Alert, Button, Card, ConfirmDialog, DateInput, EmptyState, Field, MetricBar, Modal, PageHeader, Select, Tabs, useToast } from "../../../components/ui";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Field, MetricBar, Modal, PageHeader, Select, Tabs, useToast } from "../../../components/ui";
 import { SearchBox, SegmentedFilter } from "../../bank-analysis/shared/components/tableControls";
 import { normalizeKey } from "../../../utils/text";
 import { formatDateForDisplay } from "../../../utils/dates";
@@ -9,19 +9,24 @@ import { extractPdfText } from "../../bank-analysis/shared/pdf/pdfExtractor";
 import { statementService } from "../../bank-analysis/shared/statementService";
 import { errorMessage } from "../../../services/tauri";
 import { formatInteger } from "../../../utils/format";
-import { CompanySelect } from "../shared/components/CompanySelect";
+import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import { formatExactCents, isIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { ImportModal, ReturnDetailModal } from "./components";
+import { ExcessReviewModal } from "./ExcessReviewModal";
+import { IncomeCompositionPanel } from "./IncomeCompositionPanel";
+import { TaxParamsBar } from "./shared/TaxParamsBar";
 import { CoverageGrid, EmptyReturns, ReconciliationTab, ReturnsTable } from "./sections";
 import { coverageYears, periodicityOf, taxPeriodCoverage, type TaxPeriodCell } from "./services/coverage";
 import { parseTaxReturn, TAX_FORM_LABEL, TaxReturnError } from "./parser/taxReturnParser";
-import { fiscalResult, periodName, taxEffects, type TaxStatus } from "./services/effects";
+import { fiscalResult, periodName, pucLabel, taxEffects, type TaxStatus } from "./services/effects";
+import { incomeComposition } from "./services/incomeComposition";
+import { taxPucItems } from "./services/pucItems";
 import { buildDraft, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
-import { periodsAffectedByPuc, returnView, versionsOf } from "./services/view";
-import { PERIODICITY_LABEL, PUC_KEYS_BY_TAX, TAX_LABEL, TAX_PUC_ITEMS, type TaxEmptyPeriod, type TaxReturn, type TaxType, type VatPeriodicity } from "./types";
+import { returnView, versionsOf } from "./services/view";
+import { PERIODICITY_LABEL, TAX_LABEL, type TaxEmptyPeriod, type TaxReturn, type TaxType, type VatPeriodicity } from "./types";
 
 const DESCRIPTION: Record<TaxType, string> = {
   withholding: "Formulario 350: el total declarado (retenciones más sanciones) es cuenta por pagar hasta su fecha de pago.",
@@ -30,7 +35,7 @@ const DESCRIPTION: Record<TaxType, string> = {
 };
 
 type ReturnFilter = "all" | "pending" | "partial" | "paid" | "favor" | "superseded";
-type PageTab = "returns" | "reconciliation";
+type PageTab = "returns" | "composition" | "reconciliation";
 
 /** Estados de cada filtro (Pendientes incluye «Requiere revisión»). */
 const FILTER_STATUS: Record<Exclude<ReturnFilter, "all">, TaxStatus[]> = {
@@ -79,6 +84,8 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
   const [emptyConfirmed, setEmptyConfirmed] = useState(false);
   const [voiding, setVoiding] = useState<TaxEmptyPeriod | null>(null);
   const [busy, setBusy] = useState(false);
+  const [excessOpen, setExcessOpen] = useState(false);
+  const [classifying, setClassifying] = useState<{ code: string; concept: string } | null>(null);
 
   const load = useCallback(
     async (id: number | null) => {
@@ -108,11 +115,19 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
   const constitution = company?.constitutionDate || null;
   const years = useMemo(() => coverageYears(constitution, currentYear), [constitution, currentYear]);
   const own = useMemo(() => returns.filter((r) => r.taxType === taxType).sort((a, b) => b.periodEnd.localeCompare(a.periodEnd) || b.id - a.id), [returns, taxType]);
-  const pucKeys = PUC_KEYS_BY_TAX[taxType];
-  const missingPuc = pucKeys.filter((k) => !data.settingsMap.get(k));
+  const pucItems = useMemo(() => taxPucItems(taxType, returns), [taxType, returns]);
   const effects = useMemo(() => (isIsoDate(cut) ? taxEffects({ returns, puc: data.settingsMap, vatPeriodicity }, cut) : null), [returns, data.settingsMap, vatPeriodicity, cut]);
-  const ownEffects = useMemo(() => effects?.effects.filter((e) => (taxType === "withholding" ? e.kind === "withholding_payable" : taxType === "vat" ? e.kind.startsWith("vat") : e.kind.startsWith("income"))) ?? [], [effects, taxType]);
+  const ownEffects = useMemo(() => effects?.effects.filter((e) => e.taxType === taxType && (e.kind === `${taxType}_payable` || e.kind === `${taxType}_favor` || e.kind === "income_advance" || e.kind === "prior_results" || e.kind.startsWith("sanction") || e.kind === "interest_expense" || e.kind === "excess_favor")) ?? [], [effects, taxType]);
   const ownIssues = effects?.issues.filter((i) => i.taxType === taxType) ?? [];
+  // Valores que esperan una cuenta PUC («Pendiente de clasificar»): del impuesto y los comunes a los pagos.
+  const missingPuc = useMemo(() => [...new Set((effects?.issues ?? []).filter((i) => i.code === "puc_missing" && i.pucKey && (i.taxType === taxType || pucItems.some((x) => x.key === i.pucKey))).map((i) => i.pucKey!))], [effects, taxType, pucItems]);
+  const pendingByPuc = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const e of effects?.effects ?? []) if (!e.pucCode) out.set(e.pucKey, (out.get(e.pucKey) ?? 0) + e.cents);
+    return out;
+  }, [effects]);
+  const composition = useMemo(() => (taxType === "income" && isIsoDate(cut) ? incomeComposition(returns, cut, data.settingsMap) : null), [taxType, returns, cut, data.settingsMap]);
+  const ownExcess = (effects?.excessReviews ?? []).filter((x) => x.taxType === taxType);
   const fresh = (id: number) => returns.find((r) => r.id === id) ?? null;
   const allEffects = effects?.effects ?? [];
   const views = useMemo(() => own.map((r) => returnView(r, cut, vatPeriodicity, allEffects)), [own, cut, vatPeriodicity, allEffects]);
@@ -231,14 +246,15 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
   return (
     <>
       <PageHeader eyebrow="Estados Financieros · Obligaciones tributarias" title={TAX_LABEL[taxType]} description={DESCRIPTION[taxType]} />
-      <Card className="tax-bar">
-        <div className="tax-bar__row">
-          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
-          <Field label="Fecha de corte" hint="Pagos hasta esta fecha reducen el saldo.">
-            {(id) => <DateInput id={id} value={cut} onChange={setCut} />}
-          </Field>
-          {companyId !== null && (
-            <dl className="context-bar__items tax-bar__context">
+      <TaxParamsBar
+        companies={data.companies}
+        companyId={companyId}
+        onCompany={setCompanyId}
+        cut={cut}
+        onCut={setCut}
+        context={
+          companyId !== null && (
+            <dl className="context-bar__items">
               <div className="context-bar__item">
                 <dt>Cobertura</dt>
                 <dd>{range ?? "Pendiente"}</dd>
@@ -255,8 +271,10 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
                 </div>
               )}
             </dl>
-          )}
-          <div className="tax-bar__actions">
+          )
+        }
+        actions={
+          <>
             <Button icon={<Settings2 size={15} />} onClick={() => setSettingsOpen(true)}>
               Configuración PUC
             </Button>
@@ -277,26 +295,33 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
             <Button variant="primary" icon={<FileUp size={15} />} loading={picking} onClick={() => void importReturn()}>
               Importar declaración
             </Button>
-          </div>
-        </div>
-      </Card>
+          </>
+        }
+      />
       {error && <Alert tone="danger">{error}</Alert>}
       {missingPuc.length > 0 && (
-        <Alert tone="warning" title="Falta configurar cuentas PUC">
+        <Alert tone="warning" title="Pendiente de clasificar: falta configurar cuentas PUC">
           <div className="row row--between" style={{ flexWrap: "wrap" }}>
             <ul className="tax-puc-missing">
-              {TAX_PUC_ITEMS.filter((i) => missingPuc.includes(i.key)).map((i) => {
-                const n = periodsAffectedByPuc(returns.filter((r) => r.taxType === taxType), i.key);
-                return (
-                  <li key={i.key}>
-                    {i.label}
-                    {n > 0 && <span className="muted"> · {n} {n === 1 ? "periodo afectado" : "periodos afectados"}</span>}
-                  </li>
-                );
-              })}
+              {missingPuc.map((k) => (
+                <li key={k}>
+                  {pucItems.find((i) => i.key === k)?.label ?? pucLabel(k)}
+                  {pendingByPuc.get(k) ? <span className="muted"> · {formatExactCents(pendingByPuc.get(k)!)} fuera de los Estados Financieros</span> : null}
+                </li>
+              ))}
             </ul>
             <Button size="sm" onClick={() => setSettingsOpen(true)}>
               Configurar
+            </Button>
+          </div>
+        </Alert>
+      )}
+      {ownExcess.some((x) => x.needsReview) && (
+        <Alert tone="warning" title="Excedentes a favor de DIAN por revisar">
+          <div className="row row--between" style={{ flexWrap: "wrap" }}>
+            <span>Hay pagos por encima del saldo clasificados como excedente a favor. Decide si aplican a Estados Financieros y 1008.</span>
+            <Button size="sm" onClick={() => setExcessOpen(true)}>
+              Revisar excedentes
             </Button>
           </div>
         </Alert>
@@ -324,12 +349,17 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
             onChange={setTab}
             tabs={[
               { id: "returns", label: "Declaraciones" },
+              ...(taxType === "income" ? [{ id: "composition" as const, label: "Composición de la renta" }] : []),
               { id: "reconciliation", label: "Conciliación y reportes", badge: ownIssues.length ? ownIssues.length : undefined },
             ]}
           />
-          {tab === "reconciliation" ? (
+          {tab === "composition" && composition ? (
+            <div role="tabpanel" id="panel-composition" aria-labelledby="tab-composition">
+              <IncomeCompositionPanel composition={composition} onConfigurePuc={() => setSettingsOpen(true)} />
+            </div>
+          ) : tab === "reconciliation" ? (
             <div role="tabpanel" id="panel-reconciliation" aria-labelledby="tab-reconciliation">
-              <ReconciliationTab taxType={taxType} companyId={companyId} cut={cut} effects={allEffects} issues={ownIssues} />
+              <ReconciliationTab taxType={taxType} companyId={companyId} cut={cut} effects={allEffects} issues={ownIssues} onConfigurePuc={() => setSettingsOpen(true)} onReviewExcess={ownExcess.length ? () => setExcessOpen(true) : undefined} />
             </div>
           ) : (
             <div role="tabpanel" id="panel-returns" aria-labelledby="tab-returns" className="stack">
@@ -402,7 +432,7 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
           await load(id);
         }}
       />
-      <ReturnDetailModal item={detail && fresh(detail.id)} vatPeriodicity={vatPeriodicity} versions={detail ? versionsOf(detail, returns) : []} cut={cut} onClose={() => setDetail(null)} onChanged={() => load(companyId)} onOpenVersion={setDetail} />
+      <ReturnDetailModal item={detail && fresh(detail.id)} vatPeriodicity={vatPeriodicity} versions={detail ? versionsOf(detail, returns) : []} cut={cut} onClose={() => setDetail(null)} onChanged={() => load(companyId)} onOpenVersion={setDetail} data={data} onClassify={(code, concept) => setClassifying({ code, concept })} />
       <Modal
         open={emptyCell !== null}
         title="Registrar periodo sin obligación"
@@ -458,16 +488,20 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
       <PucSettingsModal
         open={settingsOpen}
         title="Configuración PUC de obligaciones tributarias"
-        description="Una cuenta por concepto, global para todas las empresas. Al cambiarla se recalculan los efectos sin borrar declaraciones ni pagos."
-        items={TAX_PUC_ITEMS}
+        description="Una cuenta por concepto, global para todas las empresas. Ningún valor llega a los Estados Financieros sin su cuenta. Al cambiarla se recalculan los efectos sin borrar declaraciones ni pagos."
+        items={pucItems}
         index={data.index}
         settings={data.settingsMap}
         mappings={data.mappingMap}
+        catalog={data.catalog}
+        onClassify={(code, concept) => setClassifying({ code, concept })}
         required={missingPuc}
         onClose={() => setSettingsOpen(false)}
         onSaved={data.reloadSettings}
         onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])}
       />
+      <ClassifyPucModal open={classifying !== null} pucCode={classifying?.code ?? ""} concept={classifying?.concept ?? ""} catalog={data.catalog} mappings={data.mappingMap} onClose={() => setClassifying(null)} onSaved={data.reloadMappings} />
+      <ExcessReviewModal open={excessOpen} items={ownExcess} onClose={() => setExcessOpen(false)} onChanged={() => load(companyId)} onConfigurePuc={() => (setExcessOpen(false), setSettingsOpen(true))} />
     </>
   );
 }

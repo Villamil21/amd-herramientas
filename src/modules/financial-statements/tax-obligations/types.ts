@@ -71,6 +71,10 @@ export interface TaxReturnDetail {
   equity?: { key: string; label: string; cents: number | null; casilla: string | null }[];
   warnings?: string[];
   nameMismatchConfirmed?: boolean;
+  /** Formulario 350: casillas numéricas leídas (casilla → centavos). Base de la discriminación por concepto. */
+  withholding?: { casillas: Record<string, number> };
+  /** Decisiones manuales del usuario (nunca se pisan al releer el PDF). */
+  manual?: { adjustments129?: { id: string; conceptKey: string; cents: number; note: string }[] };
 }
 
 /** Pago total o parcial de una declaración con saldo a pagar. */
@@ -79,16 +83,26 @@ export interface TaxPayment {
   returnId: number;
   /** AAAA-MM-DD. */
   paymentDate: string;
+  /** Valor aplicado a la obligación (nunca supera el saldo a pagar). */
   amountCents: number;
+  /** Lo pagado por encima del saldo pendiente y su clasificación. */
+  excessCents: number;
+  excessKind: ExcessKind;
+  /** Decisión sobre el excedente a favor para EEFF y 1008 (null: sin revisar). */
+  excessReview: { decision: "applies" | "not_applies"; fingerprint: string; decidedAt: string } | null;
   note: string;
   reference: string;
   createdAt: string;
   updatedAt: string;
 }
 
+export type ExcessKind = "" | "interest" | "favor";
+
 export interface TaxPaymentInput {
   paymentDate: string;
+  /** Total pagado: si supera el saldo pendiente, el sistema separa lo aplicado del excedente. */
   amountCents: number;
+  excessKind: ExcessKind;
   note: string;
   reference: string;
 }
@@ -140,22 +154,45 @@ export const TAX_PUC = {
   incomeFavor: "tax.income_favor",
   incomeAdvance: "tax.income_advance",
   priorResults: "tax.prior_results",
+  interestExpense: "tax.interest.expense",
+  excessFavor: "tax.excess.favor",
 } as const;
 
-export type TaxPucKey = (typeof TAX_PUC)[keyof typeof TAX_PUC];
+/** Cuenta por cobrar a socios (capital suscrito − pagado): global, obligatoria para llegar a EEFF. */
+export const CAPITAL_RECEIVABLE_KEY = "capital.receivable";
 
-export const TAX_PUC_ITEMS: { key: TaxPucKey; label: string; group: string }[] = [
-  { key: TAX_PUC.withholdingPayable, label: "Retención en la fuente por pagar", group: "Retención en la fuente" },
+export const sanctionExpenseKey = (t: TaxType) => `tax.sanction.expense.${t}`;
+export const sanctionPayableKey = (t: TaxType) => `tax.sanction.payable.${t}`;
+
+/** Clave PUC de una cuenta de configuración (las de Retefuente por concepto son dinámicas: tax.wh.<concepto>). */
+export type TaxPucKey = string;
+
+export interface TaxPucItem {
+  key: TaxPucKey;
+  label: string;
+  group: string;
+}
+
+export const TAX_PUC_ITEMS: TaxPucItem[] = [
   { key: TAX_PUC.vatPayable, label: "IVA por pagar", group: "IVA" },
   { key: TAX_PUC.vatFavor, label: "Saldo a favor de IVA", group: "IVA" },
+  { key: sanctionExpenseKey("vat"), label: "Sanciones de IVA — gasto", group: "IVA" },
+  { key: sanctionPayableKey("vat"), label: "Sanciones de IVA — cuenta por pagar", group: "IVA" },
   { key: TAX_PUC.incomePayable, label: "Renta por pagar", group: "Renta" },
   { key: TAX_PUC.incomeFavor, label: "Saldo a favor de Renta", group: "Renta" },
   { key: TAX_PUC.incomeAdvance, label: "Anticipo de Renta", group: "Renta" },
   { key: TAX_PUC.priorResults, label: "Resultados de ejercicios anteriores (renta líquida / pérdida líquida)", group: "Renta" },
+  { key: sanctionExpenseKey("income"), label: "Sanciones de Renta — gasto", group: "Renta" },
+  { key: sanctionPayableKey("income"), label: "Sanciones de Renta — cuenta por pagar", group: "Renta" },
+  { key: sanctionExpenseKey("withholding"), label: "Sanciones de Retefuente — gasto", group: "Retención en la fuente" },
+  { key: sanctionPayableKey("withholding"), label: "Sanciones de Retefuente — cuenta por pagar", group: "Retención en la fuente" },
+  { key: TAX_PUC.interestExpense, label: "Intereses por pagos de impuestos — gasto", group: "Pagos de impuestos" },
+  { key: TAX_PUC.excessFavor, label: "Excedente a favor de la DIAN — deudor", group: "Pagos de impuestos" },
 ];
 
+/** Claves PUC que cada impuesto necesita configurar (las de Retefuente por concepto salen de la declaración). */
 export const PUC_KEYS_BY_TAX: Record<TaxType, TaxPucKey[]> = {
-  withholding: [TAX_PUC.withholdingPayable],
-  vat: [TAX_PUC.vatPayable, TAX_PUC.vatFavor],
-  income: [TAX_PUC.incomePayable, TAX_PUC.incomeFavor, TAX_PUC.incomeAdvance, TAX_PUC.priorResults],
+  withholding: [sanctionExpenseKey("withholding"), sanctionPayableKey("withholding"), TAX_PUC.interestExpense, TAX_PUC.excessFavor],
+  vat: [TAX_PUC.vatPayable, TAX_PUC.vatFavor, sanctionExpenseKey("vat"), sanctionPayableKey("vat"), TAX_PUC.interestExpense, TAX_PUC.excessFavor],
+  income: [TAX_PUC.incomePayable, TAX_PUC.incomeFavor, TAX_PUC.incomeAdvance, TAX_PUC.priorResults, sanctionExpenseKey("income"), sanctionPayableKey("income"), TAX_PUC.interestExpense, TAX_PUC.excessFavor],
 };

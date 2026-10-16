@@ -68,6 +68,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 22, name: "exogena_foundation", sql: include_str!("../../migrations/022_exogena_foundation.sql"), rebuilds_tables: false },
     Migration { version: 23, name: "exogena_catalog_seed", sql: include_str!("../../migrations/023_exogena_catalog_seed.sql"), rebuilds_tables: false },
     Migration { version: 24, name: "company_registry_notes_concepts", sql: include_str!("../../migrations/024_company_registry_notes_concepts.sql"), rebuilds_tables: false },
+    Migration { version: 25, name: "tax_adjustments_excess", sql: include_str!("../../migrations/025_tax_adjustments_excess.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
@@ -228,7 +229,7 @@ mod tests {
         conn.execute("INSERT INTO suppliers (id, nit, business_name, vat_type, created_at, updated_at) VALUES (7, '900319753', 'PRICESMART', 'purchase', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (1, 'E', '1', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO shareholders (id, company_id, name, identity_document, percentage, sort_order, created_at, updated_at) VALUES (3, 1, 'ANA', 'CC 1020', 100, 0, 'x', 'x')", []).unwrap();
-        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string()]);
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string(), "025_tax_adjustments_excess".to_string()]);
         let (id, nit, status, dv): (i64, String, String, String) = conn
             .query_row("SELECT id, nit, data_status, dv FROM suppliers", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .unwrap();

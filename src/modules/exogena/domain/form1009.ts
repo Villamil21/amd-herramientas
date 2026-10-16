@@ -247,9 +247,10 @@ export function build1009(src: Sources1009): Built1009 {
   // 2. Obligaciones tributarias pendientes al corte → DIAN (concepto 2204): el mismo saldo del ESF (el total declarado ya incluye las sanciones del formulario).
   const tax = taxEffects(src.tax, end);
   let taxTotal = 0;
-  for (const issue of tax.issues) if (issue.level === "blocking") issues.push({ level: "blocking", message: issue.message, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } });
+  // Los excedentes a favor y la CxC a socios afectan EEFF y 1008, no el 1009.
+  for (const issue of tax.issues) if (issue.level === "blocking" && issue.code !== "excess_review" && issue.taxType !== "capital") issues.push({ level: "blocking", message: issue.message, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } });
   for (const effect of tax.effects) {
-    if (effect.kind !== "withholding_payable" && effect.kind !== "vat_payable" && effect.kind !== "income_payable") continue;
+    if (effect.kind !== "withholding_payable" && effect.kind !== "vat_payable" && effect.kind !== "income_payable" && effect.kind !== "sanction_payable") continue;
     if (!effect.pucCode) {
       unmatched.push({ kind: "tax_unconfigured", label: `${effect.label}: falta la cuenta PUC`, cents: effect.cents, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } });
       continue;

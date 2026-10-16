@@ -179,14 +179,34 @@ describe("Estado de Situación Financiera", () => {
     expect(s.bankBalances).toHaveLength(1);
   });
 
-  it("capital social desde Empresas y la diferencia suscrito − pagado en 132505", () => {
-    const s = run({ company: { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 1_500, paidNominalValue: 1_000 } });
+  it("capital social desde Empresas y la diferencia suscrito − pagado en el PUC configurado", () => {
+    const s = run({ company: { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 1_500, paidNominalValue: 1_000 }, capitalReceivablePuc: "132505" });
     const equity = s.sections.equity.lines.find((l) => l.line.role === "share_capital")!;
     expect(equity.cents).toBe(200_000_000);
     expect(s.pucBalances.get("132505")).toBe(50_000_000);
+    expect(s.sociosReceivableCents).toBe(50_000_000);
     expect(isBalanced(s)).toBe(false);
     // Suscrito = pagado: sin saldo en 132505.
-    expect(run({ company: { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 2_000, paidNominalValue: 1_000 } }).pucBalances.has("132505")).toBe(false);
+    expect(run({ company: { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 2_000, paidNominalValue: 1_000 }, capitalReceivablePuc: "132505" }).pucBalances.has("132505")).toBe(false);
+  });
+
+  it("la CxC a socios sin PUC no entra a EEFF y queda como pendiente bloqueante; sin ubicación tampoco", () => {
+    const company = { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 1_500, paidNominalValue: 1_000 };
+    const none = run({ company, capitalReceivablePuc: null });
+    expect(none.pucBalances.has("132505")).toBe(false);
+    expect(none.sociosReceivableCents).toBe(0);
+    expect(none.tax.issues).toEqual([expect.objectContaining({ level: "blocking", taxType: "capital", pucKey: "capital.receivable" })]);
+    // Con PUC pero sin línea del ESF: queda sin clasificar (por su familia de cuatro dígitos) y no entra.
+    const unmapped = run({ company, capitalReceivablePuc: "132510" });
+    expect(unmapped.sociosReceivableCents).toBe(0);
+    expect(unmapped.unclassified).toEqual([expect.objectContaining({ pucCode: "1325", cents: 50_000_000 })]);
+  });
+
+  it("la ubicación en EEFF de un PUC puede configurarse por familia de cuatro dígitos", () => {
+    const familyOnly = MAPPINGS.filter((m) => m.pucCode !== "132505").concat(map("1325", 2));
+    const s = run({ mappings: familyOnly, company: { subscribedTotalShares: 2_000, subscribedNominalValue: 1_000, paidTotalShares: 1_500, paidNominalValue: 1_000 }, capitalReceivablePuc: "132510" });
+    expect(s.sociosReceivableCents).toBe(50_000_000);
+    expect(s.unclassified).toHaveLength(0);
   });
 
   it("resultados anteriores negativos siguen en Patrimonio, en negativo", () => {
@@ -316,7 +336,7 @@ describe("reporte de operaciones: Banco y OTC", () => {
 
 describe("obligaciones tributarias en el ESF", () => {
   const base = { companyId: 1, previousFormNumber: "", isCorrection: false, supersededBy: null, favorCents: 0, resolution: "", nit: "", companyName: "", fileName: "", detail: {}, createdAt: "", updatedAt: "", events: [] as TaxReturn["events"], payments: [] as TaxReturn["payments"] };
-  const paidOn = (paymentDate: string, amountCents: number): TaxReturn["payments"] => [{ id: amountCents, returnId: 0, paymentDate, amountCents, note: "", reference: "", createdAt: "", updatedAt: "" }];
+  const paidOn = (paymentDate: string, amountCents: number): TaxReturn["payments"] => [{ id: amountCents, returnId: 0, paymentDate, amountCents, note: "", reference: "", excessCents: 0, excessKind: "", excessReview: null, createdAt: "", updatedAt: "" }];
   const retefuente = { ...base, id: 1, taxType: "withholding", year: 2026, period: 9, periodicity: "monthly", periodStart: "2026-09-01", periodEnd: "2026-09-30", formNumber: "1", payableCents: 62_400_000, payments: paidOn("2026-10-15", 62_400_000), incomeOrdinaryCents: null, incomeLossCents: null, advanceNextCents: null, advanceTargetYear: null } as TaxReturn;
   const renta = { ...base, id: 2, taxType: "income", year: 2025, period: null, periodicity: "annual", periodStart: "2025-01-01", periodEnd: "2025-12-31", formNumber: "2", payableCents: 0, incomeOrdinaryCents: 1_966_200_000, incomeLossCents: 0, advanceNextCents: 0, advanceTargetYear: 2026 } as TaxReturn;
   const puc = new Map([[TAX_PUC.withholdingPayable, "236540"], [TAX_PUC.priorResults, "370505"]]);
@@ -356,6 +376,62 @@ describe("obligaciones tributarias en el ESF", () => {
     it("caso 3: Retefuente 2025 pagada el 15/01/2026 → no aparece como CxP", () => {
       const s = runWith([ret(12, 2025, 12, "2026-01-15")]);
       expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([0, 0]);
+    });
+  });
+
+  describe("pruebas 09 — PUC por concepto, sanciones, excedentes y presentación por familia", () => {
+    const casillas = { "44": 94_100_000, "129": 31_700_000, "130": 62_400_000, "137": 5_000_000, "138": 67_400_000 };
+    const septiembre = { ...retefuente, id: 30, payableCents: 67_400_000, payments: [], detail: { withholding: { casillas }, manual: { adjustments129: [{ id: "a", conceptKey: "services", cents: 31_700_000, note: "" }] } } } as TaxReturn;
+    const conceptPuc = new Map<string, string>([
+      ["tax.wh.services", "236525"],
+      ["tax.sanction.payable.withholding", "236595"],
+      ["tax.sanction.expense.withholding", "531520"],
+      ["tax.interest.expense", "530520"],
+      ["tax.excess.favor", "135515"],
+    ]);
+    // Ubicación por familia de cuatro dígitos: 2365 → Cuentas por pagar, 5315 → Gastos diversos (sin mapear cada subcuenta).
+    const familyMappings = [...MAPPINGS, map("2365", 6), map("5315", 28), map("5305", 33), map("1355", 2)];
+    const go = (over: Partial<EngineInput> = {}) => run({ tax: { returns: [septiembre], puc: conceptPuc, vatPeriodicity: null }, mappings: familyMappings, start: "2026-01-01", end: "2026-09-30", ...over });
+
+    it("las subcuentas de la misma familia comparten ubicación y el pasivo suma concepto + sanción", () => {
+      const s = go();
+      expect(s.unclassified).toHaveLength(0);
+      // Servicios 941.000 − devolución 317.000 = 624.000 y la sanción por pagar 50.000, ambos en «Cuentas por pagar» (familia 2365).
+      expect(s.esf.currentLiabilities).toBe(67_400_000);
+      const line = s.sections.liability_current.lines.find((l) => l.line.id === 6)!;
+      expect(line.contributions.map((c) => [c.pucCode, c.cents])).toEqual([["236525", 62_400_000], ["236595", 5_000_000]]);
+      expect(line.contributions[0].concept).toContain("Servicios");
+    });
+
+    it("la sanción es gasto del periodo en que se presenta (EERR) y no entra a un rango anterior", () => {
+      expect(go().eerr.otherExpenses + go().eerr.admin).toBe(5_000_000);
+      expect(go({ start: "2026-10-01", end: "2026-10-31" }).eerr.admin).toBe(0);
+    });
+
+    it("sin el PUC de gasto de la sanción: la cuenta por pagar entra, el gasto queda pendiente y bloquea", () => {
+      const puc = new Map(conceptPuc);
+      puc.delete("tax.sanction.expense.withholding");
+      const s = go({ tax: { returns: [septiembre], puc, vatPeriodicity: null } });
+      expect(s.esf.currentLiabilities).toBe(67_400_000);
+      expect(s.eerr.admin + s.eerr.otherExpenses).toBe(0);
+      expect(s.tax.issues.some((i) => i.pucKey === "tax.sanction.expense.withholding")).toBe(true);
+      expect(checklist(s, s, [], [], 0).find((c) => c.id === "tax")!.ok).toBe(false);
+    });
+
+    it("un PUC de la familia sin ubicación queda UNA vez «sin clasificar» por su familia de cuatro dígitos", () => {
+      const s = go({ mappings: MAPPINGS });
+      expect(s.unclassified.map((u) => u.pucCode).sort()).toEqual(["2365", "5315"]);
+    });
+
+    it("excedente a favor aprobado de un año anterior → deudor NO corriente; sin aprobar no entra", () => {
+      const excessReturn = (review: TaxReturn["payments"][number]["excessReview"]): TaxReturn =>
+        ({ ...septiembre, id: 31, year: 2025, period: 12, periodStart: "2025-12-01", periodEnd: "2025-12-31", formNumber: "31", payableCents: 10_000_000, detail: {}, payments: [{ id: 9, returnId: 31, paymentDate: "2026-01-10", amountCents: 10_000_000, excessCents: 2_000_000, excessKind: "favor", excessReview: review, note: "", reference: "", createdAt: "", updatedAt: "" }] }) as TaxReturn;
+      const fingerprint = "9|2026-01-10|2000000|favor|135515";
+      const approved = go({ tax: { returns: [excessReturn({ decision: "applies", fingerprint, decidedAt: "x" })], puc: conceptPuc, vatPeriodicity: null } });
+      expect([approved.esf.currentAssets, approved.esf.nonCurrentAssets]).toEqual([0, 2_000_000]);
+      const pending = go({ tax: { returns: [excessReturn(null)], puc: conceptPuc, vatPeriodicity: null } });
+      expect(pending.esf.nonCurrentAssets).toBe(0);
+      expect(checklist(pending, pending, [], [], 0).find((c) => c.id === "tax")!.ok).toBe(false);
     });
   });
 

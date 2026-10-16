@@ -297,6 +297,7 @@ const FS_TABLES: &[&str] = &[
     "fs_tax_returns",
     "fs_tax_return_events",
     "fs_tax_payments",
+    "fs_tax_excess_reviews",
     "fs_bank_account_lifecycle",
     "fs_bank_account_events",
     "fs_bank_gmf_rules",

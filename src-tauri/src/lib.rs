@@ -164,6 +164,8 @@ pub fn run() {
             commands::tax::update_fs_tax_payment,
             commands::tax::delete_fs_tax_payment,
             commands::tax::set_fs_tax_return_resolution,
+            commands::tax::set_fs_tax_excess_review,
+            commands::tax::patch_fs_tax_return_detail,
             commands::tax::get_fs_tax_settings,
             commands::tax::save_fs_tax_settings,
             commands::tax::list_fs_tax_empty_periods,

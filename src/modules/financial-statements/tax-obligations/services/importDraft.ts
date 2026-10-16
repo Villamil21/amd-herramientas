@@ -107,6 +107,7 @@ export function draftInput(d: ImportDraft, yearSource: "form" | "presentation" |
       equity: p.equity.map((e) => ({ key: e.key, label: e.label, cents: e.value?.cents ?? null, casilla: e.value?.casilla ?? null })),
       warnings: p.warnings,
       nameMismatchConfirmed: d.nameMismatch || undefined,
+      ...(p.withholdingCasillas && Object.keys(p.withholdingCasillas).length > 0 && { withholding: { casillas: p.withholdingCasillas } }),
     },
   };
 }

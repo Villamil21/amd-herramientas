@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Input, Loader, M
 import { exogenaService } from "../../../services/exogenaService";
 import { errorMessage } from "../../../services/tauri";
 import type { ExoRecord, RecordData, SyncOutcome } from "../../../types/exogena";
+import { ExcessReviewModal } from "../../financial-statements/tax-obligations/ExcessReviewModal";
 import { ConceptsManager } from "../components/ConceptsManager";
 import { ExogenaContextBar } from "../components/ExogenaContextBar";
 import { ProblemsPanel } from "../components/ProblemsPanel";
@@ -28,7 +29,7 @@ const nameOf = (d: RecordData) => (str(d.businessName) || [d.firstSurname, d.sec
 export default function Format1008Page() {
   const toast = useToast();
   const [selection] = useExogenaSelection();
-  const { companies, company, catalogs, index, format, model, concepts, reloadConcepts } = use1008(selection.companyId, selection.year);
+  const { companies, company, catalogs, index, format, model, concepts, reloadConcepts, reloadLedger } = use1008(selection.companyId, selection.year);
   const { records, status, reload, setStatus } = format;
   const [syncing, setSyncing] = useState(false);
   const [editing, setEditing] = useState<ExoRecord | null>(null);
@@ -36,6 +37,7 @@ export default function Format1008Page() {
   const [restoring, setRestoring] = useState<ExoRecord | null>(null);
   const [deleting, setDeleting] = useState<ExoRecord | null>(null);
   const [managing, setManaging] = useState(false);
+  const [excessOpen, setExcessOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const problems = model?.problems ?? [];
@@ -167,6 +169,20 @@ export default function Format1008Page() {
               La CxC a socios, los socios o los saldos a favor de la DIAN cambiaron desde la última sincronización ({changes.length} {changes.length === 1 ? "registro" : "registros"}). Usa «Actualizar desde fuentes»; tus ajustes manuales no se pierden.
             </Alert>
           )}
+          {(model.excessReviews ?? []).length > 0 && (
+            <Alert tone={model.excessReviews.some((x) => x.needsReview) ? "warning" : "info"} title="Excedentes a favor de DIAN">
+              <div className="row row--between" style={{ flexWrap: "wrap" }}>
+                <span>
+                  {model.excessReviews.some((x) => x.needsReview)
+                    ? "Hay excedentes de pagos por revisar: un excedente que aplica entra al 1008 (DIAN-1317) y a Deudores del ESF a la vez."
+                    : "Los excedentes a favor de la DIAN tienen decisión vigente; puedes revisarla."}
+                </span>
+                <Button size="sm" onClick={() => setExcessOpen(true)}>
+                  Revisar excedentes
+                </Button>
+              </div>
+            </Alert>
+          )}
           <ProblemsPanel problems={problems} okText="Sin pendientes: el 1008 se puede marcar como listo." />
           <Card
             flush
@@ -226,8 +242,8 @@ export default function Format1008Page() {
                             <div className="muted">{d.personType === "PJ" ? "Persona jurídica" : d.personType === "PN" ? "Persona natural" : "Tipo sin definir"}</div>
                             {Array.isArray(d.taxTrace) &&
                               (d.taxTrace as { returnId: number; kind: string; periodLabel: string; formNumber: string; resultCents: number }[]).map((t) => (
-                                <div key={t.returnId + t.kind} className="muted">
-                                  {t.kind === "vat_favor" ? "IVA a favor" : "Renta a favor"} · {t.periodLabel} · form. {t.formNumber || "s/n"} · $ {formatPesosPlain(Math.round(t.resultCents / 100))}
+                                <div key={`${t.returnId}-${t.kind}-${(t as { paymentId?: number }).paymentId ?? ""}`} className="muted">
+                                  {t.kind === "vat_favor" ? "IVA a favor" : t.kind === "excess_favor" ? "Excedente de pago a favor" : "Renta a favor"} · {t.periodLabel} · form. {t.formNumber || "s/n"} · $ {formatPesosPlain(Math.round(t.resultCents / 100))}
                                 </div>
                               ))}
                           </td>
@@ -292,6 +308,7 @@ export default function Format1008Page() {
         onSave={saveEdit}
         onRestore={async (r) => setRestoring(r)}
       />
+      <ExcessReviewModal open={excessOpen} items={model?.excessReviews ?? []} onClose={() => setExcessOpen(false)} onChanged={reloadLedger} onConfigurePuc={() => navigate(paths.submodule("estados-financieros", "generador"))} />
       <ConceptsManager open={managing} formatCode={FORMAT_1008} concepts={concepts ?? []} onClose={() => setManaging(false)} onChanged={() => void reloadConcepts()} />
       <ConfirmDialog
         open={!!restoring}

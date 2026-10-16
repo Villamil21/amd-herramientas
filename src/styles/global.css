@@ -5318,23 +5318,38 @@ body.is-reordering * {
   color: var(--color-muted);
 }
 
-/* Obligaciones tributarias: barra común, fichas compactas y conciliación */
-.tax-bar__row {
+/* Obligaciones tributarias: parámetros comunes (Empresa y Fecha de corte alineados), fichas compactas y conciliación */
+.tax-params {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3) var(--space-5);
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
-.tax-bar__context {
-  align-self: center;
+.tax-params__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-5);
+  align-items: start;
 }
 
-.tax-bar__actions {
+.tax-params__grid .select,
+.tax-params__grid .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.tax-params__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-left: auto;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 720px) {
+  .tax-params__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tax-coverage__cell.is-s-pending,

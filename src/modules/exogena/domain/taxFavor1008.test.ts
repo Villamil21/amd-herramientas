@@ -72,7 +72,7 @@ describe("1008 — saldos a favor de IVA y Renta a nombre de la DIAN", () => {
 
 describe("1009 — mismo saldo que el ESF, con traza", () => {
   it("el saldo pendiente (declarado − pagos ≤ corte) coincide con el efecto del ESF y conserva sanciones", () => {
-    const r = ret({ taxType: "withholding", periodicity: "monthly", period: 12, periodStart: "2025-12-01", periodEnd: "2025-12-31", payableCents: 520_000_00, payments: [{ id: 1, returnId: 1, paymentDate: "2025-12-20", amountCents: 200_000_00, note: "", reference: "", createdAt: "x", updatedAt: "x" }, { id: 2, returnId: 1, paymentDate: "2026-01-10", amountCents: 100_000_00, note: "", reference: "", createdAt: "x", updatedAt: "x" }] });
+    const r = ret({ taxType: "withholding", periodicity: "monthly", period: 12, periodStart: "2025-12-01", periodEnd: "2025-12-31", payableCents: 520_000_00, payments: [{ id: 1, returnId: 1, paymentDate: "2025-12-20", amountCents: 200_000_00, note: "", reference: "", excessCents: 0, excessKind: "", excessReview: null, createdAt: "x", updatedAt: "x" }, { id: 2, returnId: 1, paymentDate: "2026-01-10", amountCents: 100_000_00, note: "", reference: "", excessCents: 0, excessKind: "", excessReview: null, createdAt: "x", updatedAt: "x" }] });
     const eff = taxEffects(tax([r]), "2025-12-31").effects[0];
     const built = build1009({ year: 2025, company: { shareholders: [] }, suppliers: [dian], movements: [], catalog: { lines: [], sections: [] }, mappings: [], batches: [], tax: tax([r]), statements: { esf: { liabilities: 0 } as never } });
     expect(built.proposals[0].data.balanceCents).toBe(eff.cents);
@@ -96,7 +96,7 @@ describe("Deudores del ESF ↔ total 1008", () => {
     ];
     const ok = reconcileDeudores({ eeffDeudoresCents: 3_500_000_00, sociosReceivableCents: 2_000_000_00, taxEffects: effects, records });
     expect(ok.differenceCents).toBe(0);
-    expect(ok.rows.map((r) => [r.key, r.differenceCents])).toEqual([["socios", 0], ["vat_favor", 0], ["income_favor", 0], ["other", 0]]);
+    expect(ok.rows.map((r) => [r.key, r.differenceCents])).toEqual([["socios", 0], ["vat_favor", 0], ["income_favor", 0], ["excess_favor", 0], ["other", 0]]);
     // El ESF trae 400.000 de otros deudores que el 1008 no tiene.
     const gap = reconcileDeudores({ eeffDeudoresCents: 3_900_000_00, sociosReceivableCents: 2_000_000_00, taxEffects: effects, records });
     expect(gap.differenceCents).toBe(400_000_00);

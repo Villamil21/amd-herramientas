@@ -14,6 +14,7 @@ import {
 } from "../../../types/fs";
 import { estimatedIncomeTax, monthsBetween, roundThousands } from "../shared/money";
 import { taxEffects, type TaxEffects, type TaxInput } from "../tax-obligations/services/effects";
+import { CAPITAL_RECEIVABLE_KEY, SHORT_TAX_LABEL } from "../tax-obligations/types";
 
 /**
  * Motor de los Estados Financieros: consolida los movimientos de UNA empresa
@@ -44,7 +45,6 @@ import { taxEffects, type TaxEffects, type TaxInput } from "../tax-obligations/s
  *   en Ventas y Costo de Ventas. El resultado nunca cambia por la presentación.
  */
 
-export const CAPITAL_RECEIVABLE_PUC = "132505";
 
 /** Secciones de naturaleza débito: una salida del banco (D) las aumenta. */
 const DEBIT_SECTIONS = new Set<FsSectionKey>(["asset_current", "asset_noncurrent", "costs", "admin_expenses", "sales_expenses", "other_expenses"]);
@@ -75,6 +75,8 @@ export interface EngineInput {
   presentation: Presentation;
   /** Declaraciones tributarias de la empresa (Obligaciones tributarias). */
   tax?: TaxInput;
+  /** Cuenta PUC de la CxC a socios (capital suscrito − pagado). Sin ella la diferencia no entra a EEFF. */
+  capitalReceivablePuc?: string | null;
   /** Apertura / cierre confirmados de las cuentas bancarias. */
   bankLifecycles?: BankAccountLifecycle[];
 }
@@ -148,6 +150,8 @@ export interface Statements {
   bankBalances: BankBalanceStatus[];
   /** Efecto de las obligaciones tributarias a la fecha final y lo que falta resolver. */
   tax: TaxEffects;
+  /** CxC a socios (capital suscrito − pagado) que SÍ entró a EEFF por tener PUC y ubicación; 0 si falta alguno. */
+  sociosReceivableCents: number;
   presentation: Presentation;
 }
 
@@ -174,21 +178,33 @@ export function buildStatements(input: EngineInput): Statements {
   const unclassified = new Map<string, UnclassifiedPuc>();
   const pucBalances = new Map<string, number>();
 
-  /** Línea del pasivo no corriente equivalente a una corriente: la del mismo nombre o la representativa de la sección. */
-  const noncurrentLines = catalog.lines.filter((l) => l.section === "liability_noncurrent" && l.isActive).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
-  const noncurrentRep = catalog.sections.find((s) => s.section === "liability_noncurrent")?.representativeLineId;
-  const noncurrentFor = (line: FsLine) =>
-    noncurrentLines.find((l) => l.name.trim().toLowerCase() === line.name.trim().toLowerCase()) ?? noncurrentLines.find((l) => l.id === noncurrentRep) ?? noncurrentLines[0];
+  /** Línea no corriente equivalente a una corriente (pasivo o activo): la del mismo nombre o la representativa de la sección. */
+  const noncurrentOf = (section: FsSectionKey) => {
+    const lines = catalog.lines.filter((l) => l.section === section && l.isActive).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+    return { lines, rep: catalog.sections.find((s) => s.section === section)?.representativeLineId };
+  };
+  const NONCURRENT_TARGET: Partial<Record<FsSectionKey, FsSectionKey>> = { liability_current: "liability_noncurrent", asset_current: "asset_noncurrent" };
+  const noncurrentFor = (line: FsLine) => {
+    const target = NONCURRENT_TARGET[line.section];
+    if (!target) return undefined;
+    const { lines: candidates, rep } = noncurrentOf(target);
+    return candidates.find((l) => l.name.trim().toLowerCase() === line.name.trim().toLowerCase()) ?? candidates.find((l) => l.id === rep) ?? candidates[0];
+  };
 
-  /** Suma un valor de un PUC según su destino en el catálogo. */
-  function post(pucCode: string, pucConcept: string, cents: number, date: string | null, opts: { dc?: "D" | "C" | null; settlesOn?: string | null; noncurrent?: string } = {}) {
-    if (date !== null && date > end) return;
-    const m = mapping.get(pucCode);
-    if (m?.excluded) return;
+  /**
+   * Suma un valor de un PUC según su destino en el catálogo. La ubicación se busca por el código completo y, si no está,
+   * por su familia de cuatro dígitos (una sola clasificación de presentación por cuenta, p. ej. 2365). Devuelve si entró.
+   * `family`: los valores sin clasificar se agrupan por familia (para clasificar una sola vez).
+   */
+  function post(pucCode: string, pucConcept: string, cents: number, date: string | null, opts: { dc?: "D" | "C" | null; settlesOn?: string | null; noncurrent?: string; family?: boolean; ref?: string } = {}): boolean {
+    if (date !== null && date > end) return false;
+    const familyCode = pucCode.slice(0, 4);
+    const m = mapping.get(pucCode) ?? mapping.get(familyCode);
+    if (m?.excluded) return false;
     let line = m?.lineId ? lines.get(m.lineId) : undefined;
     // Presentación no corriente (el PUC original se conserva en la contribución).
     let reclassified: string | undefined;
-    if (opts.noncurrent && line?.isActive && line.section === "liability_current") {
+    if (opts.noncurrent && line?.isActive && NONCURRENT_TARGET[line.section]) {
       const target = noncurrentFor(line);
       if (target) {
         reclassified = `${opts.noncurrent} (PUC ${pucCode}, línea corriente «${line.name}»)`;
@@ -196,25 +212,29 @@ export function buildStatements(input: EngineInput): Statements {
       }
     }
     if (!line || !line.isActive) {
-      const u = unclassified.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), count: 0, cents: 0, inactiveLine: line ? line.name : undefined };
+      const key = opts.family ? familyCode : pucCode;
+      const u = unclassified.get(key) ?? { pucCode: key, concept: opts.family ? concept(familyCode) : pucConcept || concept(pucCode), count: 0, cents: 0, inactiveLine: line ? line.name : undefined };
       u.count++;
       u.cents += opts.dc ? bankAccountingCents(opts.dc, cents, isDebitPuc(pucCode)) : cents;
-      unclassified.set(pucCode, u);
-      return;
+      unclassified.set(key, u);
+      return false;
     }
     const esf = isEsf(line.section);
-    if (esf && opts.settlesOn && opts.settlesOn <= end) return; // cuenta por pagar ya pagada a la fecha final
-    if (!esf && date !== null && date < start) return; // EERR: solo el rango
+    if (esf && opts.settlesOn && opts.settlesOn <= end) return false; // cuenta por pagar ya pagada a la fecha final
+    if (!esf && date !== null && date < start) return false; // EERR: solo el rango
     let value = cents;
     if (opts.dc) value = bankAccountingCents(opts.dc, cents, DEBIT_SECTIONS.has(line.section));
     const b = bucket(line.id);
     b.cents += value;
     if (reclassified && !b.automatic.includes(reclassified)) b.automatic.push(reclassified);
-    const c = b.byPuc.get(pucCode) ?? { pucCode, concept: pucConcept || concept(pucCode), cents: 0, count: 0 };
+    // Los valores de obligaciones tributarias se detallan por declaración y periodo (`ref`), no solo por PUC.
+    const contributionKey = opts.ref ? `${pucCode}|${opts.ref}` : pucCode;
+    const c = b.byPuc.get(contributionKey) ?? { pucCode, concept: opts.ref || pucConcept || concept(pucCode), cents: 0, count: 0 };
     c.cents += value;
     c.count++;
-    b.byPuc.set(pucCode, c);
+    b.byPuc.set(contributionKey, c);
     pucBalances.set(pucCode, (pucBalances.get(pucCode) ?? 0) + value);
+    return true;
   }
 
   // 1. Movimientos activos (el reporte de operaciones va aparte: solo alimenta la presentación).
@@ -238,8 +258,8 @@ export function buildStatements(input: EngineInput): Statements {
   for (const b of bankBalances) if (b.balance) post(b.balance.pucCode, "", b.balance.balanceCents, null);
 
   // 2b. Obligaciones tributarias a la fecha final (sin PUC configurado no se envían: bloquea en la lista de verificación).
-  const tax = input.tax ? taxEffects(input.tax, end) : { effects: [], issues: [] };
-  for (const e of tax.effects) if (e.pucCode) post(e.pucCode, "", e.cents, null, e.noncurrent ? { noncurrent: `Retefuente de años anteriores a ${end.slice(0, 4)} (no corriente)` } : {});
+  const tax: TaxEffects = input.tax ? taxEffects(input.tax, end) : { effects: [], issues: [], excessReviews: [] };
+  for (const e of tax.effects) if (e.pucCode) post(e.pucCode, "", e.cents, e.date ?? null, { family: true, ref: e.label, ...(e.noncurrent && { noncurrent: `${SHORT_TAX_LABEL[e.taxType]} de años anteriores a ${end.slice(0, 4)} (no corriente)` }) });
 
   // 3. Capital: suscrito en Capital social; la diferencia con el pagado en 132505.
   const { subscribedTotalShares, subscribedNominalValue, paidTotalShares, paidNominalValue } = input.company;
@@ -251,7 +271,13 @@ export function buildStatements(input: EngineInput): Statements {
     b.cents += subscribed;
     b.automatic.push("Capital suscrito (Empresas)");
   }
-  if (subscribed && subscribed !== paid) post(CAPITAL_RECEIVABLE_PUC, "A SOCIOS", subscribed - paid, null);
+  let sociosReceivableCents = 0;
+  if (subscribed && subscribed !== paid) {
+    // La CxC a socios exige un PUC configurado; la ubicación (y si es corriente / no corriente) sale de su clasificación.
+    if (input.capitalReceivablePuc) {
+      if (post(input.capitalReceivablePuc, "A SOCIOS", subscribed - paid, null, { family: true })) sociosReceivableCents = subscribed - paid;
+    } else tax.issues.push({ level: "blocking", taxType: "capital", pucKey: CAPITAL_RECEIVABLE_KEY, code: "puc_missing", message: "Configura la cuenta PUC de la cuenta por cobrar a socios (capital suscrito − pagado): sin ella no se incluye en los Estados Financieros." });
+  }
 
   // 4. Reporte de operaciones según la presentación (el resultado es el mismo en ambas).
   const months = monthsBetween(start, end).map((period) => ({ period, sellsCents: crypto.byMonth.get(period) ?? 0 }));
@@ -341,6 +367,7 @@ export function buildStatements(input: EngineInput): Statements {
     pucBalances,
     bankBalances,
     tax,
+    sociosReceivableCents,
     presentation,
   };
 }

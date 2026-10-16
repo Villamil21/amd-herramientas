@@ -33,6 +33,16 @@ pub fn delete_fs_tax_payment(db: State<'_, Db>, id: i64) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn set_fs_tax_excess_review(db: State<'_, Db>, payment_id: i64, decision: String, fingerprint: String) -> AppResult<()> {
+    db.with(|c| tax::set_excess_review(c, payment_id, &decision, &fingerprint))
+}
+
+#[tauri::command]
+pub fn patch_fs_tax_return_detail(db: State<'_, Db>, id: i64, patch: serde_json::Value, note: String) -> AppResult<()> {
+    db.with(|c| tax::patch_detail(c, id, &patch, &note))
+}
+
+#[tauri::command]
 pub fn set_fs_tax_return_resolution(db: State<'_, Db>, id: i64, resolution: String) -> AppResult<()> {
     db.with(|c| tax::set_resolution(c, id, &resolution))
 }

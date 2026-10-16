@@ -2,6 +2,7 @@ import type { PdfDocumentText, PdfTextItem } from "../../../bank-analysis/shared
 import { normalizeKey } from "../../../../utils/text";
 import type { TaxType, VatPeriodicity } from "../types";
 import { formatDateForDisplay } from "../../../../utils/dates";
+import { CASILLA_TOTAL, WH_CASILLA_RANGE } from "../withholding/detail";
 
 /**
  * Lector de declaraciones DIAN (Formularios 350 Retención en la fuente, 300
@@ -31,7 +32,11 @@ export type ValueKey =
   | "incomeTaxBalance"
   | "incomeOrdinary"
   | "incomeLoss"
-  | "incomeAdvanceNext";
+  | "incomeAdvanceNext"
+  | "sanctions"
+  | "incomeTaxDue"
+  | "incomeAdvancePrior"
+  | "incomeSelfWithholding";
 
 export type EquityKey = "cash" | "investments" | "receivables" | "inventories" | "intangibles" | "biological" | "ppe" | "otherAssets" | "grossEquity" | "liabilities" | "netEquity";
 
@@ -66,6 +71,8 @@ export interface ParsedTaxReturn {
   values: Partial<Record<ValueKey, ReadValue>>;
   /** Solo Renta: patrimonio declarado (informativo, nunca va a los Estados Financieros). */
   equity: { key: EquityKey; label: string; value: ReadValue | null }[];
+  /** Solo Formulario 350: valor de cada casilla numérica leída (casilla → centavos), para discriminar la retención por concepto. */
+  withholdingCasillas?: Record<string, number>;
   warnings: string[];
 }
 
@@ -88,6 +95,7 @@ const VALUE_CONCEPTS: Record<TaxType, Concept[]> = {
   vat: [
     { key: "vatPayable", label: "Total saldo a pagar", match: ["total saldo a pagar"] },
     { key: "vatFavor", label: "Total saldo a favor", match: ["total saldo a favor", "o total saldo a favor"] },
+    { key: "sanctions", label: "Sanciones", match: ["sanciones"] },
   ],
   income: [
     { key: "incomeOrdinary", label: "Renta líquida ordinaria del ejercicio", match: ["renta liquida ordinaria del ejercicio"] },
@@ -96,6 +104,11 @@ const VALUE_CONCEPTS: Record<TaxType, Concept[]> = {
     { key: "incomeTaxBalance", label: "Saldo a pagar por impuesto", match: ["saldo a pagar por impuesto"] },
     { key: "incomePayable", label: "Total saldo a pagar", match: ["total saldo a pagar"] },
     { key: "incomeFavor", label: "Total saldo a favor", match: ["total saldo a favor"] },
+    // Composición de la liquidación (informativos; no son obligatorios).
+    { key: "sanctions", label: "Sanciones", match: ["sanciones"] },
+    { key: "incomeTaxDue", label: "Total impuesto a cargo", match: ["total impuesto a cargo"] },
+    { key: "incomeAdvancePrior", label: "Anticipo renta liquidado año gravable anterior", match: ["anticipo renta liquidado ano gravable anterior"] },
+    { key: "incomeSelfWithholding", label: "Autorretenciones", match: ["autorretenciones"] },
   ],
 };
 
@@ -229,6 +242,25 @@ class Page {
     return c ? c.text.trim() : null;
   }
 
+  /**
+   * Casillas numéricas de una tabla (Formulario 350): cada casilla impresa lleva su valor ~100 pt a la derecha, en la misma fila.
+   * Se lee por la casilla y no por el nombre del concepto porque las etiquetas de dos líneas y las filas sin etiqueta no son fiables.
+   */
+  casillaValues(range: [number, number]): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const c of this.items) {
+      const t = c.text.trim();
+      if (!/^\d{2,3}$/.test(t) || this.isValue(c)) continue;
+      const n = Number(t);
+      if (n < range[0] || n > range[1] || t in out) continue;
+      const v = this.items
+        .filter((i) => this.isValue(i) && i !== c && Math.abs(i.y - c.y) <= 6 && right(i) - c.x >= 85 && right(i) - c.x <= 125)
+        .sort((a, b) => Math.abs(a.y - c.y) - Math.abs(b.y - c.y) || Math.abs(right(a) - c.x - 103) - Math.abs(right(b) - c.x - 103))[0];
+      if (v) out[String(n)] = parseDeclaredPesos(v.text)!;
+    }
+    return out;
+  }
+
   /** Dígitos sueltos o agrupados de una zona, en orden de lectura. */
   digits(filter: (i: PdfTextItem) => boolean): string {
     return this.items
@@ -349,6 +381,13 @@ export function parseTaxReturn(doc: PdfDocumentText): ParsedTaxReturn {
     equity = EQUITY_CONCEPTS.map((c) => ({ key: c.key, label: c.label, value: read(c) }));
   }
 
+  let withholdingCasillas: Record<string, number> | undefined;
+  if (form.taxType === "withholding") {
+    withholdingCasillas = page.casillaValues(WH_CASILLA_RANGE);
+    if (!(String(CASILLA_TOTAL) in withholdingCasillas)) warnings.push("No se pudieron leer las casillas por concepto del Formulario 350: la retención no se podrá discriminar por concepto.");
+    else if (values.withholdingTotal && withholdingCasillas[String(CASILLA_TOTAL)] !== values.withholdingTotal.cents) warnings.push("La casilla 138 leída por posición no coincide con el total leído por nombre: revisa la discriminación.");
+  }
+
   // Conceptos obligatorios y validación de casillas.
   const required: Record<TaxType, ValueKey[]> = {
     withholding: ["withholdingTotal"],
@@ -368,5 +407,5 @@ export function parseTaxReturn(doc: PdfDocumentText): ParsedTaxReturn {
   if (!formNumber) warnings.push("No se pudo leer el número de formulario.");
   if (form.taxType !== "income" && period === null) warnings.push("No se pudo leer el periodo de la declaración.");
 
-  return { ...form, year, yearSource, presentedOn, period, periodicity, nit, dv, companyName, formNumber, previousFormNumber, values, equity, warnings };
+  return { ...form, year, yearSource, presentedOn, period, periodicity, nit, dv, companyName, formNumber, previousFormNumber, values, equity, ...(withholdingCasillas && { withholdingCasillas }), warnings };
 }

@@ -107,9 +107,9 @@ export function buildProposals1008(company: Company): SyncProposal[] {
 export function buildTaxProposals1008(src: { tax: TaxInput; year: number; suppliers: Supplier[]; /** El registro DIAN tiene el saldo editado a mano: se sigue proponiendo (en $0 si ya no hay saldos) para que su desglose se actualice sin tocar el valor editado. */ keepManualDian?: boolean }): { proposals: SyncProposal[]; issues: Problem[] } {
   const effects = taxEffects(src.tax, `${src.year}-12-31`);
   const issues: Problem[] = effects.issues
-    .filter((i) => i.level === "blocking")
+    .filter((i) => i.level === "blocking" && i.taxType !== "capital")
     .map((i) => ({ level: "blocking" as const, message: i.message, action: { label: "Obligaciones tributarias", path: "/herramientas/estados-financieros/obligaciones-tributarias" } }));
-  const favors = effects.effects.filter((e) => (e.kind === "vat_favor" || e.kind === "income_favor") && e.pucCode && e.trace);
+  const favors = effects.effects.filter((e) => (e.kind === "vat_favor" || e.kind === "income_favor" || e.kind === "excess_favor") && e.pucCode && e.trace);
   const cents = favors.reduce((n, e) => n + e.cents, 0);
   if (cents <= 0 && !src.keepManualDian) return { proposals: [], issues };
   const supplier = src.suppliers.find((s) => nitDigits(s.nit) === DIAN_NIT);

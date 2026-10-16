@@ -28,6 +28,10 @@ import { CompanySelect } from "../shared/components/CompanySelect";
 import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, roundThousands } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { taxService } from "../tax-obligations/services/taxService";
+import { CAPITAL_RECEIVABLE_KEY, type TaxType } from "../tax-obligations/types";
+import { taxPucItems } from "../tax-obligations/services/pucItems";
+import { ExcessReviewModal } from "../tax-obligations/ExcessReviewModal";
+import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
@@ -80,6 +84,10 @@ export default function GeneratorPage() {
   /** Verificación: los puntos ya cumplidos se ven solo al pedir el detalle. */
   const [checksDetail, setChecksDetail] = useState(false);
   const reviewing = useRef<string | null>(null);
+  const [pucOpen, setPucOpen] = useState(false);
+  const [excessOpen, setExcessOpen] = useState(false);
+  /** Excedentes a favor de DIAN ya ofrecidos en esta sesión (el modal se abre una vez por conjunto pendiente). */
+  const askedExcess = useRef<string>("");
 
   const company = data.companies?.find((c) => c.id === companyId) ?? null;
   const rangeOk = isIsoDate(start) && isIsoDate(end) && start <= end;
@@ -145,11 +153,30 @@ export default function GeneratorPage() {
       start,
       end,
       tax,
+      capitalReceivablePuc: data.settingsMap.get(CAPITAL_RECEIVABLE_KEY) ?? null,
     };
     return { current: buildStatements({ ...input, presentation }), other: buildStatements({ ...input, presentation: presentation === "bank" ? "otc" : "bank" }) };
   }, [ledger, data.catalog, data.mappings, data.index, data.settingsMap, company, start, end, rangeOk, presentation]);
 
   const s = statements?.current ?? null;
+
+  // Cuentas PUC que se configuran desde el Generador: las de los tres impuestos (Retefuente por concepto incluida) y la CxC a socios.
+  const pucItems = useMemo(() => {
+    const returns = ledger?.taxReturns ?? [];
+    const byKey = new Map<string, ReturnType<typeof taxPucItems>[number]>();
+    for (const t of ["withholding", "vat", "income"] as TaxType[]) for (const i of taxPucItems(t, returns)) byKey.set(i.key, i);
+    byKey.set(CAPITAL_RECEIVABLE_KEY, { key: CAPITAL_RECEIVABLE_KEY, label: "Cuenta por cobrar a socios (capital suscrito − pagado)", group: "Capital" });
+    return [...byKey.values()];
+  }, [ledger?.taxReturns]);
+
+  // Al preparar los EEFF, los excedentes a favor de DIAN pendientes de decisión se muestran en un modal (una vez por conjunto pendiente).
+  const pendingExcess = s?.tax.excessReviews.filter((x) => x.needsReview) ?? [];
+  const pendingExcessKey = pendingExcess.map((x) => x.fingerprint).join(",");
+  useEffect(() => {
+    if (!pendingExcessKey || period?.status === "closed" || askedExcess.current === pendingExcessKey) return;
+    askedExcess.current = pendingExcessKey;
+    setExcessOpen(true);
+  }, [pendingExcessKey, period?.status]);
   const rows = useMemo(() => (s ? { esf: esfRows(s), eerr: eerrRows(s) } : null), [s]);
   const hash = useMemo(() => (s && rows ? fingerprint(JSON.stringify({ esf: rows.esf.map((r) => [r.label, r.cents]), eerr: rows.eerr.map((r) => [r.label, r.cents]), u: s.unclassified.map((u) => [u.pucCode, u.cents]), p: presentation })) : null), [s, rows, presentation]);
   const lines = useMemo(() => {
@@ -457,7 +484,10 @@ export default function GeneratorPage() {
                   <tbody>
                     {s.unclassified.map((u) => (
                       <tr key={u.pucCode} className="row-attention--blocking">
-                        <td className="mono">{u.pucCode}</td>
+                        <td className="mono">
+                          {u.pucCode}
+                          {u.pucCode.length === 4 && <div className="table__secondary">Familia: se clasifica una vez para todas sus subcuentas</div>}
+                        </td>
                         <td>
                           {u.concept}
                           {u.inactiveLine && <div className="table__secondary">Su línea «{u.inactiveLine}» está desactivada.</div>}
@@ -491,7 +521,21 @@ export default function GeneratorPage() {
               title="Obligaciones tributarias"
               items={s.tax.issues.map((i) => i.message)}
             >
-              Resuélvelo en Estados Financieros → Obligaciones tributarias.
+              <div className="stack stack--sm">
+                <span>Resuélvelo en Estados Financieros → Obligaciones tributarias.</span>
+                <div className="row" style={{ flexWrap: "wrap" }}>
+                  {s.tax.issues.some((i) => i.code === "puc_missing") && (
+                    <Button size="sm" onClick={() => setPucOpen(true)}>
+                      Configurar PUC pendiente
+                    </Button>
+                  )}
+                  {s.tax.excessReviews.length > 0 && (
+                    <Button size="sm" onClick={() => setExcessOpen(true)}>
+                      Excedentes a favor de DIAN
+                    </Button>
+                  )}
+                </div>
+              </div>
             </Alert>
           )}
           {review.absences.length > 0 && (
@@ -662,6 +706,22 @@ export default function GeneratorPage() {
       {companyId !== null && rangeOk && presentation && !s && <Card><span className="muted">Cargando información de la empresa…</span></Card>}
       {companyId !== null && company && (!rangeOk || !presentation) && <Alert tone="info">Elige el rango de fechas y la presentación para preparar los estados. Los datos fuera del rango se conservan.</Alert>}
 
+      <PucSettingsModal
+        open={pucOpen}
+        title="Cuentas PUC de impuestos y capital"
+        description="Ningún valor llega a los Estados Financieros sin su cuenta PUC. La ubicación en EEFF (y si es corriente o no corriente) se elige una sola vez por familia de cuatro dígitos."
+        items={pucItems}
+        index={data.index}
+        settings={data.settingsMap}
+        mappings={data.mappingMap}
+        catalog={data.catalog}
+        onClassify={(code, concept) => setClassifying({ code, concept })}
+        required={(statements?.current.tax.issues ?? []).flatMap((i) => (i.code === "puc_missing" && i.pucKey ? [i.pucKey] : []))}
+        onClose={() => setPucOpen(false)}
+        onSaved={data.reloadSettings}
+        onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])}
+      />
+      <ExcessReviewModal open={excessOpen} items={statements?.current.tax.excessReviews ?? []} onClose={() => setExcessOpen(false)} onChanged={loadLedger} onConfigurePuc={() => (setExcessOpen(false), setPucOpen(true))} />
       <ClassifyPucModal open={classifying !== null} pucCode={classifying?.code ?? ""} concept={classifying?.concept ?? ""} catalog={data.catalog} mappings={data.mappingMap} onClose={() => setClassifying(null)} onSaved={data.reloadMappings} />
       {companyId !== null && (
         <AdjustmentModal

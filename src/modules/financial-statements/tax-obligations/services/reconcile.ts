@@ -8,8 +8,8 @@ import type { TaxType } from "../types";
  * `TaxEffect` que usa el Generador: no repite el cálculo de saldos.
  */
 
-const PAYABLE = ["withholding_payable", "vat_payable", "income_payable"];
-const FAVOR = ["vat_favor", "income_favor"];
+const PAYABLE = ["withholding_payable", "vat_payable", "income_payable", "sanction_payable"];
+const FAVOR = ["vat_favor", "income_favor", "excess_favor"];
 
 export interface TaxReconRow {
   key: string;
@@ -43,7 +43,7 @@ export function taxReconciliation(effects: TaxEffect[], saved1009: Saved, saved1
   const t1009 = traces(saved1009);
   const t1008 = traces(saved1008);
   const rows: TaxReconRow[] = [];
-  const taxOf = (e: TaxEffect): TaxType => (e.kind.startsWith("withholding") ? "withholding" : e.kind.startsWith("vat") ? "vat" : "income");
+  const taxOf = (e: TaxEffect): TaxType => e.taxType;
   const add = (taxType: TaxType, kinds: string[], format: "1009" | "1008", noun: string, saved: Saved, from: TaxTrace[]) => {
     const eeff = sum(effects.filter((e) => kinds.includes(e.kind) && taxOf(e) === taxType));
     const exo = saved === null ? null : from.filter((t) => kinds.includes(t.kind) && t.taxType === taxType).reduce((n, t) => n + t.resultCents, 0);
@@ -53,7 +53,7 @@ export function taxReconciliation(effects: TaxEffect[], saved1009: Saved, saved1
   for (const taxType of ["withholding", "vat", "income"] as TaxType[]) {
     if (only && only !== taxType) continue;
     add(taxType, PAYABLE, "1009", "por pagar", saved1009, t1009);
-    if (taxType !== "withholding") add(taxType, FAVOR, "1008", "a favor", saved1008, t1008);
+    add(taxType, FAVOR, "1008", "a favor", saved1008, t1008);
   }
   // Correcciones manuales de los registros de la DIAN: no se atribuyen a un impuesto y se muestran aparte (solo en el total).
   if (!only) {

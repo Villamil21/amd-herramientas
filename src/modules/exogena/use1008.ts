@@ -44,14 +44,19 @@ export function use1008(companyId: number | null, year: number) {
     const reconciliation = reconcile1008(format.records, company);
     const problems: Problem[] = check1008(format.records, company, index, options).map((p) => (p.recordKey ? { ...p, action: { label: p.field === "concept" ? "Conceptos" : "Empresas", path: p.field === "concept" ? paths.submodule("informacion-exogena", FORMAT_1008) : paths.companies } } : p));
     problems.push(...taxProposals.issues);
+    // La CxC a socios sin PUC (o sin ubicación) no entra al ESF: el 1008 no puede conciliar hasta configurarla.
+    for (const i of statements?.tax.issues ?? [])
+      if (i.taxType === "capital") problems.push({ level: "blocking", message: i.message, action: { label: "Generador de Estados Financieros", path: paths.submodule("estados-financieros", "generador") } });
+    if (statements && statements.sociosReceivableCents === 0 && (receivableFromSocios(company) ?? 0) > 0 && !(statements.tax.issues ?? []).some((i) => i.taxType === "capital"))
+      problems.push({ level: "blocking", message: "La CxC a socios no tiene ubicación en el Estado de Situación Financiera: clasifica su cuenta PUC (familia de cuatro dígitos) en el Generador.", action: { label: "Generador de Estados Financieros", path: paths.submodule("estados-financieros", "generador") } });
     // Deudores corrientes + no corrientes del ESF frente al total del 1008, explicados por fuente.
-    const deudores = statements && tax ? reconcileDeudores({ eeffDeudoresCents: deudoresCents(statements), sociosReceivableCents: Math.max(0, receivableFromSocios(company) ?? 0) * 100, taxEffects: taxEffects(tax, `${year}-12-31`).effects, records: format.records }) : null;
+    const deudores = statements && tax ? reconcileDeudores({ eeffDeudoresCents: deudoresCents(statements), sociosReceivableCents: statements.sociosReceivableCents, taxEffects: taxEffects(tax, `${year}-12-31`).effects, records: format.records }) : null;
     // Los saldos a favor de IVA y Renta deben estar mapeados a una línea llamada «Deudores» (corriente o no corriente).
     if (tax && data.catalog) {
       const lines = new Map(data.catalog.lines.map((l) => [l.id, l]));
       for (const e of taxEffects(tax, `${year}-12-31`).effects) {
-        if ((e.kind !== "vat_favor" && e.kind !== "income_favor") || !e.pucCode) continue;
-        const line = lines.get(data.mappingMap.get(e.pucCode)?.lineId ?? -1);
+        if ((e.kind !== "vat_favor" && e.kind !== "income_favor" && e.kind !== "excess_favor") || !e.pucCode) continue;
+        const line = lines.get((data.mappingMap.get(e.pucCode) ?? data.mappingMap.get(e.pucCode.slice(0, 4)))?.lineId ?? -1);
         if (!line || normalizeKey(line.name) !== "deudores" || !["asset_current", "asset_noncurrent"].includes(line.section))
           problems.push({ level: "blocking", message: `La cuenta PUC ${e.pucCode} (${e.label}) no está mapeada a una línea «Deudores» del activo: el 1008 no puede conciliar con el ESF.`, action: { label: "Catálogo PUC → Estados Financieros", path: paths.submodule("estados-financieros", "generador") } });
       }
@@ -60,7 +65,8 @@ export function use1008(companyId: number | null, year: number) {
     problems.push(...manualBalanceProblems(format.records, proposals));
     if (deudores && deudores.differenceCents !== 0) problems.push({ level: "blocking", message: "El total del 1008 no coincide con los Deudores (corrientes y no corrientes) del Estado de Situación Financiera al 31/12.", action: { label: "Control y exportación", path: paths.submodule("informacion-exogena", "control") } });
     if (changes.length) problems.push({ level: "blocking", message: `Empresas cambió desde la última sincronización (${changes.length} ${changes.length === 1 ? "registro" : "registros"}): usa «Actualizar desde Empresas».` });
-    return { proposals, changes, problems, reconciliation, deudores };
+    const excessReviews = tax ? taxEffects(tax, `${year}-12-31`).excessReviews : [];
+    return { proposals, changes, problems, reconciliation, deudores, excessReviews };
   }, [company, index, format.records, concepts, tax, suppliers, statements, year, data.catalog, data.mappingMap]);
 
   const reloadLedger = useCallback(async () => {

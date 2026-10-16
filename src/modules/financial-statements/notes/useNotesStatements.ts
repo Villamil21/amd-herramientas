@@ -7,7 +7,7 @@ import { buildStatements, eerrRows, esfRows } from "../generator/engine";
 import { isIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { taxService } from "../tax-obligations/services/taxService";
-import type { TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import { CAPITAL_RECEIVABLE_KEY, type TaxReturn, type VatPeriodicity } from "../tax-obligations/types";
 import { buildNoteItems, withNoteNumbers } from "./model";
 
 interface Ledger {
@@ -58,6 +58,7 @@ export function useNotesStatements(companyId: number | null, start: string, end:
       end,
       presentation,
       tax: { returns: ledger.taxReturns, puc: data.settingsMap, vatPeriodicity: ledger.vatPeriodicity },
+      capitalReceivablePuc: data.settingsMap.get(CAPITAL_RECEIVABLE_KEY) ?? null,
     });
     const esf = esfRows(statements);
     const eerr = eerrRows(statements);

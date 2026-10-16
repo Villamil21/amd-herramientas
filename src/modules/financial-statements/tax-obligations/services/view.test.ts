@@ -5,7 +5,7 @@ import { taxEffects } from "./effects";
 
 const base = { companyId: 1, taxType: "vat", year: 2026, period: 3, periodicity: "bimonthly", periodStart: "2026-05-01", periodEnd: "2026-06-30", supersededBy: null, payableCents: 0, favorCents: 0, resolution: "", payments: [], incomeOrdinaryCents: null, incomeLossCents: null, advanceNextCents: null } as unknown as TaxReturn;
 const r = (over: Partial<TaxReturn>): TaxReturn => ({ ...base, id: 1, ...over });
-const pay = (paymentDate: string, amountCents: number) => ({ id: 1, returnId: 1, paymentDate, amountCents, note: "", reference: "", createdAt: "", updatedAt: "" });
+const pay = (paymentDate: string, amountCents: number) => ({ id: 1, returnId: 1, paymentDate, amountCents, note: "", reference: "", excessCents: 0, excessKind: "" as const, excessReview: null, createdAt: "", updatedAt: "" });
 
 describe("vista de una declaración a una fecha de corte", () => {
   it("saldo al corte = declarado − pagos con fecha ≤ corte; un pago posterior no reduce la obligación", () => {

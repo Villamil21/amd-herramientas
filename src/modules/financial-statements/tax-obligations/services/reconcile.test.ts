@@ -3,7 +3,7 @@ import { taxReconciliation } from "./reconcile";
 import type { TaxEffect, TaxTrace } from "./effects";
 
 const trace = (kind: TaxTrace["kind"], taxType: TaxTrace["taxType"], resultCents: number, returnId = 1): TaxTrace => ({ returnId, taxType, kind, year: 2026, period: 1, periodLabel: "x", formNumber: "1", declaredCents: resultCents, paidCents: 0, cut: "2026-12-31", resultCents });
-const eff = (kind: TaxEffect["kind"], cents: number, t: TaxTrace): TaxEffect => ({ kind, pucKey: "tax.vat_payable", pucCode: "240801", label: "x", cents, returnIds: [t.returnId], trace: t });
+const eff = (kind: TaxEffect["kind"], cents: number, t: TaxTrace): TaxEffect => ({ kind, taxType: t.taxType, pucKey: "tax.vat_payable", pucCode: "240801", label: "x", cents, returnIds: [t.returnId], trace: t });
 const rec = (data: Record<string, unknown>) => ({ data });
 
 describe("conciliación EEFF vs Exógena por impuesto", () => {

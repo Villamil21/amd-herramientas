@@ -21,7 +21,8 @@ use crate::models::tax::*;
 use crate::services::time::now_iso;
 
 pub const REVIEW_TAX_CHANGE: &str = "Este periodo había sido conciliado, pero cambió una declaración tributaria (o sus pagos) que afecta su fecha de corte.";
-pub const PAYMENT_EXCEEDS: &str = "El pago supera el saldo pendiente de la obligación.";
+pub const PAYMENT_NO_BALANCE: &str = "La obligación no tiene saldo pendiente: no hay valor que aplicar a este pago.";
+pub const EXCESS_KIND_REQUIRED: &str = "El pago supera el saldo pendiente: indica si el excedente es un interés o un excedente a favor.";
 pub const CLOSED_TAX_PERIOD: &str = "Este cambio afecta un periodo de Estados Financieros cerrado.\nDesbloquea el periodo desde Generador de Estados Financieros.";
 
 const COLUMNS: &str = "id, company_id, tax_type, year, period, periodicity, period_start, period_end, form_number, previous_form_number, is_correction, superseded_by, payable_cents, favor_cents, resolution, nit, company_name, file_name, income_ordinary_cents, income_loss_cents, advance_next_cents, advance_target_year, detail, created_at, updated_at";
@@ -79,7 +80,7 @@ pub fn list(conn: &Connection, company_id: i64) -> AppResult<Vec<TaxReturn>> {
         }
     }
     let payments: Vec<TaxPayment> = conn
-        .prepare(&format!("SELECT {PAYMENT_COLUMNS} FROM fs_tax_payments p JOIN fs_tax_returns t ON t.id = p.return_id WHERE t.company_id = ?1 ORDER BY p.payment_date, p.id"))?
+        .prepare(&format!("SELECT {PAYMENT_COLUMNS} FROM {PAYMENT_FROM} JOIN fs_tax_returns t ON t.id = p.return_id WHERE t.company_id = ?1 ORDER BY p.payment_date, p.id"))?
         .query_map([company_id], map_payment)?
         .collect::<Result<_, _>>()?;
     for p in payments {
@@ -90,14 +91,32 @@ pub fn list(conn: &Connection, company_id: i64) -> AppResult<Vec<TaxReturn>> {
     Ok(returns)
 }
 
-const PAYMENT_COLUMNS: &str = "p.id, p.return_id, p.payment_date, p.amount_cents, p.note, p.reference, p.created_at, p.updated_at";
+const PAYMENT_COLUMNS: &str = "p.id, p.return_id, p.payment_date, p.amount_cents, p.note, p.reference, p.created_at, p.updated_at, p.excess_cents, p.excess_kind, v.decision, v.fingerprint, v.decided_at";
+const PAYMENT_FROM: &str = "fs_tax_payments p LEFT JOIN fs_tax_excess_reviews v ON v.payment_id = p.id";
 
 fn map_payment(r: &Row) -> rusqlite::Result<TaxPayment> {
-    Ok(TaxPayment { id: r.get(0)?, return_id: r.get(1)?, payment_date: r.get(2)?, amount_cents: r.get(3)?, note: r.get(4)?, reference: r.get(5)?, created_at: r.get(6)?, updated_at: r.get(7)? })
+    let decision: Option<String> = r.get(10)?;
+    let excess_review = match decision {
+        Some(decision) => Some(ExcessReview { decision, fingerprint: r.get(11)?, decided_at: r.get(12)? }),
+        None => None,
+    };
+    Ok(TaxPayment {
+        id: r.get(0)?,
+        return_id: r.get(1)?,
+        payment_date: r.get(2)?,
+        amount_cents: r.get(3)?,
+        excess_cents: r.get(8)?,
+        excess_kind: r.get(9)?,
+        excess_review,
+        note: r.get(4)?,
+        reference: r.get(5)?,
+        created_at: r.get(6)?,
+        updated_at: r.get(7)?,
+    })
 }
 
 fn get_payment(conn: &Connection, id: i64) -> AppResult<TaxPayment> {
-    conn.query_row(&format!("SELECT {PAYMENT_COLUMNS} FROM fs_tax_payments p WHERE p.id = ?1"), [id], map_payment)
+    conn.query_row(&format!("SELECT {PAYMENT_COLUMNS} FROM {PAYMENT_FROM} WHERE p.id = ?1"), [id], map_payment)
         .optional()?
         .ok_or_else(|| AppError::user("El pago no existe."))
 }
@@ -274,8 +293,19 @@ fn paid_except(conn: &Connection, return_id: i64, except: Option<i64>) -> AppRes
     Ok(conn.query_row("SELECT COALESCE(SUM(amount_cents), 0) FROM fs_tax_payments WHERE return_id = ?1 AND id IS NOT ?2", params![return_id, except], |r| r.get(0))?)
 }
 
-/// Valida un pago nuevo o editado (`except` = el pago que se edita) y devuelve la entrada limpia.
-fn validated_payment(conn: &Connection, r: &TaxReturn, input: &TaxPaymentInput, except: Option<i64>) -> AppResult<TaxPaymentInput> {
+/// Pago validado: lo aplicado a la obligación y, si lo pagado supera el saldo pendiente, el excedente con su clasificación.
+struct ValidPayment {
+    payment_date: String,
+    applied_cents: i64,
+    excess_cents: i64,
+    excess_kind: String,
+    note: String,
+    reference: String,
+}
+
+/// Valida un pago nuevo o editado (`except` = el pago que se edita). Un pago mayor al saldo pendiente se separa en
+/// valor aplicado y excedente; el excedente exige indicar si es interés o excedente a favor.
+fn validated_payment(conn: &Connection, r: &TaxReturn, input: &TaxPaymentInput, except: Option<i64>) -> AppResult<ValidPayment> {
     if r.superseded_by.is_some() {
         return Err(AppError::user("La declaración fue reemplazada por una corrección: registra los pagos en la corrección."));
     }
@@ -293,10 +323,17 @@ fn validated_payment(conn: &Connection, r: &TaxReturn, input: &TaxPaymentInput, 
     if input.amount_cents <= 0 {
         return Err(AppError::user("El valor del pago debe ser mayor que cero."));
     }
-    if paid_except(conn, r.id, except)? + input.amount_cents > payable {
-        return Err(AppError::user(PAYMENT_EXCEEDS));
+    let room = (payable - paid_except(conn, r.id, except)?).max(0);
+    if room == 0 {
+        return Err(AppError::user(PAYMENT_NO_BALANCE));
     }
-    Ok(TaxPaymentInput { payment_date: date, amount_cents: input.amount_cents, note: clean(&input.note, 500), reference: clean(&input.reference, 200) })
+    let applied = input.amount_cents.min(room);
+    let excess = input.amount_cents - applied;
+    let kind = input.excess_kind.trim();
+    if excess > 0 && !EXCESS_KINDS.contains(&kind) {
+        return Err(AppError::user(EXCESS_KIND_REQUIRED));
+    }
+    Ok(ValidPayment { payment_date: date, applied_cents: applied, excess_cents: excess, excess_kind: if excess > 0 { kind.to_string() } else { String::new() }, note: clean(&input.note, 500), reference: clean(&input.reference, 200) })
 }
 
 /// Cortes que cambian con un pago de esa fecha: desde la fecha (nunca antes del fin del periodo) en adelante.
@@ -316,11 +353,11 @@ pub fn add_payment(conn: &mut Connection, return_id: i64, input: &TaxPaymentInpu
     let tx = conn.transaction()?;
     let now = now_iso();
     tx.execute(
-        "INSERT INTO fs_tax_payments (return_id, payment_date, amount_cents, note, reference, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        params![return_id, p.payment_date, p.amount_cents, p.note, p.reference, now],
+        "INSERT INTO fs_tax_payments (return_id, payment_date, amount_cents, excess_cents, excess_kind, note, reference, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        params![return_id, p.payment_date, p.applied_cents, p.excess_cents, p.excess_kind, p.note, p.reference, now],
     )?;
     let id = tx.last_insert_rowid();
-    event(&tx, return_id, "payment", &format!("Pago registrado: {} por {}", p.payment_date, money(p.amount_cents)))?;
+    event(&tx, return_id, "payment", &format!("Pago registrado: {} por {}{}", p.payment_date, money(p.applied_cents), excess_note(&p)))?;
     invalidate(&tx, r.company_id, &from, None)?;
     tx.commit()?;
     Ok(id)
@@ -331,24 +368,24 @@ pub fn update_payment(conn: &mut Connection, id: i64, input: &TaxPaymentInput) -
     let old = get_payment(conn, id)?;
     let r = get(conn, old.return_id)?;
     let p = validated_payment(conn, &r, input, Some(id))?;
-    if p.payment_date == old.payment_date && p.amount_cents == old.amount_cents && p.note == old.note && p.reference == old.reference {
+    if p.payment_date == old.payment_date && p.applied_cents == old.amount_cents && p.excess_cents == old.excess_cents && p.excess_kind == old.excess_kind && p.note == old.note && p.reference == old.reference {
         return Ok(());
     }
-    let affects = p.payment_date != old.payment_date || p.amount_cents != old.amount_cents;
+    let affects = p.payment_date != old.payment_date || p.applied_cents != old.amount_cents || p.excess_cents != old.excess_cents || p.excess_kind != old.excess_kind;
     let from = from_date(&r, old.payment_date.as_str().min(p.payment_date.as_str()));
-    let until = if p.amount_cents == old.amount_cents { Some(old.payment_date.clone().max(p.payment_date.clone())) } else { None };
+    let until = if p.applied_cents == old.amount_cents && p.excess_cents == old.excess_cents && p.excess_kind == old.excess_kind { Some(old.payment_date.clone().max(p.payment_date.clone())) } else { None };
     if affects {
         ensure_open(conn, r.company_id, &from, until.as_deref())?;
     }
     let tx = conn.transaction()?;
     tx.execute(
-        "UPDATE fs_tax_payments SET payment_date = ?1, amount_cents = ?2, note = ?3, reference = ?4, updated_at = ?5 WHERE id = ?6",
-        params![p.payment_date, p.amount_cents, p.note, p.reference, now_iso(), id],
+        "UPDATE fs_tax_payments SET payment_date = ?1, amount_cents = ?2, excess_cents = ?3, excess_kind = ?4, note = ?5, reference = ?6, updated_at = ?7 WHERE id = ?8",
+        params![p.payment_date, p.applied_cents, p.excess_cents, p.excess_kind, p.note, p.reference, now_iso(), id],
     )?;
     let note = if affects {
-        format!("Pago editado: {} por {} → {} por {}", old.payment_date, money(old.amount_cents), p.payment_date, money(p.amount_cents))
+        format!("Pago editado: {} por {} → {} por {}{}", old.payment_date, money(old.amount_cents), p.payment_date, money(p.applied_cents), excess_note(&p))
     } else {
-        format!("Pago del {} por {}: se editó la observación o la referencia", p.payment_date, money(p.amount_cents))
+        format!("Pago del {} por {}: se editó la observación o la referencia", p.payment_date, money(p.applied_cents))
     };
     event(&tx, r.id, "payment", &note)?;
     if affects {
@@ -364,9 +401,67 @@ pub fn delete_payment(conn: &mut Connection, id: i64) -> AppResult<()> {
     let from = from_date(&r, &p.payment_date);
     ensure_open(conn, r.company_id, &from, None)?;
     let tx = conn.transaction()?;
+    tx.execute("DELETE FROM fs_tax_excess_reviews WHERE payment_id = ?1", [id])?;
     tx.execute("DELETE FROM fs_tax_payments WHERE id = ?1", [id])?;
     event(&tx, r.id, "payment", &format!("Pago eliminado: {} por {}", p.payment_date, money(p.amount_cents)))?;
     invalidate(&tx, r.company_id, &from, None)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn excess_note(p: &ValidPayment) -> String {
+    match (p.excess_cents, p.excess_kind.as_str()) {
+        (0, _) => String::new(),
+        (c, "interest") => format!(" + {} de excedente clasificado como interés", money(c)),
+        (c, _) => format!(" + {} de excedente a favor de la DIAN", money(c)),
+    }
+}
+
+/// Decisión sobre un excedente a favor: entra (o no) a EEFF y 1008 a la vez. El pago original se conserva siempre.
+pub fn set_excess_review(conn: &mut Connection, payment_id: i64, decision: &str, fingerprint: &str) -> AppResult<()> {
+    if !EXCESS_DECISIONS.contains(&decision) || fingerprint.trim().is_empty() {
+        return Err(AppError::user("Decisión no válida."));
+    }
+    let p = get_payment(conn, payment_id)?;
+    if p.excess_cents <= 0 || p.excess_kind != "favor" {
+        return Err(AppError::user("Este pago no tiene un excedente a favor por revisar."));
+    }
+    let r = get(conn, p.return_id)?;
+    let from = from_date(&r, &p.payment_date);
+    ensure_open(conn, r.company_id, &from, None)?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO fs_tax_excess_reviews (payment_id, decision, fingerprint, decided_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(payment_id) DO UPDATE SET decision = excluded.decision, fingerprint = excluded.fingerprint, decided_at = excluded.decided_at",
+        params![payment_id, decision, fingerprint.trim(), now_iso()],
+    )?;
+    let text = if decision == "applies" { "aplica a Estados Financieros y 1008" } else { "no aplica a Estados Financieros ni 1008" };
+    event(&tx, r.id, "payment", &format!("Excedente a favor del pago del {} por {}: {text}", p.payment_date, money(p.excess_cents)))?;
+    invalidate(&tx, r.company_id, &from, None)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Guarda datos de la declaración que no vienen de su captura inicial: las casillas del Formulario 350 releídas del PDF
+/// (`withholding`) y las decisiones manuales del usuario (`manual`, p. ej. la distribución de la casilla 129). No cambia valores declarados.
+pub fn patch_detail(conn: &mut Connection, id: i64, patch: &Value, note: &str) -> AppResult<()> {
+    let r = get(conn, id)?;
+    let obj = patch.as_object().ok_or_else(|| AppError::user("Datos no válidos."))?;
+    if obj.is_empty() || obj.keys().any(|k| k != "withholding" && k != "manual") {
+        return Err(AppError::user("Solo se pueden guardar las casillas por concepto y las decisiones manuales."));
+    }
+    ensure_open(conn, r.company_id, &r.period_end, None)?;
+    let mut detail = match &r.detail {
+        Value::Object(m) => m.clone(),
+        _ => serde_json::Map::new(),
+    };
+    for (k, v) in obj {
+        detail.insert(k.clone(), v.clone());
+    }
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE fs_tax_returns SET detail = ?1, updated_at = ?2 WHERE id = ?3", params![Value::Object(detail).to_string(), now_iso(), id])?;
+    event(&tx, id, "detail", &clean(note, 300))?;
+    invalidate(&tx, r.company_id, &r.period_end, None)?;
     tx.commit()?;
     Ok(())
 }
@@ -601,12 +696,12 @@ mod tests {
         let p2 = add_payment(&mut conn, id, &pay("2026-10-15", 300_000_000)).unwrap();
         assert_ne!(p1, p2);
         add_payment(&mut conn, id, &pay("2026-11-05", 300_000_000)).unwrap();
-        // Pendiente $2.000.000: un pago de $3.000.000 se bloquea.
-        assert_eq!(add_payment(&mut conn, id, &pay("2026-11-20", 300_000_000)).unwrap_err().0, PAYMENT_EXCEEDS);
+        // Pendiente $2.000.000: un pago de $3.000.000 exige clasificar el excedente (interés o a favor).
+        assert_eq!(add_payment(&mut conn, id, &pay("2026-11-20", 300_000_000)).unwrap_err().0, EXCESS_KIND_REQUIRED);
         assert!(add_payment(&mut conn, id, &pay("2026-11-20", 0)).unwrap_err().0.contains("mayor que cero"));
         assert!(add_payment(&mut conn, id, &pay("2026-08-01", 100)).unwrap_err().0.contains("anterior al inicio"));
         // Editar respeta el mismo tope (sin contar el propio pago).
-        assert_eq!(update_payment(&mut conn, p1, &pay("2026-10-15", 500_000_000)).unwrap_err().0, PAYMENT_EXCEEDS);
+        assert_eq!(update_payment(&mut conn, p1, &pay("2026-10-15", 500_000_000)).unwrap_err().0, EXCESS_KIND_REQUIRED);
         update_payment(&mut conn, p1, &pay("2026-10-15", 400_000_000)).unwrap();
         let r = &list(&conn, a).unwrap()[0];
         assert_eq!(r.payable_cents, 1_000_000_000, "el valor de la declaración nunca cambia");
@@ -615,6 +710,45 @@ mod tests {
         delete_payment(&mut conn, p2).unwrap();
         let r = &list(&conn, a).unwrap()[0];
         assert_eq!((r.payments.len(), r.events.last().unwrap().note.as_str()), (2, "Pago eliminado: 2026-10-15 por $ 3.000.000,00"));
+    }
+
+    #[test]
+    fn a_payment_above_the_balance_splits_applied_and_excess_and_the_review_is_kept() {
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let id = save(&mut conn, &withholding(a, 9, "1", 1_000_000_000)).unwrap();
+        add_payment(&mut conn, id, &pay("2026-10-15", 600_000_000)).unwrap();
+        // Pendiente $4.000.000: se pagan $5.000.000 → $4.000.000 aplicados y $1.000.000 de excedente a favor.
+        let favor = add_payment(&mut conn, id, &TaxPaymentInput { excess_kind: "favor".into(), ..pay("2026-11-20", 500_000_000) }).unwrap();
+        let r = &list(&conn, a).unwrap()[0];
+        let p = r.payments.iter().find(|p| p.id == favor).unwrap();
+        assert_eq!((p.amount_cents, p.excess_cents, p.excess_kind.as_str()), (400_000_000, 100_000_000, "favor"));
+        assert!(p.excess_review.is_none());
+        assert!(r.events.iter().any(|e| e.note.contains("excedente a favor de la DIAN")));
+        // Ya sin saldo: no hay nada que aplicar.
+        assert_eq!(add_payment(&mut conn, id, &pay("2026-11-25", 1)).unwrap_err().0, PAYMENT_NO_BALANCE);
+        // Decisión persistida (con su huella); un pago sin excedente no se puede revisar.
+        set_excess_review(&mut conn, favor, "not_applies", "huella").unwrap();
+        let r = &list(&conn, a).unwrap()[0];
+        let review = r.payments.iter().find(|p| p.id == favor).unwrap().excess_review.clone().unwrap();
+        assert_eq!((review.decision.as_str(), review.fingerprint.as_str()), ("not_applies", "huella"));
+        assert!(set_excess_review(&mut conn, r.payments[0].id, "applies", "x").is_err());
+        assert!(set_excess_review(&mut conn, favor, "quizas", "x").is_err());
+        // Eliminar el pago elimina su decisión, nunca al revés.
+        delete_payment(&mut conn, favor).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM fs_tax_excess_reviews", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn detail_patch_keeps_declared_values_and_rejects_other_keys() {
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let id = save(&mut conn, &withholding(a, 9, "1", 62_400_000)).unwrap();
+        patch_detail(&mut conn, id, &serde_json::json!({ "manual": { "adjustments129": [{ "id": "a", "conceptKey": "services", "cents": 100, "note": "" }] } }), "Distribución casilla 129").unwrap();
+        let r = &list(&conn, a).unwrap()[0];
+        assert_eq!(r.payable_cents, 62_400_000);
+        assert_eq!(r.detail["manual"]["adjustments129"][0]["conceptKey"], "services");
+        assert!(patch_detail(&mut conn, id, &serde_json::json!({ "payable_cents": 1 }), "x").is_err());
     }
 
     #[test]

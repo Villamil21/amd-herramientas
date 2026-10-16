@@ -38,7 +38,7 @@ function ret(taxType: TaxType, year: number, period: number | null, periodicity:
 }
 
 let nextPaymentId = 1;
-const payment = (paymentDate: string, amountCents: number): TaxPayment => ({ id: nextPaymentId++, returnId: 0, paymentDate, amountCents, note: "", reference: "", createdAt: "", updatedAt: "" });
+const payment = (paymentDate: string, amountCents: number): TaxPayment => ({ id: nextPaymentId++, returnId: 0, paymentDate, amountCents, note: "", reference: "", excessCents: 0, excessKind: "", excessReview: null, createdAt: "", updatedAt: "" });
 
 const PUC = new Map<string, string>(Object.values(TAX_PUC).map((k, i) => [k, String(240000 + i)]));
 const run = (returns: TaxReturn[], cut: string, extra: Partial<TaxInput> = {}) => taxEffects({ returns, puc: PUC, vatPeriodicity: "bimonthly", ...extra }, cut);
@@ -152,7 +152,7 @@ describe("correcciones y PUC", () => {
     expect(taxStatus(old, null)).toBe("superseded");
     const s = run([fix], "2026-09-30", { puc: new Map() });
     expect(s.effects[0].pucCode).toBeNull();
-    expect(s.issues[0]).toMatchObject({ level: "blocking", message: expect.stringContaining("Retención en la fuente por pagar") });
+    expect(s.issues.find((i) => i.level === "blocking")).toMatchObject({ level: "blocking", code: "puc_missing", message: expect.stringContaining("Retención en la fuente por pagar") });
   });
 });
 

@@ -222,7 +222,7 @@ describe("1009 — obligaciones tributarias y DIAN", () => {
 
   it("una declaración pagada antes o el mismo día del corte no es deuda; pagada después, conserva su saldo; solo lo causado", () => {
     const base = sources({ suppliers: [dian] }).tax;
-    const paid = (date: string, cents = 500_000_00) => taxReturn({ payments: [{ id: 1, returnId: 1, paymentDate: date, amountCents: cents, note: "", reference: "", createdAt: "x", updatedAt: "x" }] });
+    const paid = (date: string, cents = 500_000_00) => taxReturn({ payments: [{ id: 1, returnId: 1, paymentDate: date, amountCents: cents, note: "", reference: "", excessCents: 0, excessKind: "", excessReview: null, createdAt: "x", updatedAt: "x" }] });
     expect(build1009(sources({ suppliers: [dian], tax: { ...base, returns: [paid("2025-12-31")] } })).proposals).toHaveLength(0);
     expect(build1009(sources({ suppliers: [dian], tax: { ...base, returns: [paid("2025-12-15")] } })).proposals).toHaveLength(0);
     // Pagada el 20/01/2026: al 31/12/2025 sigue siendo deuda por el valor causado (sin intereses de mora posteriores).

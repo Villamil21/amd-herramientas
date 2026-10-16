@@ -212,9 +212,9 @@ export function EmptyReturns({ taxType, company }: { taxType: TaxType; company: 
 // Conciliación y reportes
 // ---------------------------------------------------------------------------
 
-const KIND_TARGET: Partial<Record<TaxEffect["kind"], "1009" | "1008">> = { withholding_payable: "1009", vat_payable: "1009", income_payable: "1009", vat_favor: "1008", income_favor: "1008" };
+const KIND_TARGET: Partial<Record<TaxEffect["kind"], "1009" | "1008">> = { withholding_payable: "1009", vat_payable: "1009", income_payable: "1009", sanction_payable: "1009", vat_favor: "1008", income_favor: "1008", excess_favor: "1008" };
 
-export function ReconciliationTab({ taxType, companyId, cut, effects, issues }: { taxType: TaxType; companyId: number; cut: string; effects: TaxEffect[]; issues: TaxIssue[] }) {
+export function ReconciliationTab({ taxType, companyId, cut, effects, issues, onConfigurePuc, onReviewExcess }: { taxType: TaxType; companyId: number; cut: string; effects: TaxEffect[]; issues: TaxIssue[]; onConfigurePuc?: () => void; onReviewExcess?: () => void }) {
   const year = Number(cut.slice(0, 4));
   const yearEnd = /-12-31$/.test(cut);
   const [saved, setSaved] = useState<{ r1009: ExoRecord[]; r1008: ExoRecord[] } | null>(null);
@@ -231,7 +231,7 @@ export function ReconciliationTab({ taxType, companyId, cut, effects, issues }: 
     };
   }, [companyId, year, yearEnd]);
 
-  const ownEffects = effects.filter((e) => (taxType === "withholding" ? e.kind === "withholding_payable" : taxType === "vat" ? e.kind.startsWith("vat") : e.kind.startsWith("income")));
+  const ownEffects = effects.filter((e) => e.taxType === taxType);
   const recon = taxReconciliation(effects, yearEnd ? (saved?.r1009 ?? null) : null, yearEnd ? (saved?.r1008 ?? null) : null, cut, taxType);
   const proposals = ownEffects.filter((e) => e.trace && KIND_TARGET[e.kind]);
 
@@ -254,7 +254,19 @@ export function ReconciliationTab({ taxType, companyId, cut, effects, issues }: 
                       <td>
                         <Badge tone={i.level === "blocking" ? "danger" : "warning"}>{i.level === "blocking" ? "Bloquea" : "Aviso"}</Badge>
                       </td>
-                      <td>{i.message}</td>
+                      <td>
+                        {i.message}{" "}
+                        {i.code === "puc_missing" && onConfigurePuc && (
+                          <button type="button" className="link-button" onClick={onConfigurePuc}>
+                            Configurar PUC
+                          </button>
+                        )}
+                        {i.code === "excess_review" && onReviewExcess && (
+                          <button type="button" className="link-button" onClick={onReviewExcess}>
+                            Revisar excedentes
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -280,7 +292,19 @@ export function ReconciliationTab({ taxType, companyId, cut, effects, issues }: 
                 {ownEffects.map((e, n) => (
                   <tr key={n}>
                     <td>{e.label}</td>
-                    <td className="mono">{e.pucCode ?? <Badge tone="danger">Sin configurar</Badge>}</td>
+                    <td className="mono">
+                      {e.pucCode ?? (
+                        <>
+                          <Badge tone="danger">Pendiente de clasificar</Badge>{" "}
+                          {onConfigurePuc && (
+                            <button type="button" className="link-button" onClick={onConfigurePuc}>
+                              Configurar
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {e.noncurrent && <div className="table__secondary">No corriente</div>}
+                    </td>
                     <td className={e.cents < 0 ? "num amount--negative" : "num"}>{money(e.cents)}</td>
                   </tr>
                 ))}
@@ -353,8 +377,8 @@ export function ReconciliationTab({ taxType, companyId, cut, effects, issues }: 
                       </tr>
                     </thead>
                     <tbody>
-                      {proposals.map((e) => (
-                        <tr key={e.trace!.returnId + e.kind}>
+                      {proposals.map((e, n) => (
+                        <tr key={`${e.trace!.returnId}-${e.kind}-${e.conceptKey ?? ""}-${n}`}>
                           <td>{e.trace!.periodLabel}</td>
                           <td className="mono">{e.trace!.formNumber || "—"}</td>
                           <td className="num">{money(e.trace!.declaredCents)}</td>

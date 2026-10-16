@@ -11,6 +11,8 @@ use crate::models::clean;
 pub const TAX_TYPES: [&str; 3] = ["withholding", "vat", "income"];
 pub const VAT_PERIODICITIES: [&str; 2] = ["bimonthly", "four_monthly"];
 pub const RESOLUTIONS: [&str; 3] = ["", "payable", "favor"];
+pub const EXCESS_KINDS: [&str; 2] = ["interest", "favor"];
+pub const EXCESS_DECISIONS: [&str; 2] = ["applies", "not_applies"];
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -29,18 +31,35 @@ pub struct TaxPayment {
     pub id: i64,
     pub return_id: i64,
     pub payment_date: String,
+    /// Valor APLICADO a la obligación (nunca supera el saldo a pagar).
     pub amount_cents: i64,
+    /// Lo pagado por encima del saldo pendiente y su clasificación ('interest' | 'favor').
+    pub excess_cents: i64,
+    pub excess_kind: String,
+    pub excess_review: Option<ExcessReview>,
     pub note: String,
     pub reference: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
+/// Decisión sobre un excedente a favor para EEFF y 1008.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExcessReview {
+    pub decision: String,
+    pub fingerprint: String,
+    pub decided_at: String,
+}
+
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxPaymentInput {
     pub payment_date: String,
+    /// Total pagado: si supera el saldo pendiente se separa lo aplicado del excedente.
     pub amount_cents: i64,
+    #[serde(default)]
+    pub excess_kind: String,
     #[serde(default)]
     pub note: String,
     #[serde(default)]

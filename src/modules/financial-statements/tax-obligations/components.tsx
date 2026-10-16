@@ -10,8 +10,10 @@ import { parseNumericText } from "../../../utils/numbers";
 import { anomalies, effectiveValues, paidCents, pendingCents, periodName, STATUS_LABEL, type TaxStatus } from "./services/effects";
 import { draftBlockers, draftInput, withExisting, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
-import { PERIODICITY_LABEL, TAX_LABEL, type TaxPayment, type TaxReturn, type VatPeriodicity } from "./types";
+import { PERIODICITY_LABEL, TAX_LABEL, type ExcessKind, type TaxPayment, type TaxReturn, type VatPeriodicity } from "./types";
 import { returnView } from "./services/view";
+import { WithholdingBreakdownPanel } from "./withholding/WithholdingBreakdownPanel";
+import type { FsData } from "../shared/useFsData";
 
 const STATUS_TONE: Record<TaxStatus, "success" | "warning" | "danger" | "gold" | undefined> = {
   pending: "warning",
@@ -194,8 +196,6 @@ export function ImportModal({
 // Pagos (totales o parciales)
 // ---------------------------------------------------------------------------
 
-const PAYMENT_EXCEEDS = "El pago supera el saldo pendiente de la obligación.";
-
 /**
  * Total a pagar, pagado y pendiente de una declaración con su historial de
  * pagos. Se registran, editan y eliminan aquí; Rust bloquea los cambios que
@@ -233,6 +233,7 @@ export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChang
         rows={[
           ["Total a pagar", formatExactCents(payable)],
           ["Total pagado", formatExactCents(paid)],
+          ["Excedentes de pago", r.payments.some((p) => p.excessCents > 0) ? formatExactCents(r.payments.reduce((n, p) => n + p.excessCents, 0)) : null],
           ["Saldo pendiente", <span key="p" className={pending > 0 ? "amount--negative" : undefined}>{formatExactCents(pending)}</span>],
           ["Pagos registrados", String(r.payments.length)],
         ]}
@@ -253,7 +254,8 @@ export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChang
             <thead>
               <tr>
                 <th>Fecha de pago</th>
-                <th style={{ textAlign: "right" }}>Valor pagado</th>
+                <th style={{ textAlign: "right" }}>Aplicado a la obligación</th>
+                <th>Excedente</th>
                 <th>Referencia / observación</th>
                 {editable && <th />}
               </tr>
@@ -265,6 +267,7 @@ export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChang
                   <td className="nowrap" style={{ textAlign: "right" }}>
                     {formatExactCents(p.amountCents)}
                   </td>
+                  <td>{p.excessCents > 0 ? <ExcessCell payment={p} /> : <span className="muted">—</span>}</td>
                   <td className="selectable">{[p.reference, p.note].filter(Boolean).join(" · ") || <span className="muted">—</span>}</td>
                   {editable && (
                     <td className="actions nowrap">
@@ -293,6 +296,21 @@ export function PaymentsPanel({ item: r, onChanged }: { item: TaxReturn; onChang
   );
 }
 
+const EXCESS_LABEL: Record<Exclude<ExcessKind, "">, string> = { interest: "Interés (gasto)", favor: "Excedente a favor de la DIAN" };
+
+function ExcessCell({ payment: p }: { payment: TaxPayment }) {
+  const review = p.excessKind === "favor" ? p.excessReview : null;
+  return (
+    <div className="stack stack--sm">
+      <span className="nowrap">{formatExactCents(p.excessCents)}</span>
+      <span className="table__secondary">
+        {p.excessKind ? EXCESS_LABEL[p.excessKind] : "Sin clasificar"}
+        {p.excessKind === "favor" && (review ? (review.decision === "applies" ? " · aplica a EEFF y 1008" : " · no aplica a EEFF ni 1008") : " · por revisar")}
+      </span>
+    </div>
+  );
+}
+
 /** Pagos de una declaración desde la tabla de declaraciones. */
 export function PaymentsModal({ item: r, onClose, onChanged }: { item: TaxReturn | null; onClose: () => void; onChanged: () => Promise<void> }) {
   return (
@@ -310,31 +328,37 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
+  const [excessKind, setExcessKind] = useState<ExcessKind>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDate(editing?.paymentDate ?? "");
-    setAmount(editing ? centsText(editing.amountCents) : r ? centsText(pendingCents(r)) : "");
+    setAmount(editing ? centsText(editing.amountCents + editing.excessCents) : r ? centsText(pendingCents(r)) : "");
     setReference(editing?.reference ?? "");
     setNote(editing?.note ?? "");
+    setExcessKind(editing?.excessKind ?? "");
     setError(null);
   }, [r, editing]);
 
   if (!r) return <Modal open={false} title="" onClose={onClose} />;
-  // Lo que se puede pagar con este pago: el pendiente (más el valor actual si se edita).
+  // Lo que se puede aplicar con este pago: el pendiente (más lo aplicado actualmente si se edita).
   const available = pendingCents(r) + (editing?.amountCents ?? 0);
   const value = parseNumericText(amount);
   const cents = value === null ? null : Math.round(value * 100);
-  const amountError = amount.trim() === "" ? null : cents === null ? "Valor no válido." : cents <= 0 ? "El valor del pago debe ser mayor que cero." : cents > available ? PAYMENT_EXCEEDS : null;
-  const unchanged = editing !== null && editing.paymentDate === date && editing.amountCents === cents && editing.reference === reference.trim() && editing.note === note.trim();
+  const amountError = amount.trim() === "" ? null : cents === null ? "Valor no válido." : cents <= 0 ? "El valor del pago debe ser mayor que cero." : available <= 0 ? "La obligación no tiene saldo pendiente." : null;
+  // Pago mayor al saldo: se separa lo aplicado a la obligación del excedente y se pregunta qué es.
+  const applied = cents === null ? null : Math.min(cents, available);
+  const excess = cents === null || applied === null ? 0 : cents - applied;
+  const kind: ExcessKind = excess > 0 ? excessKind : "";
+  const unchanged = editing !== null && editing.paymentDate === date && editing.amountCents === applied && editing.excessCents === excess && editing.excessKind === kind && editing.reference === reference.trim() && editing.note === note.trim();
 
   async function save() {
     if (cents === null) return;
     setSaving(true);
     setError(null);
     try {
-      const input = { paymentDate: date, amountCents: cents, reference: reference.trim(), note: note.trim() };
+      const input = { paymentDate: date, amountCents: cents, excessKind: kind, reference: reference.trim(), note: note.trim() };
       if (editing) await taxService.updatePayment(editing.id, input);
       else await taxService.addPayment(r!.id, input);
       toast(editing ? "Pago actualizado." : "Pago registrado.");
@@ -359,7 +383,7 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
           <Button variant="ghost" onClick={onClose} disabled={saving}>
             Cancelar
           </Button>
-          <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!isIsoDate(date) || cents === null || amountError !== null || unchanged}>
+          <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!isIsoDate(date) || cents === null || amountError !== null || unchanged || (excess > 0 && !excessKind)}>
             Guardar
           </Button>
         </>
@@ -380,6 +404,30 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
           <Field label="Referencia / comprobante">{(id) => <Input id={id} value={reference} maxLength={200} onChange={(e) => setReference(e.target.value)} />}</Field>
           <Field label="Observación">{(id) => <Input id={id} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />}</Field>
         </div>
+        {excess > 0 && applied !== null && (
+          <Alert tone="warning" title="El pago supera el saldo pendiente">
+            <div className="stack stack--sm">
+              <span>
+                Aplicado a la obligación: <strong>{formatExactCents(applied)}</strong> · Excedente: <strong>{formatExactCents(excess)}</strong>
+              </span>
+              <fieldset className="stack stack--sm" style={{ border: 0, padding: 0, margin: 0 }}>
+                <legend className="field__label">¿A qué corresponde el excedente?</legend>
+                <label className="checkbox">
+                  <input type="radio" name="excess-kind" checked={excessKind === "interest"} onChange={() => setExcessKind("interest")} />
+                  <span>
+                    <strong>Interés</strong> — gasto con PUC de gasto propio. No genera Deudores ni 1008.
+                  </span>
+                </label>
+                <label className="checkbox">
+                  <input type="radio" name="excess-kind" checked={excessKind === "favor"} onChange={() => setExcessKind("favor")} />
+                  <span>
+                    <strong>Excedente a favor de la DIAN</strong> — candidato a deudor; al preparar EEFF y 1008 decidirás si aplica.
+                  </span>
+                </label>
+              </fieldset>
+            </div>
+          </Alert>
+        )}
         {error && <Alert tone="danger">{error}</Alert>}
       </div>
     </Modal>
@@ -392,10 +440,10 @@ function PaymentFormModal({ item: r, editing, onClose, onSaved }: { item: TaxRet
 
 const EVENT_LABEL: Record<string, string> = { imported: "Importada", correction: "Corrección", superseded: "Reemplazada", payment: "Pago", resolution: "Revisión" };
 
-type DetailTab = "summary" | "payments" | "boxes" | "history" | "fiscal" | "settlement" | "info";
+type DetailTab = "summary" | "accounting" | "payments" | "boxes" | "history" | "fiscal" | "settlement" | "info";
 
 const TABS: Record<TaxReturn["taxType"], { id: DetailTab; label: string }[]> = {
-  withholding: [{ id: "summary", label: "Resumen" }, { id: "payments", label: "Pagos" }, { id: "boxes", label: "Casillas del formulario" }, { id: "history", label: "Historial" }],
+  withholding: [{ id: "summary", label: "Resumen" }, { id: "accounting", label: "Detalle contable" }, { id: "payments", label: "Pagos" }, { id: "boxes", label: "Casillas del formulario" }, { id: "history", label: "Historial" }],
   vat: [{ id: "summary", label: "Resumen" }, { id: "payments", label: "Pagos" }, { id: "boxes", label: "Casillas del formulario" }, { id: "history", label: "Historial" }],
   income: [{ id: "fiscal", label: "Resumen fiscal" }, { id: "settlement", label: "Liquidación y pagos" }, { id: "info", label: "Datos informativos" }, { id: "history", label: "Historial" }],
 };
@@ -408,7 +456,12 @@ export function ReturnDetailModal({
   onClose,
   onChanged,
   onOpenVersion,
+  data,
+  onClassify,
 }: {
+  data?: FsData;
+  /** Clasificar la familia PUC de una cuenta sin ubicación en EEFF. */
+  onClassify?: (familyCode: string, concept: string) => void;
   item: TaxReturn | null;
   vatPeriodicity: VatPeriodicity | null;
   /** Todas las versiones del mismo periodo (la vigente y las reemplazadas). */
@@ -540,6 +593,7 @@ export function ReturnDetailModal({
               {both && <span className="field__hint">Trae saldo a pagar y a favor a la vez. Cuenta: a pagar {formatExactCents(eff.payable)} · a favor {formatExactCents(eff.favor)}.</span>}
             </div>
           )}
+          {tab === "accounting" && data && <WithholdingBreakdownPanel item={r} data={data} onChanged={onChanged} onClassify={onClassify} />}
           {tab === "payments" && payments}
           {tab === "boxes" && (boxes || <p className="muted">No se guardaron casillas para esta declaración.</p>)}
           {tab === "fiscal" && (

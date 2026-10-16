@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.35.0",
+    "date": "2026-10-16",
+    "notes": [
+      "Obligaciones tributarias: Empresa y Fecha de corte quedan alineadas en Retención, IVA y Renta, con las acciones en una fila aparte.",
+      "Ningún valor llega a los estados financieros sin PUC: lo que no tiene cuenta queda «Pendiente de clasificar» con acceso directo a configurarla, y la ubicación en EEFF se define por los cuatro primeros dígitos del PUC.",
+      "Retención en la fuente por concepto (Formulario 350): personas jurídicas y naturales se consolidan por concepto con su propio PUC, la casilla 129 se distribuye a mano con guardado parcial, las autorretenciones llevan un único PUC y todo concilia con el total declarado.",
+      "Sanciones con cuenta de gasto y cuenta por pagar; los pagos superiores al saldo se separan en valor aplicado y excedente (interés o excedente a favor), con el modal «Excedentes a favor de DIAN por revisar» que aplica la decisión a EEFF y 1008 a la vez.",
+      "Renta con composición visible (impuesto, anticipo del año anterior, autorretenciones), pasivos y saldos tributarios corriente/no corriente según el año, cuenta por cobrar a socios con PUC obligatorio y conciliación EEFF/1008/1009 que bloquea «Listo» ante diferencias o pendientes."
+    ]
+  },
+  {
     "version": "1.34.0",
     "date": "2026-10-16",
     "notes": [

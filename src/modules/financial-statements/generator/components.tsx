@@ -68,8 +68,8 @@ export function StatementView({ title, rows, lines }: { title: string; rows: Sta
                     <td colSpan={3}>
                       <div className="stack stack--sm">
                         <span className="muted">Exacto: {formatExactCents(detail.cents)}{detail.automatic ? ` · Automático: ${detail.automatic}` : ""}</span>
-                        {detail.contributions.map((c) => (
-                          <span key={c.pucCode} className="muted">
+                        {detail.contributions.map((c, n) => (
+                          <span key={`${c.pucCode}-${n}`} className="muted">
                             <span className="mono">{c.pucCode}</span> {c.concept} · {formatInteger(c.count)} mov. · {formatExactCents(c.cents)}
                           </span>
                         ))}
