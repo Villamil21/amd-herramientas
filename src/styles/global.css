@@ -3658,7 +3658,6 @@ button.stat--link {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
   background: var(--color-surface);
-  cursor: grab;
 }
 
 .fs-catalog__lines li.is-inactive .fs-catalog__name {
@@ -3667,12 +3666,28 @@ button.stat--link {
 }
 
 .fs-catalog__lines li.is-dragging {
-  opacity: 0.5;
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  opacity: 0.85;
 }
 
 .fs-catalog__grip {
+  display: inline-flex;
   flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--radius-xs);
   color: var(--color-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.fs-catalog__grip:active {
+  cursor: grabbing;
+}
+
+.fs-catalog__grip:focus-visible {
+  outline: 2px solid var(--color-primary);
 }
 
 .fs-catalog__name {
@@ -3683,4 +3698,84 @@ button.stat--link {
   display: inline-flex;
   gap: 4px;
   margin-left: auto;
+}
+
+/* Dropi → Historial de cartera: banda de totales y edición manual del 4x1000 */
+.wallet-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.wallet-band__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+}
+
+.wallet-band__check.is-ok {
+  color: var(--color-success);
+}
+
+.wallet-band__check.is-bad {
+  color: var(--color-danger);
+}
+
+.wallet-row__manual {
+  margin-left: 6px;
+}
+
+.wallet-manual {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* Datos → Firmas: miniatura de la firma PNG en la tabla */
+.signer-thumb {
+  display: block;
+  width: 88px;
+  height: 32px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.signer-thumb--empty {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-muted);
+}
+
+/* Datos → Proveedores: secciones del modal (información fiscal, códigos PUC) */
+.supplier-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Dropi → Órdenes: las tres tablas del informe mensual, juntas */
+.dropi-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.dropi-report__head {
+  align-items: center;
+  margin-bottom: calc(-1 * var(--space-2));
+}
+
+.dropi-report__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
 }

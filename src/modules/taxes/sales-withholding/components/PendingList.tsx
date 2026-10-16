@@ -1,15 +1,17 @@
 import { useState, type ReactNode } from "react";
-import { Building2, Filter, Pencil, Percent, Save } from "lucide-react";
+import { Building2, Filter, Pencil, Percent, Save, X } from "lucide-react";
 import { Alert, Button, Input } from "../../../../components/ui";
 import { formatInteger } from "../../../../utils/format";
 import { isValidCiiuInput } from "../services/ciiu";
-import type { Pending } from "../types";
+import type { IssuerNit, Pending } from "../types";
 
 const firstOf = (items: string[], max = 10) => (items.length > max ? [...items.slice(0, max), `… y ${formatInteger(items.length - max)} más`] : items);
 
 interface Props {
   pending: Pending[];
-  onCreateCompany: () => void;
+  onCreateCompany: (issuer?: IssuerNit) => void;
+  onSelectIssuer: (nit: string) => void;
+  onCancelImport: () => void;
   onEditCompany: () => void;
   onSaveCiiu: (code: string) => Promise<void>;
   onOpenTable: () => void;
@@ -17,7 +19,7 @@ interface Props {
 }
 
 /** Pendientes visibles con su acción: bloqueantes primero, luego advertencias. */
-export function PendingList({ pending, onCreateCompany, onEditCompany, onSaveCiiu, onOpenTable, onShowReview }: Props) {
+export function PendingList({ pending, ...actions }: Props) {
   const sorted = [...pending].sort((a, b) => Number(b.blocking) - Number(a.blocking));
   return (
     <>
@@ -31,14 +33,14 @@ export function PendingList({ pending, onCreateCompany, onEditCompany, onSaveCii
               ))}
             </ul>
           )}
-          <Actions pending={p} {...{ onCreateCompany, onEditCompany, onSaveCiiu, onOpenTable, onShowReview }} />
+          <Actions pending={p} {...actions} />
         </Alert>
       ))}
     </>
   );
 }
 
-function Actions({ pending, onCreateCompany, onEditCompany, onSaveCiiu, onOpenTable, onShowReview }: { pending: Pending } & Omit<Props, "pending">) {
+function Actions({ pending, onCreateCompany, onSelectIssuer, onCancelImport, onEditCompany, onSaveCiiu, onOpenTable, onShowReview }: { pending: Pending } & Omit<Props, "pending">) {
   const row = (children: ReactNode) => (
     <div className="row" style={{ marginTop: "var(--space-2)" }}>
       {children}
@@ -47,9 +49,27 @@ function Actions({ pending, onCreateCompany, onEditCompany, onSaveCiiu, onOpenTa
   switch (pending.kind) {
     case "company_missing":
       return row(
-        <Button size="sm" variant="primary" icon={<Building2 size={14} />} onClick={onCreateCompany}>
-          Crear empresa
-        </Button>,
+        <>
+          <Button size="sm" variant="primary" icon={<Building2 size={14} />} onClick={() => onCreateCompany(pending.issuer)}>
+            Ir a crear empresa
+          </Button>
+          <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={onCancelImport}>
+            Cancelar importación
+          </Button>
+        </>,
+      );
+    case "multiple_nits":
+      return row(
+        <>
+          {pending.issuers?.map((i) => (
+            <Button key={i.nit} size="sm" variant="primary" icon={<Building2 size={14} />} onClick={() => onSelectIssuer(i.nit)}>
+              Procesar solo {i.company.razonSocial}
+            </Button>
+          ))}
+          <Button size="sm" variant="ghost" icon={<X size={14} />} onClick={onCancelImport}>
+            Cancelar importación
+          </Button>
+        </>,
       );
     case "ciiu_missing":
       return row(

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { Filter, FileSpreadsheet, Sheet as SheetIcon } from "lucide-react";
+import { CheckCircle2, Filter, FileSpreadsheet, Sheet as SheetIcon, XCircle } from "lucide-react";
 import { Alert, Button, Card, PageHeader, useToast } from "../../../components/ui";
 import { useShortcut } from "../../../hooks/useShortcut";
 import { fileService } from "../../../services/fileService";
@@ -37,6 +37,8 @@ export default function WalletHistoryPage() {
   const [exporting, setExporting] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<WithdrawalFilter>("all");
+  /** Valor pagado editado a mano por fila de Excel (solo esta sesión; el MONTO original no cambia). */
+  const [manual, setManual] = useState<ReadonlyMap<number, number>>(new Map());
   const tableRef = useRef<HTMLDivElement>(null);
   const busy = picking || state.status === "analyzing";
 
@@ -45,6 +47,7 @@ export default function WalletHistoryPage() {
     const { fileName } = workbook;
     setExportedPath(null);
     setFilter("all");
+    setManual(new Map());
     setState({ status: "analyzing", fileName });
     await nextFrame();
     try {
@@ -72,7 +75,14 @@ export default function WalletHistoryPage() {
 
   const loaded = state.status === "done" ? state.analysis : undefined;
   const file = loaded?.kind === "ok" ? loaded.file : undefined;
-  const analysis = useMemo(() => (file ? analyzeWallet(file.movements, { checkType: file.hasType }) : undefined), [file]);
+  const analysis = useMemo(() => (file ? analyzeWallet(file.movements, { checkType: file.hasType, manual }) : undefined), [file, manual]);
+  const editPaid = (rowNumber: number, paidCents: number | null) =>
+    setManual((prev) => {
+      const next = new Map(prev);
+      if (paidCents === null) next.delete(rowNumber);
+      else next.set(rowNumber, paidCents);
+      return next;
+    });
   /** El archivo puede no traer ningún retiro de saldo: los demás conceptos se ignoran. */
   const hasWithdrawals = !!analysis && analysis.movements.length > 0;
 
@@ -170,35 +180,38 @@ export default function WalletHistoryPage() {
 
       {file && analysis && hasWithdrawals && (
         <>
-          <div className="stat-row">
-            <Stat label="Retiros encontrados" value={formatInteger(analysis.totals.count)} onClick={() => showOnly("validated")} active={filter === "validated"} title="Ver solo los retiros validados" />
-            <Stat label="Valor total retirado" value={formatCop(analysis.totals.amountCents)} />
-            <Stat label="Total valor pagado" value={formatCop(analysis.totals.paidCents)} />
-            <Stat label="Total 4x1000" value={formatCop(analysis.totals.gmfCents)} />
-            <Stat
-              label="Movimientos por revisar"
-              value={formatInteger(analysis.review.count)}
-              tone={analysis.review.count > 0 ? "negative" : undefined}
-              onClick={() => showOnly("review")}
-              active={filter === "review"}
-              title="Ver solo los retiros que requieren revisión"
-            />
-          </div>
-          <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            Los totales incluyen solo los retiros validados. El MONTO de Dropi ya incluye el 4x1000: valor pagado = MONTO / 1,004 y 4x1000 = MONTO − valor pagado.
-            Conciliación: {formatCop(analysis.totals.paidCents)} + {formatCop(analysis.totals.gmfCents)} = {formatCop(analysis.totals.paidCents + analysis.totals.gmfCents)}
-            {analysis.totals.paidCents + analysis.totals.gmfCents === analysis.totals.amountCents ? " ✓" : " ✗ no coincide con el valor total retirado"}
-            {analysis.review.count > 0 && <> · Por revisar (no incluido): {formatCop(analysis.review.amountCents)}</>}
-          </p>
+          <WalletBand analysis={analysis} filter={filter} onReview={() => showOnly("review")} onValidated={() => showOnly("validated")} />
 
           <Alerts analysis={analysis} hasId={file.hasId} flagged={flagged} filterButton={filterButton} />
 
           <div ref={tableRef} style={{ scrollMarginTop: "var(--space-4)" }}>
-            <WithdrawalsTable key={`${file.fileName}:${file.sheetName}`} analysis={analysis} filter={filter} onFilter={setFilter} />
+            <WithdrawalsTable key={`${file.fileName}:${file.sheetName}`} analysis={analysis} filter={filter} onFilter={setFilter} onEditPaid={editPaid} />
           </div>
         </>
       )}
     </>
+  );
+}
+
+/** Banda superior: Retiros · Valor pagado · 4x1000 · Total retirado, y la conciliación de los tres. */
+function WalletBand({ analysis, filter, onReview, onValidated }: { analysis: ReturnType<typeof analyzeWallet>; filter: WithdrawalFilter; onReview: () => void; onValidated: () => void }) {
+  const t = analysis.totals;
+  const reconciled = t.paidCents + t.gmfCents === t.amountCents;
+  return (
+    <div className="wallet-band">
+      <div className="stat-row">
+        <Stat label="Retiros" value={formatInteger(t.count)} onClick={onValidated} active={filter === "validated"} title="Ver solo los retiros validados" />
+        <Stat label="Valor pagado" value={formatCop(t.paidCents)} />
+        <Stat label="4x1000" value={formatCop(t.gmfCents)} />
+        <Stat label="Total retirado" value={formatCop(t.amountCents)} />
+        {analysis.review.count > 0 && <Stat label="Por revisar" value={formatInteger(analysis.review.count)} tone="negative" onClick={onReview} active={filter === "review"} title="Ver solo los retiros que requieren revisión (no se suman)" />}
+      </div>
+      <div className={`wallet-band__check ${reconciled ? "is-ok" : "is-bad"}`}>
+        {reconciled ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+        Valor pagado + 4x1000 = Total retirado: {formatCop(t.paidCents)} + {formatCop(t.gmfCents)} = {formatCop(t.paidCents + t.gmfCents)}
+        {analysis.review.count > 0 && <span className="muted"> · Por revisar (no incluido): {formatCop(analysis.review.amountCents)}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -217,6 +230,7 @@ function Alerts({
   const type = flagged("type");
   const duplicate = flagged("duplicate");
   const invalid = flagged("invalid_amount");
+  const gmf = flagged("gmf_review");
 
   return (
     <>
@@ -245,6 +259,16 @@ function Alerts({
         <Alert tone="danger" title={plural(c.invalid_amount, "1 movimiento tiene un MONTO no válido.", "# movimientos tienen un MONTO no válido.")} items={firstOf(invalid.map((m) => describe(m, m.amountProblem ?? "")))}>
           No se calcularon valor pagado ni 4x1000 para esas filas y no se suman a los totales.
           {filterButton("invalid_amount")}
+        </Alert>
+      )}
+      {c.gmf_review > 0 && (
+        <Alert
+          tone="warning"
+          title={plural(c.gmf_review, "1 retiro requiere revisar el 4x1000.", "# retiros requieren revisar el 4x1000.")}
+          items={firstOf(gmf.map((m) => describe(m, `fila ${m.rowNumber}`)))}
+        >
+          Ningún valor pagado entero produce ese MONTO con la regla de Dropi (MONTO = valor pagado / 0,996). Despliega la fila y escribe el valor pagado: el 4x1000 es la diferencia con el MONTO.
+          {filterButton("gmf_review")}
         </Alert>
       )}
       {!hasId && <Alert tone="info">El archivo no trae la columna ID: no fue posible detectar movimientos duplicados.</Alert>}

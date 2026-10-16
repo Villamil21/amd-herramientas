@@ -676,6 +676,114 @@ pub fn reclassify_movements(conn: &mut Connection, company_id: Option<i64>, ids:
 }
 
 // ---------------------------------------------------------------------------
+// Edición individual de movimientos (siempre trazable)
+// ---------------------------------------------------------------------------
+
+/// Edita un movimiento activo sin sobrescribirlo: el original pasa a «Ajustado»
+/// y la versión corregida es un movimiento nuevo del mismo lote; o, si solo
+/// cambia el estado, el original pasa a «Ignorado» / «Anulado». Cada edición
+/// guarda motivo, antes y después en fs_movement_edits. Respeta los periodos
+/// cerrados (fecha anterior y nueva) e invalida los periodos aprobados.
+pub fn edit_movement(conn: &mut Connection, input: &MovementEditInput) -> AppResult<MovementEdit> {
+    let reason = input.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::user("Escribe el motivo de la edición."));
+    }
+    if !["active", "ignored", "voided"].contains(&input.status.as_str()) {
+        return Err(AppError::user("El estado elegido no es válido."));
+    }
+    let old = conn
+        .query_row(&format!("SELECT {MOVEMENT_COLUMNS} FROM fs_movements WHERE id = ?1"), [input.movement_id], map_movement)
+        .optional()?
+        .ok_or_else(|| AppError::user("El movimiento no existe."))?;
+    if old.status != "active" {
+        return Err(AppError::user("Solo se edita la versión activa de un movimiento (las anteriores quedan en el historial)."));
+    }
+    if old.source == "adjustment" {
+        return Err(AppError::user("Los ajustes manuales se editan desde Generador de Estados Financieros → Ajustes (conservan su propio historial)."));
+    }
+    let values_change = input.status == "active";
+    let puc_code = input.puc_code.trim();
+    let mut concept = input.puc_concept.trim().to_string();
+    if values_change {
+        validate_iso_date(&input.accounting_date, "Fecha contable")?;
+        let catalog_concept = puc::assignable_concept(conn, puc_code)?.ok_or_else(|| AppError::user(format!("El código PUC «{puc_code}» no existe o no se puede asignar.")))?;
+        if concept.is_empty() || puc_code != old.puc_code {
+            concept = if puc_code == old.puc_code { old.puc_concept.clone() } else { catalog_concept };
+        }
+        if old.dc.is_some() && input.amount_cents < 0 {
+            return Err(AppError::user("El valor de un movimiento bancario es absoluto: la dirección (salida / entrada) se conserva."));
+        }
+        let same = input.accounting_date == old.accounting_date && puc_code == old.puc_code && concept == old.puc_concept && input.description.trim() == old.description && input.amount_cents == old.amount_cents;
+        if same {
+            return Err(AppError::user("No hay cambios que guardar."));
+        }
+    }
+    let mut dates = BTreeSet::from([old.accounting_date.clone()]);
+    if values_change {
+        dates.insert(input.accounting_date.clone());
+    }
+    ensure_open(conn, old.company_id, &dates)?;
+
+    let snapshot = |date: &str, code: &str, concept: &str, description: &str, cents: i64, status: &str| {
+        serde_json::json!({ "accountingDate": date, "pucCode": code, "pucConcept": concept, "description": description, "amountCents": cents, "status": status })
+    };
+    let previous = snapshot(&old.accounting_date, &old.puc_code, &old.puc_concept, &old.description, old.amount_cents, &old.status);
+    let next = if values_change {
+        snapshot(&input.accounting_date, puc_code, &concept, input.description.trim(), input.amount_cents, "active")
+    } else {
+        snapshot(&old.accounting_date, &old.puc_code, &old.puc_concept, &old.description, old.amount_cents, &input.status)
+    };
+
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    let mut new_id = None;
+    if values_change {
+        let mut detail = old.detail.clone();
+        if let Value::Object(map) = &mut detail {
+            map.insert("editedFrom".into(), old.id.into());
+        }
+        tx.execute(
+            "INSERT INTO fs_movements (company_id, batch_id, accounting_date, source, concept_key, document_id, document_number, document_type, supplier_id, supplier_nit, supplier_name, employee_id, employment_id, bank, account_number, puc_code, puc_concept, description, amount_cents, dc, settles_on, status, detail, created_at, updated_at)
+             SELECT company_id, batch_id, ?2, source, concept_key, document_id, document_number, document_type, supplier_id, supplier_nit, supplier_name, employee_id, employment_id, bank, account_number, ?3, ?4, ?5, ?6, dc, settles_on, 'active', ?7, ?8, ?8
+             FROM fs_movements WHERE id = ?1",
+            params![old.id, input.accounting_date, puc_code, concept, input.description.trim(), input.amount_cents, detail.to_string(), now],
+        )?;
+        new_id = Some(tx.last_insert_rowid());
+        tx.execute("UPDATE fs_movements SET status = 'adjusted', updated_at = ?1 WHERE id = ?2", params![now, old.id])?;
+    } else {
+        tx.execute("UPDATE fs_movements SET status = ?1, updated_at = ?2 WHERE id = ?3", params![input.status, now, old.id])?;
+    }
+    tx.execute(
+        "INSERT INTO fs_movement_edits (company_id, original_movement_id, new_movement_id, reason, origin, previous, next, created_at) VALUES (?1, ?2, ?3, ?4, 'movements', ?5, ?6, ?7)",
+        params![old.company_id, old.id, new_id, reason, previous.to_string(), next.to_string(), now],
+    )?;
+    let id = tx.last_insert_rowid();
+    invalidate_periods(&tx, old.company_id, &dates, REVIEW_NEW_MOVEMENTS)?;
+    tx.commit()?;
+    Ok(MovementEdit { id, company_id: old.company_id, original_movement_id: old.id, new_movement_id: new_id, reason: reason.to_string(), origin: "movements".into(), previous, next, created_at: now })
+}
+
+pub fn list_movement_edits(conn: &Connection, company_id: i64) -> AppResult<Vec<MovementEdit>> {
+    Ok(conn
+        .prepare("SELECT id, company_id, original_movement_id, new_movement_id, reason, origin, previous, next, created_at FROM fs_movement_edits WHERE company_id = ?1 ORDER BY id")?
+        .query_map([company_id], |r| {
+            Ok(MovementEdit {
+                id: r.get(0)?,
+                company_id: r.get(1)?,
+                original_movement_id: r.get(2)?,
+                new_movement_id: r.get(3)?,
+                reason: r.get(4)?,
+                origin: r.get(5)?,
+                previous: json(r.get(6)?),
+                next: json(r.get(7)?),
+                created_at: r.get(8)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
+// ---------------------------------------------------------------------------
 // Configuración global
 // ---------------------------------------------------------------------------
 
@@ -1385,13 +1493,29 @@ mod tests {
     fn seeds_catalog_and_7305_excluded() {
         let conn = db();
         let c = catalog(&conn).unwrap();
-        assert_eq!(c.lines.len(), 34);
+        assert_eq!(c.lines.len(), 41, "34 de 014 + 7 de 019");
         assert_eq!(c.sections.len(), 11);
         let disponible = c.lines.iter().find(|l| l.name == "Disponible").unwrap();
         assert_eq!(c.sections.iter().find(|s| s.section == "asset_current").unwrap().representative_line_id, Some(disponible.id));
         let m = list_mappings(&conn).unwrap();
         assert_eq!(m.len(), 1);
         assert!(m[0].puc_code == "7305" && m[0].excluded && m[0].line_id.is_none());
+    }
+
+    #[test]
+    fn catalog_has_the_initial_lines_of_the_master_prompt() {
+        let conn = db();
+        let c = catalog(&conn).unwrap();
+        let names = |section: &str| c.lines.iter().filter(|l| l.section == section).map(|l| l.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names("asset_current"), ["Disponible", "Activos intangibles", "Deudores"]);
+        assert_eq!(names("asset_noncurrent"), ["Propiedades, planta y equipo", "Deudores"]);
+        assert_eq!(names("liability_noncurrent"), ["Otros pasivos", "Impuestos, gravámenes y tasas"]);
+        assert_eq!(
+            names("admin_expenses"),
+            ["Gastos de personal", "Honorarios", "Arrendamientos", "Servicios", "Gastos legales", "Diversos", "Seguros", "Mantenimiento y reparaciones", "Adecuación e instalación", "Gastos de viaje"]
+        );
+        assert_eq!(names("sales_expenses"), ["Gastos de personal", "Servicios", "Diversos"]);
+        assert_eq!(names("other_expenses"), ["Otros Gastos", "Otros Gastos financieros"]);
     }
 
     #[test]
@@ -1402,11 +1526,13 @@ mod tests {
         assert!(create_line(&conn, "admin_expenses", "  ").is_err());
         update_line(&conn, id, "Inventarios de mercancía", true).unwrap();
         let ids: Vec<i64> = catalog(&conn).unwrap().lines.iter().filter(|l| l.section == "asset_current").map(|l| l.id).collect();
-        assert_eq!(ids, [1, 2, id]);
-        reorder_lines(&mut conn, "asset_current", &[id, 1, 2]).unwrap();
+        // Disponible, Activos intangibles, Deudores (019) y la nueva al final.
+        let deudores = ids[2];
+        assert_eq!(ids, [1, 2, deudores, id]);
+        reorder_lines(&mut conn, "asset_current", &[id, 1, 2, deudores]).unwrap();
         assert!(reorder_lines(&mut conn, "asset_current", &[id, 1]).is_err(), "deben venir todas las líneas");
         let ids: Vec<i64> = catalog(&conn).unwrap().lines.iter().filter(|l| l.section == "asset_current").map(|l| l.id).collect();
-        assert_eq!(ids, [id, 1, 2]);
+        assert_eq!(ids, [id, 1, 2, deudores]);
         assert!(update_line(&conn, 1, "Disponible", false).unwrap_err().0.contains("representativa"));
         assert!(update_line(&conn, 14, "Capital social", false).unwrap_err().0.contains("estructura"));
         set_representative(&conn, "asset_current", id).unwrap();
@@ -1610,6 +1736,45 @@ mod tests {
         close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
         assert!(reclassify_movements(&mut conn, Some(a), &ids, "530505").is_err());
         assert!(list_movements(&conn, a).unwrap().iter().all(|m| m.puc_code == "530510"), "todo o nada");
+    }
+
+    #[test]
+    fn movement_edit_keeps_the_original_and_respects_closed_periods() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-08-10", "513595", 10_000, "d1")])).unwrap();
+        let original = list_movements(&conn, a).unwrap()[0].clone();
+        let edit = |id: i64, cents: i64, reason: &str| MovementEditInput {
+            movement_id: id,
+            accounting_date: "2026-08-15".into(),
+            puc_code: "513595".into(),
+            puc_concept: String::new(),
+            description: "Corregido".into(),
+            amount_cents: cents,
+            status: "active".into(),
+            reason: reason.into(),
+        };
+        assert!(edit_movement(&mut conn, &edit(original.id, 12_000, " ")).is_err(), "motivo obligatorio");
+        let e = edit_movement(&mut conn, &edit(original.id, 12_000, "Valor mal digitado")).unwrap();
+        let all = list_movements(&conn, a).unwrap();
+        let old = all.iter().find(|m| m.id == original.id).unwrap();
+        let new = all.iter().find(|m| Some(m.id) == e.new_movement_id).unwrap();
+        assert_eq!((old.status.as_str(), old.amount_cents), ("adjusted", 10_000), "el original no se sobrescribe");
+        assert_eq!((new.status.as_str(), new.amount_cents, new.accounting_date.as_str(), new.batch_id), ("active", 12_000, "2026-08-15", old.batch_id));
+        assert_eq!(new.detail["editedFrom"], original.id);
+        assert_eq!((e.previous["amountCents"].as_i64(), e.next["amountCents"].as_i64()), (Some(10_000), Some(12_000)));
+        assert!(edit_movement(&mut conn, &edit(original.id, 1, "otra vez")).is_err(), "solo la versión activa");
+        // Anular solo cambia el estado.
+        let voided = edit_movement(&mut conn, &MovementEditInput { status: "voided".into(), ..edit(new.id, 0, "Documento anulado por el proveedor") }).unwrap();
+        assert_eq!(voided.new_movement_id, None);
+        assert!(active(&conn, a).is_empty());
+        assert_eq!(list_movement_edits(&conn, a).unwrap().len(), 2);
+        // Periodo cerrado: bloquea.
+        send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-03-01", "513595", 100, "d2")])).unwrap();
+        mark_ready(&mut conn, &key(a), "h").unwrap();
+        close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
+        let id = list_movements(&conn, a).unwrap().into_iter().find(|m| m.status == "active").unwrap().id;
+        assert!(edit_movement(&mut conn, &edit(id, 5, "Cambio")).unwrap_err().0.starts_with(CLOSED_PERIOD));
     }
 
     #[test]

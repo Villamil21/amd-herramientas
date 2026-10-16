@@ -152,18 +152,26 @@ export function analyzeSales(rows: SalesRow[], ctx: AnalysisContext): SalesAnaly
   let company: Company | undefined;
   let rate: SelfWithholdingRate | undefined;
   if (nits.length > 1) {
-    pending.push({
-      kind: "multiple_nits",
-      blocking: true,
-      title: "Se encontraron ventas de más de un NIT Emisor en el mismo archivo.",
-      detail: "No se calcula una única tarifa hasta resolverlo. Revisa que el archivo corresponda a una sola empresa.",
-      items: nits.map((n) => `NIT ${n.nit} · ${n.name || "sin nombre"} · ${plural(n.rows, "1 fila", "# filas")}`),
-    });
+    // Nunca se mezclan empresas: cada NIT debe ser una empresa creada y se procesa una a la vez.
+    const unknown = nits.filter((n) => !findCompany(ctx.companies, n.nit));
+    for (const n of unknown) {
+      pending.push({ kind: "company_missing", blocking: true, title: "El archivo contiene un NIT Emisor que no está registrado como empresa.", detail: `NIT ${n.nit} · ${n.name || "sin nombre"} · ${plural(n.rows, "1 fila", "# filas")}. Créala en Datos → Empresas o cancela la importación.`, issuer: n });
+    }
+    if (unknown.length === 0) {
+      pending.push({
+        kind: "multiple_nits",
+        blocking: true,
+        title: "El archivo contiene documentos de varias empresas.",
+        detail: "Selecciona una empresa para procesar solo sus filas; las demás se procesan por separado, una empresa a la vez.",
+        items: nits.map((n) => `NIT ${n.nit} · ${n.name || "sin nombre"} · ${plural(n.rows, "1 fila", "# filas")}`),
+        issuers: nits.map((n) => ({ ...n, company: findCompany(ctx.companies, n.nit)! })),
+      });
+    }
   } else if (nits.length === 1) {
     issuer = nits[0];
     company = findCompany(ctx.companies, issuer.nit);
     if (!company) {
-      pending.push({ kind: "company_missing", blocking: true, title: "La empresa emisora no está registrada.", detail: `NIT ${issuer.nit} · ${issuer.name || "sin nombre"}. Créala en Datos → Empresas.` });
+      pending.push({ kind: "company_missing", blocking: true, title: "La empresa emisora no está registrada.", detail: `NIT ${issuer.nit} · ${issuer.name || "sin nombre"}. Créala en Datos → Empresas o cancela la importación.`, issuer });
     } else if (!company.ciiuCode.trim()) {
       pending.push({ kind: "ciiu_missing", blocking: true, title: `La empresa ${company.razonSocial} no tiene Código CIIU configurado.`, detail: "Sin CIIU no se puede obtener la tarifa de autorretención." });
     } else {

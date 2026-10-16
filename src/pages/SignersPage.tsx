@@ -1,11 +1,30 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { signerService } from "../services/signerService";
-import type { AccountantTitle, CertificateSigner, CertificateSignerInput } from "../types/models";
+import { SIGNER_FS_ROLE_LABEL, signerFsRole, type CertificateSigner, type CertificateSignerInput, type SignerFsRole } from "../types/models";
 
-const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", personalDocument: "", accountantTitle: "", signatureFile: "" };
+const empty: CertificateSignerInput = { name: "", role: "", professionalDocument: "", personalDocument: "", accountantTitle: "", fsExcluded: false, signatureFile: "" };
+
+/** Rol EEFF elegido en el formulario → campos guardados. */
+const roleFields = (role: SignerFsRole): Pick<CertificateSignerInput, "accountantTitle" | "fsExcluded"> =>
+  role === "excluded" ? { accountantTitle: "", fsExcluded: true } : role === "pending" ? { accountantTitle: "", fsExcluded: false } : { accountantTitle: role, fsExcluded: false };
+
+const ROLE_TONE: Record<SignerFsRole, "success" | "warning" | undefined> = { "Contador Público": "success", "Contadora Pública": "success", pending: "warning", excluded: undefined };
+
+/** Miniatura de la firma PNG en la tabla (se lee del almacenamiento persistente de firmas). */
+function SignatureThumb({ signer }: { signer: CertificateSigner }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (signer.signatureAvailable) signerService.dataUrl(signer.signatureFile).then((u) => alive && setUrl(u), () => alive && setUrl(null));
+    return () => {
+      alive = false;
+    };
+  }, [signer.signatureAvailable, signer.signatureFile]);
+  return url ? <img src={url} alt={`Firma de ${signer.name}`} className="signer-thumb" /> : <span className="signer-thumb signer-thumb--empty">—</span>;
+}
 /** "loading" mientras se lee la firma guardada; "missing" si SQLite la referencia pero el archivo ya no está. */
 type SignatureStatus = "none" | "loading" | "ok" | "missing";
 
@@ -23,7 +42,7 @@ export function SignersPage() {
     const token = ++loadToken.current;
     setEditing(s); setPreview(null); setError(null);
     if (!s) { setValues(empty); setStatus("none"); return; }
-    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, personalDocument: s.personalDocument, accountantTitle: s.accountantTitle, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
+    setValues({ name: s.name, role: s.role, professionalDocument: s.professionalDocument, personalDocument: s.personalDocument, accountantTitle: s.accountantTitle, fsExcluded: s.fsExcluded, signatureFile: s.signatureAvailable ? s.signatureFile : "" });
     if (!s.signatureAvailable) { setStatus(s.signatureFile ? "missing" : "none"); return; }
     setStatus("loading");
     const markMissing = () => { if (token === loadToken.current) { setStatus("missing"); setValues(v => ({ ...v, signatureFile: "" })); } };
@@ -46,9 +65,9 @@ export function SignersPage() {
 
   const changed = status === "ok" && !!editing && values.signatureFile !== editing.signatureFile;
   return <>
-    <PageHeader eyebrow="Datos" title="Firmas" description="Firmantes reutilizables para certificados." actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => open(null)}>Nueva firma</Button>} />
+    <PageHeader eyebrow="Datos" title="Firmas" description="Firmantes reutilizables para certificados y Estados Financieros." actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => open(null)}>Nueva firma</Button>} />
     <Card flush title="Firmas registradas">
-      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firmante</th><th>Cargo</th><th>Documento profesional</th><th>Documento de identidad</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><span className="table__primary">{s.name}</span>{!s.signatureAvailable && <> <Badge tone="warning">Firma faltante</Badge></>}</td><td>{s.role}</td><td>{s.professionalDocument}</td><td>{s.personalDocument || "—"}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en los certificados." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
+      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firma</th><th>Firmante</th><th>Cargo</th><th>Rol EEFF</th><th>Documento profesional</th><th>Documento de identidad</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><SignatureThumb signer={s} /></td><td><span className="table__primary">{s.name}</span>{!s.signatureAvailable && <> <Badge tone="warning">Firma faltante</Badge></>}</td><td>{s.role}</td><td><Badge tone={ROLE_TONE[signerFsRole(s)]}>{SIGNER_FS_ROLE_LABEL[signerFsRole(s)]}</Badge></td><td>{s.professionalDocument}</td><td>{s.personalDocument || "—"}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en los certificados." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
     </Card>
     <Modal open={editing !== undefined} title={editing ? "Editar firma" : "Nueva firma"} onClose={() => setEditing(undefined)} locked={busy} footer={<><Button variant="ghost" onClick={() => setEditing(undefined)}>Cancelar</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Guardar</Button></>}>
       <div className="stack">
@@ -68,7 +87,7 @@ export function SignersPage() {
         <Field label="Cargo" required>{id => <Input id={id} value={values.role} onChange={e => setValues(v => ({ ...v, role: e.target.value }))} />}</Field>
         <Field label="Documento profesional" required hint="Ej. TP-290048">{id => <Input id={id} value={values.professionalDocument} onChange={e => setValues(v => ({ ...v, professionalDocument: e.target.value }))} />}</Field>
         <Field label="Documento de identidad" hint="Opcional. Ej. CC 1192729629. Aparece bajo la firma del certificado de ingresos.">{id => <Input id={id} value={values.personalDocument} onChange={e => setValues(v => ({ ...v, personalDocument: e.target.value }))} />}</Field>
-        <Field label="En Estados Financieros se muestra como" hint="Para firmar como contador en los Estados Financieros. No se deduce del nombre.">{id => <Select id={id} value={values.accountantTitle} onChange={e => setValues(v => ({ ...v, accountantTitle: e.target.value as AccountantTitle }))}><option value="">Sin definir</option><option value="Contador Público">Contador Público</option><option value="Contadora Pública">Contadora Pública</option></Select>}</Field>
+        <Field label="En Estados Financieros se muestra como" hint="Para firmar como contador en los Estados Financieros. No se deduce del nombre; mientras esté «Sin definir» la firma no se puede usar en el PDF.">{id => <Select id={id} value={signerFsRole(values)} onChange={e => setValues(v => ({ ...v, ...roleFields(e.target.value as SignerFsRole) }))}><option value="pending">Sin definir (Pendiente EEFF)</option><option value="Contador Público">Contador Público</option><option value="Contadora Pública">Contadora Pública</option><option value="excluded">No usar como contador en EEFF</option></Select>}</Field>
       </div>
     </Modal>
     <ConfirmDialog open={!!removing} danger title="Eliminar firma" message="La firma y su imagen se eliminarán." confirmLabel="Eliminar" loading={busy} onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />

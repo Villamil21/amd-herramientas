@@ -84,6 +84,40 @@ export type MovementStatus = "active" | "replaced" | "ignored" | "adjusted" | "v
 
 export const MOVEMENT_STATUS_LABEL: Record<MovementStatus, string> = { active: "Activo", replaced: "Reemplazado", ignored: "Ignorado", adjusted: "Ajustado", voided: "Anulado" };
 
+/** Edición de un movimiento desde Movimientos contables (siempre con motivo; nunca sobrescribe el original). */
+export interface MovementEditInput {
+  movementId: number;
+  accountingDate: string;
+  pucCode: string;
+  pucConcept: string;
+  description: string;
+  amountCents: number;
+  /** "active" = corregir valores (versión nueva); "ignored" / "voided" = solo cambiar el estado. */
+  status: "active" | "ignored" | "voided";
+  reason: string;
+}
+
+export interface MovementEditSnapshot {
+  accountingDate: string;
+  pucCode: string;
+  pucConcept: string;
+  description: string;
+  amountCents: number;
+  status: MovementStatus;
+}
+
+export interface MovementEdit {
+  id: number;
+  companyId: number;
+  originalMovementId: number;
+  newMovementId: number | null;
+  reason: string;
+  origin: string;
+  previous: MovementEditSnapshot;
+  next: MovementEditSnapshot;
+  createdAt: string;
+}
+
 export interface MovementInput {
   accountingDate: string;
   conceptKey?: string;

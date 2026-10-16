@@ -436,6 +436,37 @@ fn record_supplier_code_at(conn: &Connection, supplier_id: i64, code: &str, now:
     Ok(())
 }
 
+/// Quita una asociación de sugerencia proveedor ↔ código (no toca movimientos ya enviados).
+pub fn delete_supplier_code(conn: &Connection, supplier_id: i64, code: &str) -> AppResult<()> {
+    if conn.execute("DELETE FROM supplier_puc_codes WHERE supplier_id = ?1 AND puc_code = ?2", params![supplier_id, code])? == 0 {
+        return Err(AppError::user("Esa asociación ya no existe."));
+    }
+    Ok(())
+}
+
+/// Cambia el código de una asociación de sugerencia (conserva el contador de usos).
+pub fn replace_supplier_code(conn: &mut Connection, supplier_id: i64, from: &str, to: &str) -> AppResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    if assignable_concept(conn, to)?.is_none() {
+        return Err(AppError::user("No se puede asignar este nivel del PUC. Selecciona un código de 6 dígitos o un código personalizado."));
+    }
+    let tx = conn.transaction()?;
+    let row: Option<(i64, String)> = tx
+        .query_row("SELECT usage_count, created_at FROM supplier_puc_codes WHERE supplier_id = ?1 AND puc_code = ?2", params![supplier_id, from], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((count, created)) = row else { return Err(AppError::user("Esa asociación ya no existe.")) };
+    tx.execute("DELETE FROM supplier_puc_codes WHERE supplier_id = ?1 AND puc_code = ?2", params![supplier_id, from])?;
+    tx.execute(
+        "INSERT INTO supplier_puc_codes (supplier_id, puc_code, usage_count, created_at, last_used_at) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(supplier_id, puc_code) DO UPDATE SET usage_count = usage_count + excluded.usage_count",
+        params![supplier_id, to, count, created, now_iso()],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Todas las asociaciones proveedor ↔ código, con el NIT del proveedor (backup).
 pub fn list_all_supplier_codes(conn: &Connection) -> AppResult<Vec<SupplierPucCode>> {
     let mut stmt = conn.prepare(

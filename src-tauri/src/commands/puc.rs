@@ -80,6 +80,24 @@ pub fn list_supplier_puc_codes(db: State<'_, Db>, supplier_id: i64) -> AppResult
     db.with(|c| puc::list_supplier_codes(c, supplier_id))
 }
 
+/// Datos → Proveedores: quita una asociación de sugerencia y devuelve la lista actualizada.
+#[tauri::command]
+pub fn delete_supplier_puc_code(db: State<'_, Db>, supplier_id: i64, code: String) -> AppResult<Vec<String>> {
+    db.with(|c| {
+        puc::delete_supplier_code(c, supplier_id, code.trim())?;
+        puc::list_supplier_codes(c, supplier_id)
+    })
+}
+
+/// Datos → Proveedores: cambia el código de una asociación y devuelve la lista actualizada.
+#[tauri::command]
+pub fn replace_supplier_puc_code(db: State<'_, Db>, supplier_id: i64, from: String, to: String) -> AppResult<Vec<String>> {
+    db.with(|c| {
+        puc::replace_supplier_code(c, supplier_id, from.trim(), to.trim())?;
+        puc::list_supplier_codes(c, supplier_id)
+    })
+}
+
 /// Guarda proveedor ↔ código al confirmar una asignación y devuelve la lista actualizada.
 #[tauri::command]
 pub fn record_supplier_puc_code(db: State<'_, Db>, supplier_id: i64, code: String) -> AppResult<Vec<String>> {

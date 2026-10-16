@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.28.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Herramientas y las tarjetas de cada módulo (Certificados, Dropi, Calculadoras, Estados Financieros…) se ordenan alfabéticamente. En Estados Financieros, Generador de Estados Financieros sigue siempre primero.",
+      "Configuración: Actualizaciones queda arriba, con versión instalada, estado (Actualizada / Actualización disponible), fecha y hora de la última comprobación y el botón principal «Buscar actualizaciones». Después Copia de seguridad y Ubicación de los datos.",
+      "Catálogo de cuentas EEFF: arrastrar para ordenar las líneas ahora funciona (también con las flechas del teclado sobre el asa). El orden se guarda y se refleja en el Generador, la vista previa y el PDF; una línea nunca cambia de sección.",
+      "Dropi → Historial de cartera: el 4x1000 se calcula como lo cobra Dropi (MONTO = valor pagado / 0,996): 4.016.064 → 4.000.000 pagado + 16.064 de 4x1000. Si un retiro no tiene solución queda «4x1000 por revisar» y se puede escribir el valor pagado a mano (siempre suma el MONTO). Banda superior compacta con la conciliación Valor pagado + 4x1000 = Total retirado.",
+      "Dropi → Órdenes: Ventas Dropi, Pedidos y Costos Dropi quedan juntos en «Resumen para informe mensual», con «Copiar resumen» para pegar en Excel.",
+      "Retención en la fuente ventas: la hoja se detecta por sus encabezados (ya no tiene que llamarse «Ventas»). Un NIT Emisor no registrado bloquea con «Ir a crear empresa» o «Cancelar importación»; un archivo con varias empresas se procesa una empresa a la vez, nunca mezcladas.",
+      "Movimientos contables: cada movimiento se puede editar (fecha, PUC, concepto, valor, descripción o estado Ignorado / Anulado) con motivo obligatorio. El original no se sobrescribe: queda «Ajustado» y el historial muestra antes, después, fecha y motivo. Un periodo cerrado bloquea el cambio.",
+      "Firmas: columna «Rol EEFF» (Contador Público, Contadora Pública, Pendiente EEFF o No usar) y miniatura de la firma en la tabla. Nueva opción «No usar como contador en EEFF». En el Generador, una firma sin rol definido aparece bloqueada con una alerta.",
+      "Proveedores: el modal muestra la información fiscal (PJ / PN, régimen editable, retenciones con subtipo y base) y los «Códigos PUC utilizados», que se pueden cambiar o quitar (solo sugieren; nunca clasifican sin confirmación).",
+      "Generador: en la cobertura mensual, Saldos iniciales es una foto de apertura y Ajustes son puntuales: sus meses sin datos ya no aparecen como faltantes.",
+      "Obligaciones tributarias → IVA: una declaración con las casillas 88 y 89 ambas mayores que cero se bloquea para revisión.",
+      "Catálogo inicial de EEFF: se agregan, solo si no existen, Deudores (corriente y no corriente), Impuestos, gravámenes y tasas (no corriente), Seguros, Mantenimiento y reparaciones, Adecuación e instalación y Gastos de viaje."
+    ]
+  },
+  {
     "version": "1.27.0",
     "date": "2026-10-15",
     "notes": [
@@ -9,13 +27,6 @@
       "El Generador de Estados Financieros toma solo el saldo pendiente a la fecha de corte (los pagos posteriores no cuentan). La Retefuente de un año anterior va al pasivo no corriente solo por su saldo pendiente. Cambiar un pago queda bloqueado si afecta un periodo cerrado y marca para revisión los periodos preparados afectados.",
       "Las fechas de pago ya registradas se conservan como un pago por el valor total. Al corregir una declaración, los pagos de la anterior no se trasladan: se registran en la corrección.",
       "Saldos iniciales: la columna «Valor» ya no queda reducida a unos pocos píxeles; el importe se ve completo y, en ventanas estrechas, la tabla se desplaza horizontalmente."
-    ]
-  },
-  {
-    "version": "1.27.0",
-    "date": "2026-10-15",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {

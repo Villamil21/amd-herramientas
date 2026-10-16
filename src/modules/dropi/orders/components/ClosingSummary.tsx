@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Coins, PackageCheck, ShoppingBag } from "lucide-react";
-import { Alert, Badge, Card } from "../../../../components/ui";
+import { ClipboardCopy, Coins, PackageCheck, ShoppingBag } from "lucide-react";
+import { Alert, Badge, Button, Card, useToast } from "../../../../components/ui";
 import { formatInteger } from "../../../../utils/format";
 import { closingConcepts, orderCounts } from "../services/excelExport";
 import { formatCop } from "../services/format";
@@ -24,8 +24,37 @@ const Title = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => 
   </span>
 );
 
-/** Los tres bloques del cierre: Ventas Dropi, Pedidos y Costos Dropi. */
+/** Pesos para pegar en Excel: sin «$» ni separador de miles; coma decimal solo si hay centavos. */
+const pastePesos = (cents: number) => (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2).replace(".", ","));
+
+/** Las tres tablas en orden (Ventas Dropi, Pedidos, Costos Dropi), una fila «Concepto⇥Valor» por línea. */
+export function summaryText(analysis: DropiOrdersAnalysis): string {
+  const concepts = closingConcepts(analysis);
+  const lines = (section: string) => concepts.filter((c) => c.section === section).map((c) => `${c.concept}\t${pastePesos(c.cents)}`);
+  return [...lines("Ventas Dropi"), ...orderCounts(analysis).map((c) => `${c.concept}\t${c.count}`), ...lines("Costos Dropi")].join("\n");
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Respaldo si el portapapeles asíncrono no está disponible.
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (!ok) throw new Error("No fue posible copiar al portapapeles.");
+  }
+}
+
+/**
+ * «Resumen para informe mensual»: los tres bloques del cierre, siempre juntos y
+ * consecutivos (Ventas Dropi, Pedidos y Costos Dropi), y «Copiar resumen».
+ */
 export function ClosingSummary({ analysis }: { analysis: DropiOrdersAnalysis }) {
+  const toast = useToast();
   const { summary: s, complete } = analysis;
   const concepts = closingConcepts(analysis);
   const sales = concepts.filter((c) => c.section === "Ventas Dropi");
@@ -34,8 +63,20 @@ export function ClosingSummary({ analysis }: { analysis: DropiOrdersAnalysis }) 
   const userClassified = ["En proceso", "Siniestro", "Indemnizada / En proceso indemnización"];
   const partial = (concept: string) => (!complete && userClassified.includes(concept) ? <Badge tone="warning">Parcial</Badge> : undefined);
 
+  const copy = () =>
+    copyText(summaryText(analysis)).then(
+      () => toast("Resumen copiado: pégalo en Excel."),
+      (e: Error) => toast(e.message, "error"),
+    );
+
   return (
-    <>
+    <section className="dropi-report" aria-label="Resumen para informe mensual">
+      <div className="row row--between dropi-report__head">
+        <h2 className="dropi-report__title">Resumen para informe mensual</h2>
+        <Button size="sm" icon={<ClipboardCopy size={14} />} onClick={() => void copy()} title="Copia Ventas Dropi, Pedidos y Costos Dropi en orden, tabulado para pegar en Excel">
+          Copiar resumen
+        </Button>
+      </div>
       {!complete && (
         <Alert tone="warning" title="El cierre aún no está completamente clasificado">
           Los totales de En proceso, Siniestro e Indemnizada / En proceso indemnización se actualizan automáticamente al clasificar los estados pendientes. La exportación se habilita cuando
@@ -77,6 +118,6 @@ export function ClosingSummary({ analysis }: { analysis: DropiOrdersAnalysis }) 
           ))}
         </div>
       </Card>
-    </>
+    </section>
   );
 }

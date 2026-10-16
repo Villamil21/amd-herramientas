@@ -138,28 +138,34 @@ function dataRows(sheet: Sheet): number {
 }
 
 /**
- * Lee exclusivamente la hoja «Ventas» (sin distinguir mayúsculas ni espacios
- * al inicio/final) y localiza las columnas por nombre de encabezado. Si varias
- * hojas se llaman igual, pide elegir en vez de tomar una arbitrariamente.
+ * Busca la hoja por estructura, no por nombre: candidatas son las hojas con
+ * todas las columnas requeridas (NIT Emisor incluida). Si alguna se llama
+ * «Ventas» (sin distinguir mayúsculas ni espacios) se prefiere; si no, sirve
+ * cualquier hoja con esos encabezados. Varias candidatas → pedir elegir.
+ * Las columnas se localizan por nombre de encabezado.
  *
  * `sheetName` fuerza una hoja (cuando el usuario la eligió).
  */
 export function readSalesWorkbook(workbook: Workbook, sheetName?: string): ReadResult {
-  const candidates = workbook.sheets.filter((s) => normalizeSheetName(s.name) === SALES_SHEET);
-  if (candidates.length === 0) throw new SalesWithholdingError("No se encontró una hoja llamada Ventas en el archivo seleccionado.");
+  const analyzed = workbook.sheets.map((sheet) => ({ sheet, ...findHeader(sheet) }));
+  const complete = analyzed.filter((a) => a.missing.length === 0);
+  const named = complete.filter((a) => normalizeSheetName(a.sheet.name) === SALES_SHEET);
+  const candidates = named.length > 0 ? named : complete;
 
-  let sheet: Sheet;
   if (sheetName !== undefined) {
-    const chosen = candidates.find((s) => s.name === sheetName);
-    if (!chosen) throw new SalesWithholdingError(`La hoja «${sheetName}» no es una hoja Ventas del archivo.`);
-    sheet = chosen;
-  } else if (candidates.length > 1) {
-    return { kind: "choose-sheet", candidates: candidates.map((s) => ({ name: s.name, rows: dataRows(s) })) };
-  } else {
-    sheet = candidates[0];
+    const chosen = complete.find((a) => a.sheet.name === sheetName);
+    if (!chosen) throw new SalesWithholdingError(`La hoja «${sheetName}» no tiene los encabezados de facturación DIAN.`);
+    return { kind: "ok", file: extract(workbook, chosen.sheet, chosen.header) };
   }
+  if (candidates.length > 1) return { kind: "choose-sheet", candidates: candidates.map((a) => ({ name: a.sheet.name, rows: dataRows(a.sheet) })) };
+  if (candidates.length === 1) return { kind: "ok", file: extract(workbook, candidates[0].sheet, candidates[0].header) };
 
-  const { header, missing } = findHeader(sheet);
-  if (missing.length > 0) throw missingColumnsError(missing);
-  return { kind: "ok", file: extract(workbook, sheet, header) };
+  // Ninguna hoja completa: se explica qué falta en la más parecida (la llamada Ventas si existe).
+  const closest = [...analyzed].sort(
+    (a, b) => Number(normalizeSheetName(b.sheet.name) === SALES_SHEET) - Number(normalizeSheetName(a.sheet.name) === SALES_SHEET) || a.missing.length - b.missing.length,
+  )[0];
+  if (!closest || closest.missing.length === REQUIRED_COLUMNS.length || (closest.missing.includes("NIT Emisor") && normalizeSheetName(closest.sheet.name) !== SALES_SHEET)) {
+    throw new SalesWithholdingError("Ninguna hoja del archivo tiene los encabezados de facturación DIAN (Tipo de documento, NIT Emisor, Total e impuestos).");
+  }
+  throw missingColumnsError(closest.missing);
 }

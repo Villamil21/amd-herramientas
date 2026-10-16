@@ -68,6 +68,9 @@ pub struct SignerBackup {
     /// Ausente en backups anteriores a Estados Financieros.
     #[serde(default)]
     pub accountant_title: String,
+    /// Ausente en backups anteriores a la 1.28 («No usar como contador en EEFF»).
+    #[serde(default)]
+    pub fs_excluded: bool,
     pub created_at: String,
     pub updated_at: String,
     /// PNG en base64; `None` si la firma ya faltaba al exportar.
@@ -211,6 +214,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
                     professional_document: s.professional_document,
                     personal_document: s.personal_document,
                     accountant_title: s.accountant_title,
+                    fs_excluded: s.fs_excluded,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                 })
@@ -270,6 +274,7 @@ const FS_TABLES: &[&str] = &[
     "fs_bank_account_events",
     "fs_bank_gmf_rules",
     "fs_employee_events",
+    "fs_movement_edits",
 ];
 
 type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;
@@ -387,6 +392,7 @@ fn signer_input(s: &SignerBackup) -> CertificateSignerInput {
         professional_document: s.professional_document.clone(),
         personal_document: s.personal_document.clone(),
         accountant_title: s.accountant_title.clone(),
+        fs_excluded: s.fs_excluded,
         // Marcador para validar nombre, cargo y documento; el archivo real se asigna al restaurar.
         signature_file: "-".into(),
     }
@@ -715,6 +721,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                         professional_document: v.professional_document,
                         personal_document: v.personal_document,
                         accountant_title: v.accountant_title,
+                        fs_excluded: v.fs_excluded,
                         signature_file: signature_file.clone(),
                         created_at: s.created_at.clone(),
                         updated_at: s.updated_at.clone(),
@@ -1064,6 +1071,7 @@ mod tests {
                 professional_document: "TP-290048".into(),
                 personal_document: "CC 1.192.729.629".into(),
                 accountant_title: "Contadora Pública".into(),
+                fs_excluded: false,
                 signature_file: signature.clone(),
             },
         )

@@ -140,3 +140,16 @@ describe("analyzeOrders", () => {
     expect(a.statuses[0]).toMatchObject({ category: "unclassified", configurable: false });
   });
 });
+
+describe("Copiar resumen (informe mensual)", () => {
+  it("copia Ventas Dropi, Pedidos y Costos Dropi en ese orden, tabulado, con Costo producto Dropi al final", async () => {
+    const { summaryText } = await import("../components/ClosingSummary");
+    const text = summaryText(analyzeOrders([row("1", "ENTREGADO", 10), row("2", "DEVOLUCION", 20)], rules()));
+    const lines = text.split("\n");
+    expect(lines.every((l) => l.split("\t").length === 2)).toBe(true);
+    const labels = lines.map((l) => l.split("\t")[0]);
+    expect(labels.indexOf("Pedidos despachados Dropi")).toBeGreaterThan(labels.indexOf("Entregado"));
+    expect(labels[labels.length - 1]).toBe("Costo producto Dropi");
+    expect(text).not.toContain("$");
+  });
+});

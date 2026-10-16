@@ -40,6 +40,8 @@ export interface CertificateSigner {
   personalDocument: string;
   /** Cómo se muestra como contador en los Estados Financieros. "" = sin definir (nunca se deduce del nombre). */
   accountantTitle: AccountantTitle;
+  /** «No usar como contador en EEFF». Sin título y sin esta marca = «Pendiente EEFF». */
+  fsExcluded: boolean;
   signatureFile: string;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +52,13 @@ export interface CertificateSigner {
 export type CertificateSignerInput = Omit<CertificateSigner, "id" | "createdAt" | "updatedAt" | "signatureAvailable">;
 
 export type AccountantTitle = "" | "Contador Público" | "Contadora Pública";
+
+/** Rol EEFF de una firma, para mostrar: Contador/a Público/a, «Pendiente EEFF» o «No usar». */
+export type SignerFsRole = "Contador Público" | "Contadora Pública" | "pending" | "excluded";
+
+export const signerFsRole = (s: Pick<CertificateSigner, "accountantTitle" | "fsExcluded">): SignerFsRole => (s.fsExcluded ? "excluded" : s.accountantTitle || "pending");
+
+export const SIGNER_FS_ROLE_LABEL: Record<SignerFsRole, string> = { "Contador Público": "Contador Público", "Contadora Pública": "Contadora Pública", pending: "Pendiente EEFF", excluded: "No usar" };
 
 export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt">;
 

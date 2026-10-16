@@ -89,9 +89,15 @@ describe("lectura de la hoja Ventas", () => {
     expect(file.rows).toHaveLength(3);
   });
 
-  it("explica cuando no existe la hoja Ventas", () => {
-    expect(() => readSalesWorkbook({ fileName: "x.xlsx", sheets: [{ name: "Compras", rows: [HEADERS.map(s)] }] })).toThrow(
-      "No se encontró una hoja llamada Ventas en el archivo seleccionado.",
+  it("sin hoja «Ventas» usa la hoja con los encabezados de facturación (no depende del nombre)", () => {
+    const file = read({ fileName: "x.xlsx", sheets: [{ name: "Notas", rows: [[s("Otra cosa")]] }, { name: "Hoja1", rows: [HEADERS.map(s), row({ total: n(1) })] }] });
+    expect(file.sheetName).toBe("Hoja1");
+    expect(file.ignoredSheets).toEqual(["Notas"]);
+  });
+
+  it("explica cuando ninguna hoja tiene los encabezados", () => {
+    expect(() => readSalesWorkbook({ fileName: "x.xlsx", sheets: [{ name: "Compras", rows: [[s("Fecha"), s("Valor")]] }] })).toThrow(
+      "Ninguna hoja del archivo tiene los encabezados de facturación DIAN (Tipo de documento, NIT Emisor, Total e impuestos).",
     );
   });
 
@@ -185,11 +191,28 @@ describe("análisis y autorretención", () => {
     expect(a.complete).toBe(false);
   });
 
-  it("bloquea con varios NIT Emisor y no calcula tarifa", () => {
+  it("un NIT Emisor no registrado entre varios: alerta bloqueante con el NIT y el nombre", () => {
     const a = analyzeSales(read(book([...SAMPLE, { nit: "800.123.456-7", name: "OTRA SAS", total: n(10) }])).rows, ctx);
-    expect(a.pending.find((p) => p.kind === "multiple_nits")?.items).toEqual(["NIT 900738791 · DIGICORT SAS · 3 filas", "NIT 800123456 · OTRA SAS · 1 fila"]);
+    const missing = a.pending.filter((p) => p.kind === "company_missing");
+    expect(missing.map((p) => p.issuer)).toEqual([{ nit: "800123456", name: "OTRA SAS", rows: 1 }]);
+    expect(a.pending.some((p) => p.kind === "multiple_nits")).toBe(false);
+    expect(a.totals).toBeUndefined();
+  });
+
+  it("varias empresas registradas: bloquea, nunca las mezcla y ofrece procesar una a la vez", () => {
+    const other = company({ id: 2, razonSocial: "OTRA SAS", nit: "800123456" });
+    const rows = read(book([...SAMPLE, { nit: "800.123.456-7", name: "OTRA SAS", total: n(10) }])).rows;
+    const a = analyzeSales(rows, { ...ctx, companies: [...ctx.companies, other] });
+    const p = a.pending.find((x) => x.kind === "multiple_nits")!;
+    expect(p.title).toBe("El archivo contiene documentos de varias empresas.");
+    expect(p.items).toEqual(["NIT 900738791 · DIGICORT SAS · 3 filas", "NIT 800123456 · OTRA SAS · 1 fila"]);
+    expect(p.issuers?.map((i) => i.company.razonSocial)).toEqual(["DIGICORT SAS", "OTRA SAS"]);
     expect(a.totals).toBeUndefined();
     expect(a.invoices.withholdingCents).toBeUndefined();
+    // Lote de una sola empresa: solo sus filas.
+    const only = analyzeSales(rows.filter((r) => r.nit === "800123456"), { ...ctx, companies: [...ctx.companies, other] });
+    expect(only.company?.razonSocial).toBe("OTRA SAS");
+    expect(only.pending.some((x) => x.kind === "multiple_nits")).toBe(false);
   });
 
   it("empresa no registrada, sin CIIU o con CIIU fuera de la tabla: pendiente bloqueante, sin tarifa", () => {

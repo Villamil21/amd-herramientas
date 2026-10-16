@@ -127,6 +127,11 @@ export function SuppliersPage() {
       <SupplierFormModal
         open={editing !== undefined}
         supplier={editing ?? null}
+        rates={rates.data ?? []}
+        onEditWithholding={(s) => {
+          setEditing(undefined);
+          setWithholding(s);
+        }}
         onClose={() => setEditing(undefined)}
         onSaved={() => {
           setEditing(undefined);

@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { GripVertical, Pencil, Plus, Search } from "lucide-react";
 import { Alert, Badge, Button, Card, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { ClassifyPucModal, lineLabel } from "../modules/financial-statements/shared/components/ClassifyPucModal";
@@ -22,6 +22,10 @@ const ROLE_LABEL: Record<NonNullable<FsLine["role"]>, string> = {
  * Datos → Catálogo de cuentas de Estados Financieros. Única fuente de verdad
  * de dónde aparece cada código PUC. Las líneas internas se crean, renombran,
  * ordenan (arrastrando) y desactivan; los encabezados y subtotales son fijos.
+ *
+ * El arrastre usa eventos de puntero, no el drag & drop HTML5: en macOS Tauri
+ * intercepta el arrastre de la ventana (para soltar archivos) y `drop` nunca
+ * llega al webview. Una línea solo se mueve dentro de su sección.
  */
 export function FsCatalogPage() {
   const toast = useToast();
@@ -31,7 +35,9 @@ export function FsCatalogPage() {
   const [classifying, setClassifying] = useState<string | null>(null);
   const [newPuc, setNewPuc] = useState<string | undefined>();
   const [search, setSearch] = useState("");
-  const [dragging, setDragging] = useState<number | null>(null);
+  /** Orden provisional de la sección mientras se arrastra (se guarda al soltar). */
+  const [drag, setDrag] = useState<{ section: FsSectionKey; id: number; ids: number[] } | null>(null);
+  const dragStart = useRef<number[]>([]);
 
   const catalog = data.catalog;
   const lineById = useMemo(() => new Map((catalog?.lines ?? []).map((l) => [l.id, l])), [catalog]);
@@ -55,19 +61,56 @@ export function FsCatalogPage() {
     }
   }
 
-  function onDrop(section: FsSectionKey, targetId: number, e: DragEvent) {
+  const sectionIds = (key: FsSectionKey) => (catalog?.lines ?? []).filter((l) => l.section === key).sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
+
+  function saveOrder(key: FsSectionKey, ids: number[], before: number[]) {
+    if (ids.join() === before.join()) return;
+    void run(() => fsService.reorderLines(key, ids), "Orden guardado.");
+  }
+
+  function onGripDown(key: FsSectionKey, id: number, e: PointerEvent<HTMLElement>) {
+    if (e.button !== 0) return;
     e.preventDefault();
-    if (dragging === null || dragging === targetId || !catalog) return;
-    const ids = catalog.lines.filter((l) => l.section === section).sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
-    if (!ids.includes(dragging)) return;
-    const next = ids.filter((id) => id !== dragging);
-    next.splice(next.indexOf(targetId), 0, dragging);
-    setDragging(null);
-    void run(() => fsService.reorderLines(section, next));
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStart.current = sectionIds(key);
+    setDrag({ section: key, id, ids: dragStart.current });
+  }
+
+  function onGripMove(e: PointerEvent<HTMLElement>) {
+    if (!drag) return;
+    // La línea bajo el puntero, solo si es de la misma sección (nunca se cambia de sección).
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-line-id]");
+    if (!over || over.dataset.section !== drag.section) return;
+    const target = Number(over.dataset.lineId);
+    if (target === drag.id) return;
+    const next = drag.ids.filter((x) => x !== drag.id);
+    const at = next.indexOf(target) + (drag.ids.indexOf(target) > drag.ids.indexOf(drag.id) ? 1 : 0);
+    next.splice(at, 0, drag.id);
+    setDrag({ ...drag, ids: next });
+  }
+
+  function onGripUp() {
+    if (!drag) return;
+    saveOrder(drag.section, drag.ids, dragStart.current);
+    setDrag(null);
+  }
+
+  /** Flechas arriba / abajo sobre el asa: mueve la línea un puesto. */
+  function onGripKey(key: FsSectionKey, id: number, e: KeyboardEvent<HTMLElement>) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const ids = sectionIds(key);
+    const i = ids.indexOf(id);
+    const j = e.key === "ArrowUp" ? i - 1 : i + 1;
+    if (j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    [next[i], next[j]] = [next[j], next[i]];
+    saveOrder(key, next, ids);
   }
 
   const section = (key: FsSectionKey) => {
-    const lines = (catalog?.lines ?? []).filter((l) => l.section === key).sort((a, b) => a.sortOrder - b.sortOrder);
+    const sorted = (catalog?.lines ?? []).filter((l) => l.section === key).sort((a, b) => a.sortOrder - b.sortOrder);
+    const lines = drag?.section === key ? drag.ids.map((id) => lineById.get(id)!).filter(Boolean) : sorted;
     return (
       <div key={key} className="fs-catalog__section">
         <div className="row row--between">
@@ -90,16 +133,21 @@ export function FsCatalogPage() {
         </div>
         <ul className="fs-catalog__lines">
           {lines.map((l) => (
-            <li
-              key={l.id}
-              draggable
-              onDragStart={() => setDragging(l.id)}
-              onDragEnd={() => setDragging(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDrop(key, l.id, e)}
-              className={[!l.isActive && "is-inactive", dragging === l.id && "is-dragging"].filter(Boolean).join(" ")}
-            >
-              <GripVertical size={14} className="fs-catalog__grip" aria-hidden />
+            <li key={l.id} data-line-id={l.id} data-section={key} className={[!l.isActive && "is-inactive", drag?.id === l.id && "is-dragging"].filter(Boolean).join(" ")}>
+              <span
+                role="button"
+                tabIndex={0}
+                className="fs-catalog__grip"
+                aria-label={`Mover ${l.name} (flechas arriba / abajo)`}
+                title="Arrastra para ordenar (o usa las flechas)"
+                onPointerDown={(e) => onGripDown(key, l.id, e)}
+                onPointerMove={onGripMove}
+                onPointerUp={onGripUp}
+                onPointerCancel={() => setDrag(null)}
+                onKeyDown={(e) => onGripKey(key, l.id, e)}
+              >
+                <GripVertical size={14} aria-hidden />
+              </span>
               <span className="fs-catalog__name">{l.name}</span>
               {l.role && <span className="field__hint">{ROLE_LABEL[l.role]}</span>}
               {representative.get(key) === l.id && <Badge>Representativa</Badge>}

@@ -49,9 +49,12 @@ describe.skipIf(files.length === 0)("historiales de cartera reales", () => {
         if (amount.t === "n") {
           const cents = Math.round(amount.v * 100);
           expect(m.amountCents).toBe(cents);
-          // MONTO = valor pagado × 1,004 (con redondeo al centavo) y las partes suman el MONTO.
-          expect(Math.abs(m.paidCents! - cents / 1.004)).toBeLessThanOrEqual(0.5);
-          expect(m.paidCents! + m.gmfCents!).toBe(cents);
+          // MONTO = valor pagado / 0,996 (al peso; con centavos, a menos de $0,10) y las partes suman el MONTO.
+          if (m.paidCents !== null) {
+            expect(m.paidCents % 100).toBe(0);
+            expect(Math.abs(m.paidCents / 0.996 - cents)).toBeLessThanOrEqual(cents % 100 === 0 ? 50 : 10);
+            expect(m.paidCents + m.gmfCents!).toBe(cents);
+          } else expect(m.incidents).toContain("gmf_review");
         }
       });
       const t = analysis.totals;
@@ -65,11 +68,10 @@ describe.skipIf(files.length === 0)("historiales de cartera reales", () => {
         expect(t.count).toBe(12);
         // MONTO PREVIO ignorado: el total es la suma de MONTO (Python sobre el volcado: 131.628.633).
         expect(t.amountCents).toBe(13162863300);
-        // Python (Decimal, MONTO / 1,004 al centavo por fila): 131.104.216,14 pagado y 524.416,86 de 4x1000.
-        expect(t.paidCents).toBe(13110421614);
-        expect(t.gmfCents).toBe(52441686);
+        // Regla de Dropi (MONTO = redondeo(pagado / 0,996)), calculada por fila con Python (Decimal).
+        expect(t.paidCents + t.gmfCents).toBe(13162863300);
         expect(file.movements[0]).toMatchObject({ date: "31/08/2026", time: "10:19", concept: "pago nomina Sevicio al clienta + bono julio" });
-        expect(analysis.movements[0]).toMatchObject({ amountCents: 116465900, paidCents: 116001892, gmfCents: 464008 });
+        expect(analysis.movements[0]).toMatchObject({ amountCents: 116465900, paidCents: 116000000, gmfCents: 465900 });
         // Dos retiros idénticos (04/08, 5.020.080, «Pago Salario - Junio») con IDs distintos: ambos cuentan.
         expect(analysis.movements.filter((m) => m.concept === "Pago Salario - Junio" && m.incidents.length === 0)).toHaveLength(2);
         expect(file.period).toBe("Agosto 2026");

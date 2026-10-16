@@ -9,6 +9,7 @@ const signer: CertificateSigner = {
   professionalDocument: "TP-290048",
   personalDocument: "1192729629",
   accountantTitle: "",
+  fsExcluded: false,
   signatureFile: "firma.png",
   createdAt: "x",
   updatedAt: "x",

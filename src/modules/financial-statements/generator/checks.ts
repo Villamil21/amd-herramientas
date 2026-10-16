@@ -30,7 +30,16 @@ export interface CoverageRow {
   empty: boolean;
   /** Solo extractos: el detalle por banco y cuenta del que sale la fila. */
   bank?: BankCoverage;
+  /**
+   * Fuente que no es mensual (Saldos iniciales = foto de apertura; Ajustes =
+   * puntuales): un mes sin datos no falta. `snapshotDates`: fechas de apertura
+   * activas hasta la fecha final (incluso anteriores al rango).
+   */
+  notMonthly?: { snapshotDates: string[] };
 }
+
+/** Fuentes que no se esperan mes a mes. */
+export const NOT_MONTHLY_SOURCES: FsSource[] = ["opening", "adjustment"];
 
 /**
  * Qué meses del rango tienen información de cada fuente, sin suponer que se
@@ -74,6 +83,11 @@ export function coverage(
       return { source, label: SOURCE_LABEL[source], cells, missing, empty: bank.banks.length === 0, bank };
     }
     for (const m of movements) if (m.source === source && m.accountingDate >= start && m.accountingDate <= end) add(m.accountingDate.slice(0, 7), m.batchId, m.status === "active");
+    if (NOT_MONTHLY_SOURCES.includes(source)) {
+      const snapshotDates = source === "opening" ? [...new Set(movements.filter((m) => m.source === "opening" && m.status === "active" && m.accountingDate <= end).map((m) => m.accountingDate))].sort() : [];
+      const empty = source === "opening" ? snapshotDates.length === 0 : months.every((m) => !cells[m].loaded);
+      return { source, label: SOURCE_LABEL[source], cells, missing: [], empty, notMonthly: { snapshotDates } };
+    }
     const missing = months.filter((m) => !cells[m].loaded);
     return { source, label: SOURCE_LABEL[source], cells, missing, empty: missing.length === months.length };
   });

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, RefreshCcw } from "lucide-react";
+import { ExternalLink, History, Pencil, RefreshCcw } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
 import { Alert, Badge, Button, Card, DateInput, EmptyState, Field, Input, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { useDebounced } from "../../../hooks/useDebounced";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
-import { MOVEMENT_STATUS_LABEL, SOURCE_LABEL, type BatchSummary, type FsSource, type Movement, type MovementStatus } from "../../../types/fs";
+import { MOVEMENT_STATUS_LABEL, SOURCE_LABEL, type BatchSummary, type FsSource, type Movement, type MovementEdit, type MovementEditInput, type MovementEditSnapshot, type MovementStatus } from "../../../types/fs";
 import { formatInteger } from "../../../utils/format";
 import { normalizeKey } from "../../../utils/text";
 import { CompanySelect } from "../shared/components/CompanySelect";
@@ -14,6 +14,7 @@ import { formatExactCents, formatIsoDate } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { bankAccountingCents, isDebitPuc } from "../generator/engine";
 import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../utils/dates";
+import { parseNumericText } from "../../../utils/numbers";
 
 /** Submódulo donde nace cada origen (para «Abrir origen»). */
 export const SOURCE_PATH: Record<FsSource, string> = {
@@ -29,8 +30,11 @@ export const SOURCE_PATH: Record<FsSource, string> = {
 const MAX_ROWS = 500;
 
 /**
- * Auditoría de movimientos contables: revisión y trazabilidad, no edición
- * libre. La única acción es «Reclasificar movimientos anteriores» (explícita).
+ * Centro de revisión y trazabilidad de todo lo enviado a Estados Financieros.
+ * Cada movimiento se puede editar (fecha, PUC, concepto, valor, descripción o
+ * estado) con motivo obligatorio: el original nunca se sobrescribe (queda
+ * «Ajustado» y la corrección es una versión nueva). También «Reclasificar
+ * movimientos anteriores» en bloque.
  */
 export default function MovementsPage() {
   const toast = useToast();
@@ -41,6 +45,8 @@ export default function MovementsPage() {
   const [filters, setFilters] = useState({ from: "", to: "", source: "", puc: "", party: "", bank: "", document: "", period: "", status: "active" });
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [open, setOpen] = useState<Movement | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [edits, setEdits] = useState<MovementEdit[]>([]);
   const [reclassifyTo, setReclassifyTo] = useState<string | undefined>();
   const [reclassifying, setReclassifying] = useState(false);
   const text = useDebounced(filters, 150);
@@ -48,9 +54,10 @@ export default function MovementsPage() {
   const load = useCallback(async () => {
     if (companyId === null) return;
     try {
-      const [m, b] = await Promise.all([fsService.movements(companyId), fsService.batches(companyId)]);
+      const [m, b, e] = await Promise.all([fsService.movements(companyId), fsService.batches(companyId), fsService.movementEdits(companyId)]);
       setMovements(m);
       setBatches(b);
+      setEdits(e);
       setSelected(new Set());
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -100,7 +107,11 @@ export default function MovementsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Estados Financieros" title="Movimientos contables" description="Revisión y trazabilidad de todo lo enviado a Estados Financieros. No es una pantalla para editar la contabilidad." />
+      <PageHeader
+        eyebrow="Estados Financieros"
+        title="Movimientos contables"
+        description="Revisión y trazabilidad de todo lo enviado a Estados Financieros. Abre un movimiento para ver su origen o editarlo: cada cambio guarda motivo, valor anterior y valor nuevo."
+      />
       <Card>
         <div className="stack">
           <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
@@ -235,25 +246,184 @@ export default function MovementsPage() {
       )}
 
       <Modal
-        open={open !== null}
+        open={open !== null && !editing}
         size="lg"
         title={open ? `${SOURCE_LABEL[open.source]} · ${open.description || open.pucConcept}` : ""}
         onClose={() => setOpen(null)}
         footer={
           open && (
-            <Button icon={<ExternalLink size={14} />} onClick={() => navigate(SOURCE_PATH[open.source])}>
-              Abrir origen
-            </Button>
+            <>
+              {open.status === "active" && open.source !== "adjustment" && (
+                <Button variant="primary" icon={<Pencil size={14} />} onClick={() => setEditing(true)}>
+                  Editar movimiento
+                </Button>
+              )}
+              <Button icon={<ExternalLink size={14} />} onClick={() => navigate(SOURCE_PATH[open.source])}>
+                Abrir origen
+              </Button>
+            </>
           )
         }
       >
-        {open && <MovementDetail movement={open} batch={batchById.get(open.batchId)} />}
+        {open && <MovementDetail movement={open} batch={batchById.get(open.batchId)} edits={edits.filter((e) => e.originalMovementId === open.id || e.newMovementId === open.id)} />}
+        {open?.source === "adjustment" && open.status === "active" && <Alert tone="info">Los ajustes manuales se editan desde Generador de Estados Financieros → Ajustes, con su propio historial.</Alert>}
       </Modal>
+
+      {open && editing && (
+        <MovementEditModal
+          movement={open}
+          data={data}
+          onClose={() => setEditing(false)}
+          onSaved={async (edit) => {
+            setEditing(false);
+            toast(edit.newMovementId ? "Movimiento corregido. El original queda como «Ajustado» en el historial." : `Movimiento marcado como «${MOVEMENT_STATUS_LABEL[edit.next.status]}».`);
+            await load();
+            setOpen(null);
+          }}
+        />
+      )}
     </>
   );
 }
 
-function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: BatchSummary }) {
+const snapshotText = (s: MovementEditSnapshot) => `${formatIsoDate(s.accountingDate)} · PUC ${s.pucCode} ${s.pucConcept} · ${formatExactCents(s.amountCents)}${s.description ? ` · «${s.description}»` : ""} · ${MOVEMENT_STATUS_LABEL[s.status]}`;
+
+/** Historial de ediciones de un movimiento: identificador, fecha, motivo, antes y después. */
+function EditHistory({ edits, movementId }: { edits: MovementEdit[]; movementId: number }) {
+  if (edits.length === 0) return null;
+  return (
+    <div className="stack stack--sm">
+      <div className="field__label row" style={{ gap: 6 }}>
+        <History size={14} /> Historial de cambios
+      </div>
+      {edits.map((e) => (
+        <Alert key={e.id} tone={e.originalMovementId === movementId ? "warning" : "info"} title={`Edición #${e.id} · ${formatDateTimeForDisplay(e.createdAt)} · Movimientos contables`}>
+          <div>
+            <strong>Motivo:</strong> {e.reason}
+          </div>
+          <div>
+            <strong>Antes:</strong> {snapshotText(e.previous)}
+          </div>
+          <div>
+            <strong>Después:</strong> {snapshotText(e.next)}
+          </div>
+          <div className="muted">{e.newMovementId ? `Movimiento #${e.originalMovementId} → versión corregida #${e.newMovementId}` : `Movimiento #${e.originalMovementId}: solo cambió el estado`}</div>
+        </Alert>
+      ))}
+    </div>
+  );
+}
+
+const EDIT_STATUS: { value: MovementEditInput["status"]; label: string }[] = [
+  { value: "active", label: "Activo (corregir valores)" },
+  { value: "ignored", label: "Ignorado (no afecta los Estados Financieros)" },
+  { value: "voided", label: "Anulado" },
+];
+
+/** Edición individual: el original no se sobrescribe; motivo obligatorio. */
+function MovementEditModal({ movement: m, data, onClose, onSaved }: { movement: Movement; data: ReturnType<typeof useFsData>; onClose: () => void; onSaved: (edit: MovementEdit) => Promise<void> }) {
+  const toast = useToast();
+  const [date, setDate] = useState(m.accountingDate);
+  const [puc, setPuc] = useState<string | undefined>(m.pucCode);
+  const [concept, setConcept] = useState(m.pucConcept);
+  const [description, setDescription] = useState(m.description);
+  const [value, setValue] = useState((m.amountCents / 100).toFixed(2).replace(".", ","));
+  const [status, setStatus] = useState<MovementEditInput["status"]>("active");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const parsed = parseNumericText(value);
+  const cents = parsed === null ? null : Math.round(parsed * 100);
+  const changed = status !== "active" || date !== m.accountingDate || puc !== m.pucCode || concept.trim() !== m.pucConcept || description.trim() !== m.description || cents !== m.amountCents;
+  const ready = !!reason.trim() && changed && (status !== "active" || (!!puc && /^\d{4}-\d{2}-\d{2}$/.test(date) && cents !== null && (!m.dc || cents >= 0)));
+
+  async function save() {
+    if (!ready || !puc || cents === null) return;
+    setSaving(true);
+    try {
+      const edit = await fsService.editMovement({ movementId: m.id, accountingDate: date, pucCode: puc, pucConcept: puc === m.pucCode ? concept.trim() : "", description: description.trim(), amountCents: cents, status, reason: reason.trim() });
+      await onSaved(edit);
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      size="lg"
+      title={`Editar movimiento #${m.id}`}
+      onClose={onClose}
+      locked={saving}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" loading={saving} disabled={!ready} onClick={() => void save()}>
+            Guardar cambio
+          </Button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Alert tone="info">El movimiento original no se sobrescribe: queda como «Ajustado» en el historial y la corrección es una versión nueva. Si afecta un periodo cerrado, el cambio se bloquea.</Alert>
+        <div className="form-grid">
+          <Field label="Estado">
+            {(id) => (
+              <Select id={id} value={status} onChange={(e) => setStatus(e.target.value as MovementEditInput["status"])}>
+                {EDIT_STATUS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Fecha contable">{(id) => <DateInput id={id} value={date} onChange={setDate} disabled={status !== "active"} />}</Field>
+          <Field label="Código PUC">
+            {() => (
+              <PucField
+                index={data.index}
+                value={puc}
+                onChange={(code) => {
+                  setPuc(code);
+                  if (code !== m.pucCode) setConcept(code ? (data.index.concepts.get(code) ?? "") : "");
+                  else setConcept(m.pucConcept);
+                }}
+                mappings={data.mappingMap}
+                disabled={status !== "active"}
+                onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])}
+              />
+            )}
+          </Field>
+          <Field label="Concepto" hint={puc !== m.pucCode ? "Con un PUC nuevo se usa el concepto del catálogo." : undefined}>
+            {(id) => <Input id={id} value={concept} onChange={(e) => setConcept(e.target.value)} disabled={status !== "active" || puc !== m.pucCode} />}
+          </Field>
+          <Field label="Valor" hint={m.dc ? `Valor absoluto; la dirección (${m.dc === "D" ? "salida" : "entrada"} del banco) se conserva.` : "Con signo: negativo resta en su línea."}>
+            {(id) => <Input id={id} className="input--right" value={value} onChange={(e) => setValue(e.target.value)} invalid={value.trim() !== "" && (cents === null || (!!m.dc && cents < 0))} disabled={status !== "active"} />}
+          </Field>
+          <Field label="Descripción">{(id) => <Input id={id} value={description} onChange={(e) => setDescription(e.target.value)} disabled={status !== "active"} />}</Field>
+        </div>
+        <Field label="Motivo del cambio" required>
+          {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. Valor mal digitado en la factura" />}
+        </Field>
+        <div className="muted" style={{ fontSize: "var(--text-sm)" }}>
+          Antes: {formatIsoDate(m.accountingDate)} · PUC {m.pucCode} · {formatExactCents(m.amountCents)}
+          {cents !== null && status === "active" && (
+            <>
+              {" "}
+              → Después: {formatIsoDate(date)} · PUC {puc ?? "—"} · {formatExactCents(cents)}
+            </>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function MovementDetail({ movement: m, batch, edits }: { movement: Movement; batch?: BatchSummary; edits: MovementEdit[] }) {
   const item = (label: string, value: string | number | null | undefined) =>
     value === null || value === undefined || value === "" ? null : (
       <div className="summary-item">
@@ -323,6 +493,7 @@ function MovementDetail({ movement: m, batch }: { movement: Movement; batch?: Ba
         </Alert>
       )}
       {Array.isArray(detail.reclassified) && <Alert tone="warning" title="Reclasificado" items={(detail.reclassified as { from: string; to: string; at: string }[]).map((r) => `${r.from} → ${r.to} (${formatDateForDisplay(r.at)})`)} />}
+      <EditHistory edits={edits} movementId={m.id} />
     </div>
   );
 }

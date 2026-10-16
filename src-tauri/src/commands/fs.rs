@@ -66,6 +66,16 @@ pub fn reclassify_fs_movements(db: State<'_, Db>, company_id: Option<i64>, ids: 
 }
 
 #[tauri::command]
+pub fn edit_fs_movement(db: State<'_, Db>, input: MovementEditInput) -> AppResult<MovementEdit> {
+    db.with(|c| fs::edit_movement(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_movement_edits(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<MovementEdit>> {
+    db.with(|c| fs::list_movement_edits(c, company_id))
+}
+
+#[tauri::command]
 pub fn list_fs_bank_balances(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankBalance>> {
     db.with(|c| fs::list_bank_balances(c, company_id))
 }

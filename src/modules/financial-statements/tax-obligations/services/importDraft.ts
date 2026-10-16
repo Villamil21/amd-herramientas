@@ -63,6 +63,10 @@ export function draftBlockers(d: ImportDraft, confirmedName: boolean, confirmedC
   if (d.parsed.taxType !== "income" && d.parsed.period === null) out.push("No se pudo leer el periodo.");
   if (!d.periodicity) out.push("Configura la periodicidad de IVA de la empresa.");
   if (d.existing && !confirmedCorrection) out.push("Ya existe una declaración de este periodo: confirma que la nueva es una corrección.");
+  // IVA: un formulario es saldo a pagar (88) o saldo a favor (89), nunca ambos.
+  if (d.parsed.taxType === "vat" && (d.parsed.values.vatPayable?.cents ?? 0) > 0 && (d.parsed.values.vatFavor?.cents ?? 0) > 0) {
+    out.push("Las casillas 88 (Total saldo a pagar) y 89 (Total saldo a favor) son ambas mayores que cero: revisa la declaración antes de importarla.");
+  }
   return out;
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "amd-herramientas"
-version = "1.27.0"
+version = "1.28.0"
 description = "Herramientas administrativas y contables"
 edition = "2021"
 publish = false

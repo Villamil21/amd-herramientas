@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Cell, Sheet, Workbook } from "../../../../types/excel";
 import { WalletHistoryError } from "../types";
-import { analyzeWallet, EXPECTED_DESCRIPTION, splitGmf } from "./analysis";
+import { analyzeWallet, EXPECTED_DESCRIPTION, manualSplit, splitGmf } from "./analysis";
 import { buildWalletSheets } from "./excelExport";
 import { parseDateTime, readWalletWorkbook } from "./workbookReader";
 
@@ -29,20 +29,59 @@ const analyze = (rows: RowSpec[]) => {
 };
 
 describe("4x1000 incluido en el MONTO", () => {
-  it("valor pagado = MONTO / 1,004 y 4x1000 = MONTO − valor pagado (ejemplo del requerimiento)", () => {
-    expect(splitGmf(116465900)).toEqual({ paidCents: 116001892, gmfCents: 464008 });
+  it("Dropi cobra el 4x1000 sobre el MONTO: MONTO = redondeo(valor pagado / 0,996) (caso del arriendo)", () => {
+    // Pago arriendo REMANSO DE LA COLINA ENERO: 4.016.064 = 4.000.000 + 16.064 (no 4.000.063,75 + 16.000,25).
+    expect(splitGmf(401606400)).toEqual({ paidCents: 400000000, gmfCents: 1606400 });
+    expect(splitGmf(116465900)).toEqual({ paidCents: 116000000, gmfCents: 465900 });
+    expect(splitGmf(120481900)).toEqual({ paidCents: 120000000, gmfCents: 481900 });
   });
 
-  it("valor pagado + 4x1000 = MONTO siempre, y el 4x1000 es el 0,4 % del valor pagado (±1 centavo)", () => {
-    for (let cents = 1; cents < 3_000_000; cents += 997) {
-      const { paidCents, gmfCents } = splitGmf(cents);
-      expect(paidCents + gmfCents).toBe(cents);
-      expect(Math.abs(paidCents * 1.004 - cents)).toBeLessThanOrEqual(0.51);
+  it("si hay solución es única, en pesos enteros, y las partes suman el MONTO", () => {
+    let none = 0;
+    for (let pesos = 1; pesos < 300_000; pesos += 7) {
+      const split = splitGmf(pesos * 100);
+      if (!split) {
+        // Sin solución: ningún valor pagado entero produce ese MONTO.
+        for (let b = Math.floor(pesos * 0.996) - 2; b <= pesos; b++) expect(Math.floor(b / 0.996 + 0.5)).not.toBe(pesos);
+        none++;
+        continue;
+      }
+      expect(split.paidCents % 100).toBe(0);
+      expect(split.paidCents + split.gmfCents).toBe(pesos * 100);
+      expect(Math.floor(split.paidCents / 100 / 0.996 + 0.5)).toBe(pesos);
     }
+    expect(none).toBeGreaterThan(0);
   });
 
-  it("no es MONTO × 0,996", () => {
-    expect(splitGmf(116465900).paidCents).not.toBe(Math.round(116465900 * 0.996));
+  it("un MONTO con centavos (Dropi lo redondea a 1 o 2 decimales) se resuelve en pesos enteros", () => {
+    // Casos reales de KAES SAS (enero–abril 2026).
+    expect(splitGmf(1004016060)).toEqual({ paidCents: 1000000000, gmfCents: 4016060 });
+    expect(splitGmf(125502008)).toEqual({ paidCents: 125000000, gmfCents: 502008 });
+    expect(splitGmf(2008032120)).toEqual({ paidCents: 2000000000, gmfCents: 8032120 });
+    expect(splitGmf(2008032130)).toEqual({ paidCents: 2000000000, gmfCents: 8032130 });
+    expect(splitGmf(5020080330)).toEqual({ paidCents: 5000000000, gmfCents: 20080330 });
+    expect(splitGmf(441767070)).toEqual({ paidCents: 440000000, gmfCents: 1767070 });
+    // Lejos de cualquier peso entero (más de $0,10): por revisar.
+    expect(splitGmf(1004016030)).toBeNull();
+  });
+
+  it("sin solución el retiro queda «4x1000 por revisar» y no suma hasta editarlo", () => {
+    let pesos = 1000;
+    while (splitGmf(pesos * 100)) pesos++;
+    const a = analyze([{ id: 1, amount: pesos }, { id: 2 }]);
+    expect(a.movements[0]).toMatchObject({ paidCents: null, gmfCents: null, method: null, incidents: ["gmf_review"] });
+    expect(a.totals.count).toBe(1);
+
+    const file = read(book(sheet("HISTORIAL DE CARTERA", [{ id: 1, amount: pesos }])));
+    const edited = analyzeWallet(file.movements, { checkType: true, manual: new Map([[2, (pesos - 4) * 100]]) });
+    expect(edited.movements[0]).toMatchObject({ paidCents: (pesos - 4) * 100, gmfCents: 400, method: "manual", incidents: [], amountCents: pesos * 100 });
+    expect(edited.totals.paidCents + edited.totals.gmfCents).toBe(pesos * 100);
+  });
+
+  it("la edición manual exige valor pagado + 4x1000 = MONTO", () => {
+    expect(manualSplit(401606400, 400000000)).toEqual({ paidCents: 400000000, gmfCents: 1606400 });
+    expect(manualSplit(401606400, 401606500)).toBe("El valor pagado no puede superar el MONTO.");
+    expect(manualSplit(401606400, 0)).toBe("El valor pagado debe ser mayor que cero.");
   });
 });
 
@@ -125,7 +164,7 @@ describe("validaciones", () => {
     expect(a.totals.amountCents).toBe((10 * 1000 + 45) * 100);
     expect(a.totals.paidCents + a.totals.gmfCents).toBe(a.totals.amountCents);
     expect(a.review.count).toBe(0);
-    expect(Object.values(a.incidentCounts)).toEqual([0, 0, 0]);
+    expect(Object.values(a.incidentCounts)).toEqual([0, 0, 0, 0]);
   });
 
   it("la descripción se compara completa, sin distinguir mayúsculas ni espacios de más", () => {
@@ -187,7 +226,7 @@ describe("validaciones", () => {
     const a = analyze([{ id: 1, amount: null }, { id: 2, amount: "abc" }, { id: 3, amount: -5000 }, { id: 4, amount: 0 }, { id: 5, amount: "1.164.659" }]);
     expect(a.movements.map((m) => m.amountProblem)).toEqual(["MONTO vacío", "MONTO no numérico: «abc»", "MONTO negativo", "MONTO en cero", undefined]);
     expect(a.movements.slice(0, 2).every((m) => m.paidCents === null && m.gmfCents === null)).toBe(true);
-    expect(a.totals).toEqual({ count: 1, amountCents: 116465900, paidCents: 116001892, gmfCents: 464008 });
+    expect(a.totals).toEqual({ count: 1, amountCents: 116465900, paidCents: 116000000, gmfCents: 465900 });
     // Los inválidos no suman al total por revisar.
     expect(a.review).toEqual({ count: 4, amountCents: 0 });
     const cells = buildWalletSheets(a).flatMap((s) => s.rows.flat());
@@ -216,7 +255,7 @@ describe("exportación", () => {
     expect(sheets.map((s) => s.name)).toEqual(["Resumen", "Detalle", "Incidencias"]);
     const [summary] = sheets;
     expect(summary.columns.map((c) => c.header)).toEqual(["Fecha", "Valor pagado", "4x1000", "Concepto retiro", "Estado"]);
-    expect(summary.rows[0]).toEqual(["31/08/2026", 1160018.92, 4640.08, "Pago nomina - Diseñador", "Validado"]);
+    expect(summary.rows[0]).toEqual(["31/08/2026", 1160000, 4659, "Pago nomina - Diseñador", "Validado"]);
     expect(summary.rows[1][4]).toBe("Tipo inesperado");
     // El movimiento con otro concepto no llega a ninguna hoja.
     expect(sheets[1].rows).toHaveLength(2);

@@ -167,7 +167,9 @@ export default function GeneratorPage() {
   const closed = period?.status === "closed";
   const closedSnapshot = closed ? (period?.closedSnapshot as StatementsSnapshot | null) : null;
   const accountant = signers.find((x) => x.id === accountantId) ?? null;
-  const validAccountants = signers.filter((x) => x.signatureAvailable && x.accountantTitle);
+  const validAccountants = signers.filter((x) => x.signatureAvailable && x.accountantTitle && !x.fsExcluded);
+  /** Firmas sin «Contador Público» / «Contadora Pública» ni «No usar»: se listan bloqueadas hasta definirlas en Firmas. */
+  const pendingAccountants = signers.filter((x) => !x.accountantTitle && !x.fsExcluded);
   const hashMatches = period?.validationHash !== null && period?.validationHash === hash;
   const pdfReady = !closed && period && (period.status === "ready" || period.status === "pdf_generated") && hashMatches;
   const pdfMissing = [!company?.legalRepName && "Falta el representante legal en Empresas", !accountant && "Elige el contador (con firma PNG y «Contador Público» / «Contadora Pública» definido en Firmas)"].filter(Boolean) as string[];
@@ -334,9 +336,24 @@ export default function GeneratorPage() {
                           {x.name} · {x.accountantTitle} · {x.professionalDocument}
                         </option>
                       ))}
+                      {pendingAccountants.map((x) => (
+                        <option key={x.id} value="" disabled>
+                          {x.name} · Pendiente EEFF (defínelo en Firmas)
+                        </option>
+                      ))}
                     </Select>
                   )}
                 </Field>
+                {pendingAccountants.length > 0 && !accountant && (
+                  <Alert tone="warning" title="Rol EEFF sin definir">
+                    {pendingAccountants.map((x) => x.name).join(", ")}: elige «Contador Público», «Contadora Pública» o «No usar como contador en EEFF» en Datos → Firmas. Sin rol definido la firma no se puede usar y el PDF queda bloqueado.
+                    <div className="row" style={{ marginTop: 8 }}>
+                      <Button size="sm" onClick={() => navigate(paths.signers)}>
+                        Ir a Firmas
+                      </Button>
+                    </div>
+                  </Alert>
+                )}
               </div>
             </Card>
           </div>

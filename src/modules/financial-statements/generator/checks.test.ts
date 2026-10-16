@@ -21,6 +21,18 @@ describe("cobertura mensual", () => {
     expect(c.rows.find((r) => r.source === "payroll")!.empty).toBe(true);
   });
 
+  it("el saldo inicial es una foto de apertura: los meses siguientes no faltan", () => {
+    const opening = { ...mv(1, "2026-01-01", 1), source: "opening" } as Movement;
+    const c = coverage("2026-01-01", "2026-12-31", [opening], [], [batch(1)]);
+    const row = c.rows.find((r) => r.source === "opening")!;
+    expect(row.cells["2026-01"].loaded).toBe(true);
+    expect(row.missing).toEqual([]);
+    expect(row.notMonthly?.snapshotDates).toEqual(["2026-01-01"]);
+    // Una apertura anterior al rango también vale.
+    const later = coverage("2026-03-01", "2026-05-31", [opening], [], [batch(1)]).rows.find((r) => r.source === "opening")!;
+    expect([later.empty, later.missing.length]).toEqual([false, 0]);
+  });
+
   it("un mes con solo información reemplazada no cuenta como cargado, pero muestra el lote", () => {
     const c = coverage("2026-01-01", "2026-01-31", [{ ...mv(1, "2026-01-15", 1), status: "replaced" }], [], [batch(1)]);
     const cell = c.rows[0].cells["2026-01"];

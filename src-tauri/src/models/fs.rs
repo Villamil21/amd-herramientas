@@ -508,6 +508,35 @@ pub struct AdjustmentInput {
     pub input_cents: i64,
 }
 
+/// Edición individual de un movimiento desde «Movimientos contables».
+/// `status`: "active" corrige valores (nueva versión); "ignored" / "voided" solo cambian el estado.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MovementEditInput {
+    pub movement_id: i64,
+    pub accounting_date: String,
+    pub puc_code: String,
+    pub puc_concept: String,
+    pub description: String,
+    pub amount_cents: i64,
+    pub status: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MovementEdit {
+    pub id: i64,
+    pub company_id: i64,
+    pub original_movement_id: i64,
+    pub new_movement_id: Option<i64>,
+    pub reason: String,
+    pub origin: String,
+    pub previous: Value,
+    pub next: Value,
+    pub created_at: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AdjustmentHistoryEntry {

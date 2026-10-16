@@ -16,6 +16,9 @@ pub struct CertificateSigner {
     /// «Contador Público» / «Contadora Pública» en los Estados Financieros. Vacío = sin definir.
     #[serde(default)]
     pub accountant_title: String,
+    /// «No usar como contador en EEFF». Sin título y sin esta marca = «Pendiente EEFF».
+    #[serde(default)]
+    pub fs_excluded: bool,
     pub signature_file: String,
     pub created_at: String,
     pub updated_at: String,
@@ -37,14 +40,19 @@ pub struct CertificateSignerInput {
     pub personal_document: String,
     #[serde(default)]
     pub accountant_title: String,
+    #[serde(default)]
+    pub fs_excluded: bool,
     pub signature_file: String,
 }
 
 impl CertificateSignerInput {
     pub fn validated(self) -> AppResult<Self> {
-        let value = Self { name: clean(&self.name, 200), role: clean(&self.role, 120), professional_document: clean(&self.professional_document, 60), personal_document: clean(&self.personal_document, 60), accountant_title: clean(&self.accountant_title, 40), signature_file: clean(&self.signature_file, 100) };
+        let value = Self { name: clean(&self.name, 200), role: clean(&self.role, 120), professional_document: clean(&self.professional_document, 60), personal_document: clean(&self.personal_document, 60), accountant_title: clean(&self.accountant_title, 40), fs_excluded: self.fs_excluded, signature_file: clean(&self.signature_file, 100) };
         if !ACCOUNTANT_TITLES.contains(&value.accountant_title.as_str()) {
             return Err(AppError::user("Elige «Contador Público» o «Contadora Pública»."));
+        }
+        if value.fs_excluded && !value.accountant_title.is_empty() {
+            return Err(AppError::user("Una firma marcada «No usar como contador en EEFF» no puede tener rol de contador."));
         }
         if value.name.is_empty() || value.role.is_empty() || value.professional_document.is_empty() || value.signature_file.is_empty() {
             return Err(AppError::user("Nombre, cargo, documento profesional y firma son obligatorios."));

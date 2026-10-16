@@ -5,7 +5,10 @@
  */
 
 /** Incidencias posibles de un movimiento; una fila puede tener varias. */
-export type Incident = "type" | "duplicate" | "invalid_amount";
+export type Incident = "type" | "duplicate" | "invalid_amount" | "gmf_review";
+
+/** Cómo se obtuvo el valor pagado: la regla de Dropi (MONTO = pagado / 0,996) o una edición manual. */
+export type SplitMethod = "calculated" | "manual";
 
 export interface WalletMovement {
   /** Número de fila en Excel (1 = primera fila de la hoja). */
@@ -52,10 +55,13 @@ export type ReadResult =
   | { kind: "choose-sheet"; candidates: { name: string; rows: number }[] };
 
 export interface AnalyzedMovement extends WalletMovement {
-  /** Valor pagado = MONTO / 1,004 (centavos, redondeo al centavo). null si MONTO no es válido. */
+  /** Valor pagado: el B con redondeo(B / 0,996) = MONTO, o el editado. null si no se pudo determinar. */
   paidCents: number | null;
-  /** 4x1000 = MONTO − Valor pagado. null si MONTO no es válido. */
+  /** 4x1000 = MONTO − Valor pagado. null si no se pudo determinar. */
   gmfCents: number | null;
+  /** Valor pagado según la regla de Dropi (aunque luego se haya editado); null si no tiene solución. */
+  calculatedPaidCents: number | null;
+  method: SplitMethod | null;
   incidents: Incident[];
   /** Explicación del valor inválido (vacío, no numérico, negativo o cero). */
   amountProblem?: string;

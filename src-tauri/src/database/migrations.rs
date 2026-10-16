@@ -52,6 +52,12 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 16, name: "bank_lifecycle_gmf_employee_edits", sql: include_str!("../../migrations/016_bank_lifecycle_gmf_employee_edits.sql"), rebuilds_tables: false },
     Migration { version: 17, name: "puc_catalog_admin", sql: include_str!("../../migrations/017_puc_catalog_admin.sql"), rebuilds_tables: false },
     Migration { version: 18, name: "tax_payments", sql: include_str!("../../migrations/018_tax_payments.sql"), rebuilds_tables: false },
+    Migration {
+        version: 19,
+        name: "signer_fs_role_and_movement_edits",
+        sql: include_str!("../../migrations/019_signer_fs_role_and_movement_edits.sql"),
+        rebuilds_tables: false,
+    },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

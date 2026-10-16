@@ -132,9 +132,17 @@ export function CoverageTable({
   const sourceCells = (r: CoverageRow) =>
     months.map((m) => {
       const c = r.cells[m];
+      // Fuente no mensual: un mes sin datos no falta (se muestra neutro).
+      const neutral = !c.loaded && !!r.notMonthly;
       return (
         <td key={m} style={{ textAlign: "center" }}>
-          <button type="button" className={`fs-coverage__cell ${c.loaded ? "is-loaded" : ""}`} onClick={() => setSelected({ kind: "source", row: r, month: m })} aria-label={`${r.label} ${periodLabel(m)}: ${c.loaded ? "cargado" : "falta"}`}>
+          <button
+            type="button"
+            className={`fs-coverage__cell ${c.loaded ? "is-loaded" : neutral ? "is-na" : ""}`}
+            onClick={() => setSelected({ kind: "source", row: r, month: m })}
+            title={neutral ? (r.source === "opening" ? "Saldo inicial: foto de apertura, no se espera cada mes" : "Los ajustes son puntuales: no se esperan cada mes") : undefined}
+            aria-label={`${r.label} ${periodLabel(m)}: ${c.loaded ? "cargado" : neutral ? "no se espera mensualmente" : "falta"}`}
+          >
             {c.loaded ? <Check size={14} /> : <Minus size={14} />}
           </button>
         </td>
@@ -376,6 +384,9 @@ export function CoverageTable({
                   <td>
                     {r.label}
                     {!r.empty && r.missing.length > 0 && <div className="table__secondary">Faltan: {r.missing.map(monthName).join(", ")}</div>}
+                    {r.notMonthly && r.source === "opening" && (
+                      <div className="table__secondary">{r.notMonthly.snapshotDates.length ? `Apertura: ${r.notMonthly.snapshotDates.map((d) => formatDateForDisplay(d)).join(", ")}` : "Sin saldo inicial"}</div>
+                    )}
                   </td>
                   {sourceCells(r)}
                 </tr>

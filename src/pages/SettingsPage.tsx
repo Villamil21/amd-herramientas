@@ -11,10 +11,10 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Configuración" title="Configuración" description="Copias de seguridad y actualizaciones." />
+      <PageHeader eyebrow="Configuración" title="Configuración" description="Actualizaciones, copias de seguridad y ubicación de los datos." />
 
-      <BackupSection />
       <AboutSection version={startup?.currentVersion ?? "—"} />
+      <BackupSection />
 
       <Card title="Ubicación de los datos" description="Carpeta de datos de la aplicación, separada del programa. Actualizar o reemplazar la aplicación no la modifica.">
         <div className="row row--between">

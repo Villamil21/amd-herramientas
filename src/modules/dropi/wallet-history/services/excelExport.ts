@@ -1,6 +1,6 @@
 import { saveExcelSheets, type ExportSheet } from "../../../bank-analysis/shared/excelExportService";
 import type { AnalyzedMovement, ParsedWalletFile, WalletAnalysis } from "../types";
-import { INCIDENT_LABEL } from "./analysis";
+import { INCIDENT_LABEL, METHOD_LABEL } from "./analysis";
 
 const pesos = (cents: number | null) => (cents === null ? null : cents / 100);
 
@@ -33,7 +33,7 @@ export function buildWalletSheets(analysis: WalletAnalysis): ExportSheet[] {
 
   const detail: ExportSheet = {
     name: "Detalle",
-    columns: [{ header: "Fila Excel", kind: "integer" as const }, text("ID"), text("Fecha"), text("Hora"), text("Tipo"), money("Monto"), money("Valor pagado"), money("4x1000"), text("Descripción"), text("Concepto retiro"), text("Estado")],
+    columns: [{ header: "Fila Excel", kind: "integer" as const }, text("ID"), text("Fecha"), text("Hora"), text("Tipo"), money("Monto"), money("Valor pagado"), money("4x1000"), text("Método"), money("Valor pagado calculado"), text("Descripción"), text("Concepto retiro"), text("Estado")],
     rows: movements.map((m) => [
       m.rowNumber,
       m.id || null,
@@ -43,6 +43,8 @@ export function buildWalletSheets(analysis: WalletAnalysis): ExportSheet[] {
       m.amountCents === null ? m.amountText || null : pesos(m.amountCents),
       pesos(m.paidCents),
       pesos(m.gmfCents),
+      m.method ? METHOD_LABEL[m.method] : null,
+      pesos(m.calculatedPaidCents),
       m.description || null,
       m.concept || null,
       statusLabel(m),

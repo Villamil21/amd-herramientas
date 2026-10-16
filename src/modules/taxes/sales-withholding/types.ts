@@ -88,6 +88,10 @@ export interface Pending {
   title: string;
   detail?: string;
   items?: string[];
+  /** NIT Emisor sin empresa (crear empresa con esos datos). */
+  issuer?: IssuerNit;
+  /** Varias empresas registradas en el archivo: se procesa una a la vez. */
+  issuers?: (IssuerNit & { company: Company })[];
 }
 
 export interface IssuerNit {

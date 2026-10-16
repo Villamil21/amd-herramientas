@@ -24,7 +24,7 @@ import { analyzeSales, type TypeRules } from "./services/analysis";
 import { normalizeCiiu } from "./services/ciiu";
 import { exportSalesExcel } from "./services/excelExport";
 import { readSalesWorkbook } from "./services/workbookReader";
-import { SalesWithholdingError, type ReadResult, type SalesAnalysis } from "./types";
+import { SalesWithholdingError, type IssuerNit, type ReadResult, type SalesAnalysis } from "./types";
 
 const LABELS = { pick: "Seleccionar Excel", pickAnother: "Seleccionar otro Excel", analyzing: "Leyendo ventas…" };
 
@@ -35,7 +35,7 @@ type Loaded = ReadResult & { workbook: Workbook };
  * desde Empresas o la Tabla de Autorretenciones el cálculo se rehace con los
  * datos guardados (ej. una tarifa editada) sin volver a elegir el Excel.
  */
-let session: { workbook: Workbook; sheetName?: string } | null = null;
+let session: { workbook: Workbook; sheetName?: string; issuerNit?: string } | null = null;
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", formatInteger(n)));
 const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -51,6 +51,10 @@ export default function SalesWithholdingPage() {
   const [typesOpen, setTypesOpen] = useState(false);
   /** undefined = cerrado; null = nueva empresa; Company = editar. */
   const [companyModal, setCompanyModal] = useState<Company | null | undefined>(undefined);
+  /** NIT Emisor sin empresa con el que se abre «Crear empresa». */
+  const [createFor, setCreateFor] = useState<IssuerNit | undefined>();
+  /** Archivo con varias empresas: NIT Emisor cuyas filas se procesan (una empresa por lote). */
+  const [issuerNit, setIssuerNit] = useState<string | undefined>();
   const busy = picking || state.status === "analyzing";
 
   const companies = useAsync(() => companyService.list(), []);
@@ -59,15 +63,16 @@ export default function SalesWithholdingPage() {
   const masterError = companies.error ?? rates.error ?? types.error;
   const masterReady = companies.data !== null && rates.data !== null && types.data !== null;
 
-  const read = useCallback(async (workbook: Workbook, sheetName?: string) => {
+  const read = useCallback(async (workbook: Workbook, sheetName?: string, keepIssuer?: string) => {
     const { fileName } = workbook;
     setExportedPath(null);
     setFilter("all");
+    setIssuerNit(keepIssuer);
     setState({ status: "analyzing", fileName });
     await nextFrame();
     try {
       const result = readSalesWorkbook(workbook, sheetName);
-      session = { workbook, sheetName: result.kind === "ok" ? result.file.sheetName : undefined };
+      session = { workbook, sheetName: result.kind === "ok" ? result.file.sheetName : undefined, issuerNit: keepIssuer };
       setState({ status: "done", fileName, pageCount: 0, analysis: { ...result, workbook } });
     } catch (e) {
       session = null;
@@ -78,7 +83,7 @@ export default function SalesWithholdingPage() {
 
   // Al volver al módulo se rehace el cálculo del último archivo.
   useEffect(() => {
-    if (session) void read(session.workbook, session.sheetName);
+    if (session) void read(session.workbook, session.sheetName, session.issuerNit);
   }, [read]);
 
   const pick = useCallback(async () => {
@@ -99,10 +104,25 @@ export default function SalesWithholdingPage() {
   const loaded = state.status === "done" ? state.analysis : undefined;
   const file = loaded?.kind === "ok" ? loaded.file : undefined;
   const rules: TypeRules = useMemo(() => new Map((types.data ?? []).map((t) => [t.normalizedLabel, t.category])), [types.data]);
+  const rows = useMemo(() => (file && issuerNit ? file.rows.filter((r) => r.nit === issuerNit) : file?.rows), [file, issuerNit]);
   const analysis = useMemo(
-    () => (file && masterReady ? analyzeSales(file.rows, { rules, companies: companies.data!, rates: rates.data! }) : undefined),
-    [file, masterReady, rules, companies.data, rates.data],
+    () => (rows && masterReady ? analyzeSales(rows, { rules, companies: companies.data!, rates: rates.data! }) : undefined),
+    [rows, masterReady, rules, companies.data, rates.data],
   );
+
+  const selectIssuer = (nit: string | undefined) => {
+    setIssuerNit(nit);
+    setExportedPath(null);
+    setFilter("all");
+    if (session) session.issuerNit = nit;
+  };
+
+  const cancelImport = () => {
+    session = null;
+    setIssuerNit(undefined);
+    setExportedPath(null);
+    setState({ status: "idle" });
+  };
 
   const showReview = () => {
     setFilter("review");
@@ -187,7 +207,7 @@ export default function SalesWithholdingPage() {
       />
 
       {loaded?.kind === "choose-sheet" && (
-        <Card title="Revisa la hoja Ventas" description="El archivo tiene varias hojas llamadas Ventas. Selecciona la que corresponde; no se elige una automáticamente.">
+        <Card title="Elige la hoja de ventas" description="Varias hojas del archivo tienen los encabezados de facturación DIAN. Selecciona la que corresponde; no se elige una automáticamente.">
           <div className="row">
             {loaded.candidates.map((c) => (
               <Button key={c.name} icon={<SheetIcon size={15} />} onClick={() => void read(loaded.workbook, c.name)}>
@@ -200,11 +220,27 @@ export default function SalesWithholdingPage() {
 
       {file && analysis && (
         <>
+          {issuerNit && rows && (
+            <Alert tone="info" title={`Lote de ${analysis.company?.razonSocial ?? `NIT ${issuerNit}`}`}>
+              Se procesan solo sus {plural(rows.length, "1 fila", "# filas")} de {formatInteger(file.rows.length)} del archivo. Las demás empresas se procesan por separado.
+              <div className="row" style={{ marginTop: "var(--space-2)" }}>
+                <Button size="sm" onClick={() => selectIssuer(undefined)}>
+                  Cambiar empresa
+                </Button>
+              </div>
+            </Alert>
+          )}
+
           <CompanyCard analysis={analysis} blocking={blocking} />
 
           <PendingList
             pending={analysis.pending.filter((p) => p.kind !== "new_type")}
-            onCreateCompany={() => setCompanyModal(null)}
+            onCreateCompany={(issuer) => {
+              setCreateFor(issuer);
+              setCompanyModal(null);
+            }}
+            onSelectIssuer={selectIssuer}
+            onCancelImport={cancelImport}
             onEditCompany={() => analysis.company && setCompanyModal(analysis.company)}
             onSaveCiiu={saveCiiu}
             onOpenTable={() => navigate(paths.selfWithholdingCode(normalizeCiiu(analysis.company?.ciiuCode ?? "")))}
@@ -222,7 +258,7 @@ export default function SalesWithholdingPage() {
       <CompanyFormModal
         open={companyModal !== undefined}
         company={companyModal ?? null}
-        initial={analysis?.issuer ? { nit: analysis.issuer.nit, razonSocial: analysis.issuer.name } : undefined}
+        initial={createFor ? { nit: createFor.nit, razonSocial: createFor.name } : undefined}
         onClose={() => setCompanyModal(undefined)}
         onSaved={() => {
           setCompanyModal(undefined);

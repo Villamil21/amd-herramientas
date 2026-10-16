@@ -28,4 +28,7 @@ export const pucService = {
   listSupplierCodes: (supplierId: number) => call<string[]>("list_supplier_puc_codes", { supplierId }),
   /** Asocia el código al proveedor (sin duplicar) y devuelve su lista actualizada. */
   recordSupplierCode: (supplierId: number, code: string) => call<string[]>("record_supplier_puc_code", { supplierId, code }),
+  /** Quita una asociación de sugerencia (los movimientos ya enviados no cambian). */
+  deleteSupplierCode: (supplierId: number, code: string) => call<string[]>("delete_supplier_puc_code", { supplierId, code }),
+  replaceSupplierCode: (supplierId: number, from: string, to: string) => call<string[]>("replace_supplier_puc_code", { supplierId, from, to }),
 };

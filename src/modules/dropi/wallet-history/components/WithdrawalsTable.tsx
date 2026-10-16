@@ -1,10 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Badge, Card } from "../../../../components/ui";
+import { Badge, Button, Card, Input } from "../../../../components/ui";
 import { normalizeKey } from "../../../../utils/text";
 import { SearchBox, SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { formatCop } from "../../orders/services/format";
-import { INCIDENT_LABEL, INCIDENTS } from "../services/analysis";
+import { INCIDENT_LABEL, INCIDENTS, manualSplit, METHOD_LABEL } from "../services/analysis";
 import type { AnalyzedMovement, Incident, WalletAnalysis } from "../types";
 
 export type WithdrawalFilter = "all" | "validated" | "review" | Incident;
@@ -39,12 +39,57 @@ export function StatusBadges({ movement }: { movement: AnalyzedMovement }) {
   );
 }
 
+/** «4.000.000» / «4000000,50» → centavos (null si no es un número). */
+function parsePesos(text: string): number | null {
+  const clean = text.replace(/[$\s.]/g, "").replace(",", ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(clean)) return null;
+  return Math.round(Number(clean) * 100);
+}
+
+/** Edición manual del valor pagado: el 4x1000 se calcula como MONTO − valor pagado (siempre suman el MONTO). */
+function ManualSplitForm({ movement, onSave }: { movement: AnalyzedMovement; onSave: (paidCents: number | null) => void }) {
+  const [text, setText] = useState(movement.paidCents === null ? "" : String(movement.paidCents / 100).replace(".", ","));
+  const paid = parsePesos(text);
+  const result = paid === null ? null : manualSplit(movement.amountCents!, paid);
+  const error = text && (paid === null ? "Escribe un valor en pesos." : typeof result === "string" ? result : null);
+  return (
+    <div className="wallet-manual" onClick={(e) => e.stopPropagation()}>
+      <label className="field__label" htmlFor={`paid-${movement.rowNumber}`}>
+        Valor pagado
+      </label>
+      <Input id={`paid-${movement.rowNumber}`} inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} style={{ width: 160 }} />
+      <span className="muted">
+        4x1000: {result && typeof result !== "string" ? formatCop(result.gmfCents) : "—"} · MONTO: {formatCop(movement.amountCents!)}
+      </span>
+      <Button size="sm" variant="primary" disabled={!result || typeof result === "string"} onClick={() => paid !== null && onSave(paid)}>
+        Guardar
+      </Button>
+      {movement.method === "manual" && (
+        <Button size="sm" variant="ghost" onClick={() => onSave(null)}>
+          Volver al cálculo
+        </Button>
+      )}
+      {error && <span className="field__error">{error}</span>}
+    </div>
+  );
+}
+
 /**
  * Retiros del archivo: Fecha, Valor pagado, 4x1000, Concepto retiro y Estado.
  * Cada fila se despliega para ver ID, hora, TIPO, MONTO y DESCRIPCIÓN.
  * Los filtros y el buscador solo cambian la vista.
  */
-export function WithdrawalsTable({ analysis, filter, onFilter }: { analysis: WalletAnalysis; filter: WithdrawalFilter; onFilter: (f: WithdrawalFilter) => void }) {
+export function WithdrawalsTable({
+  analysis,
+  filter,
+  onFilter,
+  onEditPaid,
+}: {
+  analysis: WalletAnalysis;
+  filter: WithdrawalFilter;
+  onFilter: (f: WithdrawalFilter) => void;
+  onEditPaid: (rowNumber: number, paidCents: number | null) => void;
+}) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
 
@@ -110,7 +155,14 @@ export function WithdrawalsTable({ analysis, filter, onFilter }: { analysis: Wal
                     <td className="num" title={m.amountCents === null ? undefined : `MONTO (incluye 4x1000): ${formatCop(m.amountCents)}`}>
                       {money(m.paidCents)}
                     </td>
-                    <td className="num">{money(m.gmfCents)}</td>
+                    <td className="num">
+                      {money(m.gmfCents)}
+                      {m.method === "manual" && (
+                        <span className="wallet-row__manual">
+                          <Badge tone="gold">Manual</Badge>
+                        </span>
+                      )}
+                    </td>
                     <td className="table__primary selectable" style={{ minWidth: 220 }}>
                       {m.concept || "—"}
                     </td>
@@ -129,9 +181,12 @@ export function WithdrawalsTable({ analysis, filter, onFilter }: { analysis: Wal
                           <Info label="Tipo" value={m.type || "—"} />
                           <Info label="Monto (incluye 4x1000)" value={m.amountCents === null ? m.amountText || "(vacío)" : formatCop(m.amountCents)} />
                           <Info label="Valor pagado + 4x1000" value={m.paidCents === null ? "—" : `${formatCop(m.paidCents)} + ${formatCop(m.gmfCents!)}`} />
+                          <Info label="Método" value={m.method ? METHOD_LABEL[m.method] : "Sin solución: requiere revisión"} />
+                          {m.method === "manual" && <Info label="Valor pagado calculado" value={m.calculatedPaidCents === null ? "Sin solución" : formatCop(m.calculatedPaidCents)} />}
                           <Info label="Descripción encontrada" value={m.description || "(vacía)"} />
                           <Info label="Incidencias" value={m.incidents.length === 0 ? "Ninguna" : m.incidents.map((i) => (i === "invalid_amount" && m.amountProblem ? m.amountProblem : INCIDENT_LABEL[i])).join(" · ")} />
                         </div>
+                        {m.amountCents !== null && !m.amountProblem && <ManualSplitForm key={`${m.rowNumber}:${m.paidCents}`} movement={m} onSave={(paid) => onEditPaid(m.rowNumber, paid)} />}
                       </td>
                     </tr>
                   )}

@@ -42,6 +42,11 @@ describe("borrador de importación", () => {
     expect(draftBlockers(dup, true, true)[0]).toContain("ya fue importado");
   });
 
+  it("IVA con casillas 88 y 89 ambas mayores que cero: bloquea y pide revisión", () => {
+    const both = buildDraft(parsed({ values: { vatPayable: value(100_000), vatFavor: value(200_000) } }), "x.pdf", [company], [], null);
+    expect(draftBlockers(both, true, true)).toEqual(["Las casillas 88 (Total saldo a pagar) y 89 (Total saldo a favor) son ambas mayores que cero: revisa la declaración antes de importarla."]);
+  });
+
   it("otro formulario del mismo periodo solo entra como corrección confirmada", () => {
     const existing = { id: 3, taxType: "vat", year: 2026, period: 2, supersededBy: null, formNumber: "1" } as TaxReturn;
     const d = buildDraft(parsed(), "x.pdf", [company], [existing], "four_monthly");

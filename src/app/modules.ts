@@ -13,9 +13,13 @@ import { regulatoryReportsModule } from "../modules/regulatory-reports";
 import { salesOrdersModule } from "../modules/sales-orders";
 import { socialSecurityModule } from "../modules/social-security";
 import { taxesModule } from "../modules/taxes";
+import { sortByName } from "../utils/text";
 
-/** Extractos bancarios ya no es un módulo propio: vive en Estados Financieros → Extractos bancarios. */
-export const MODULES: ModuleDef[] = [socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule, dropiModule, financialStatementsModule, calculatorsModule];
+/**
+ * Extractos bancarios ya no es un módulo propio: vive en Estados Financieros → Extractos bancarios.
+ * El orden del arreglo no importa: las tarjetas de Herramientas se muestran alfabéticamente.
+ */
+export const MODULES: ModuleDef[] = sortByName([socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule, dropiModule, financialStatementsModule, calculatorsModule]);
 
 export function findModule(id: string | undefined) {
   return MODULES.find((m) => m.id === id);
@@ -29,9 +33,9 @@ export function isAvailable(sub: SubmoduleDef): boolean {
 /** Prioridad de una tarjeta sin `priority` explícita. */
 const DEFAULT_PRIORITY = 1;
 
-/** Submódulos en el orden de las tarjetas: por prioridad explícita y, a igual prioridad, el orden declarado (sort estable). */
+/** Submódulos en el orden de las tarjetas: por prioridad explícita y, a igual prioridad, alfabéticamente (no por el orden declarado). */
 export function orderedSubmodules(module: ModuleDef): SubmoduleDef[] {
-  return [...module.submodules].sort((a, b) => (a.priority ?? DEFAULT_PRIORITY) - (b.priority ?? DEFAULT_PRIORITY));
+  return sortByName(module.submodules).sort((a, b) => (a.priority ?? DEFAULT_PRIORITY) - (b.priority ?? DEFAULT_PRIORITY));
 }
 
 export function readySubmodules(module: ModuleDef) {
