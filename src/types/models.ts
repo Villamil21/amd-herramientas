@@ -35,11 +35,41 @@ export interface Shareholder {
   id?: number;
   name: string;
   identityDocument: string;
+  /** Hasta dos decimales (50,20 %). */
   percentage: number;
   sortOrder: number;
   /** Si este socio es el representante legal principal o suplente. */
   legalRole?: LegalRole | null;
+  // --- Identificación, ubicación y contacto (alimentan el formato 1010 de Información Exógena) ---
+  /** Código DIAN del tipo de documento («13», «31»…). Vacío: sin definir (nunca se inventa). */
+  docTypeCode?: string | null;
+  dv?: string;
+  personType?: PersonType | null;
+  firstSurname?: string;
+  secondSurname?: string;
+  firstName?: string;
+  otherNames?: string;
+  address?: string;
+  /** Códigos como TEXTO: conservan los ceros iniciales (país «169», departamento «05», municipio «001»). */
+  countryCode?: string;
+  countryName?: string;
+  deptCode?: string;
+  deptName?: string;
+  muniCode?: string;
+  muniName?: string;
+  phone?: string;
+  email?: string;
+  /** pendiente: sin RUT importado · validado: el usuario confirmó los datos · revisar: hay diferencias por resolver. */
+  rutStatus?: RutStatus;
+  /** Historial del RUT del socio (más antiguo primero). Solo lectura. */
+  documents?: CompanyDocument[];
+  /** RUT cargado en el formulario, que se registra al guardar la empresa. */
+  newDocuments?: NewCompanyDocument[];
 }
+
+export type RutStatus = "pendiente" | "validado" | "revisar";
+
+export const RUT_STATUS_LABEL: Record<RutStatus, string> = { pendiente: "Pendiente", validado: "Validado", revisar: "Revisar" };
 
 export type LegalRole = "principal" | "alternate";
 
@@ -201,6 +231,45 @@ export interface Supplier {
   fiscalRegime?: string | null;
   fiscalCheckedAt?: string | null;
   withholdingRules?: SupplierWithholdingRule[];
+  // --- Datos tributarios para Información Exógena (el número de documento es `nit`) ---
+  /** Código DIAN del tipo de documento («13», «31»…). null: sin definir (nunca se inventa). */
+  docTypeCode?: string | null;
+  dv?: string;
+  firstSurname?: string;
+  secondSurname?: string;
+  firstName?: string;
+  otherNames?: string;
+  address?: string;
+  /** Códigos como TEXTO: conservan los ceros iniciales. */
+  countryCode?: string;
+  countryName?: string;
+  deptCode?: string;
+  deptName?: string;
+  muniCode?: string;
+  muniName?: string;
+  /** De dónde salieron los datos: manual, factura, rut, empresas. */
+  dataOrigin?: string;
+  dataVerifiedAt?: string | null;
+  /** Lo calcula el backend al guardar. */
+  dataStatus?: "completo" | "requiere_datos";
+}
+
+/** Datos tributarios de un tercero que se guardan junto con el proveedor. */
+export interface SupplierTaxInput {
+  data: {
+    docTypeCode: string | null;
+    dv: string;
+    personType: PersonType | null;
+    firstSurname: string;
+    secondSurname: string;
+    firstName: string;
+    otherNames: string;
+    address: string;
+    countryCode: string;
+    deptCode: string;
+    muniCode: string;
+  };
+  dataOrigin: "manual" | "factura" | "rut" | "empresas";
 }
 
 export type SupplierInput = Pick<Supplier, "nit" | "businessName" | "vatType">;

@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.32.0",
+    "date": "2026-10-16",
+    "notes": [
+      "Nuevo módulo Información Exógena (fase 1): formatos 1010 (socios, participación y capital) y 1009 (saldos por tercero al 31/12, conciliados con el pasivo del ESF), con control de estado y exportación a Excel.",
+      "Proveedores y socios: datos de tercero para Exógena (tipo de documento DIAN, DV, nombres, dirección, país, departamento y municipio) con estado Completo / Requiere datos y catálogos DIAN editables en Datos → Catálogos Exógena.",
+      "Empresas: ficha de socios ampliada e importación del RUT del socio con comparación contra los datos actuales. IVA, Retención y Clasificación de compras proponen datos del emisor de la factura para revisar.",
+      "Nómina: el detalle por entidad (AFP, EPS, ARL, CCF) de las planillas queda guardado con el lote.",
+      "Configuración → Zona de peligro: reinicio total de datos con copia previa, frase de confirmación y segunda confirmación. El respaldo JSON incluye los datos de Exógena."
+    ]
+  },
+  {
+    "version": "1.32.0",
+    "date": "2026-10-16",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.31.1",
     "date": "2026-10-16",
     "notes": [

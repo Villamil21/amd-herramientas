@@ -1,6 +1,7 @@
 import type { PdfDocumentText } from "../../bank-analysis/shared/pdf/pdfTypes";
 import { analyzeAportesEnLinea } from "../../social-security/payroll-summary/aportes-en-linea/services/analysis";
 import type { PayrollAnalysis } from "../../social-security/payroll-summary/shared/types";
+import { planillaEntitiesFor } from "../../exogena/domain/planillaEntities";
 import { slashToIso } from "../shared/money";
 import { PayrollFlow } from "./PayrollFlow";
 import type { PayrollOperator, PlanillaView } from "./operators";
@@ -15,15 +16,20 @@ function analyze(text: PdfDocumentText): Analysis {
   return { ...analyzeAportesEnLinea(text), employerNit: nit?.[1] };
 }
 
-const view = ({ summary, employerNit }: Analysis): PlanillaView => ({
-  period: summary.period,
-  paymentDate: slashToIso(summary.paymentDate) ?? null,
-  employees: summary.employees,
-  lateInterest: summary.lateInterest,
-  issues: summary.issues,
-  warnings: [],
-  employerNit,
-});
+const view = ({ summary, employerNit }: Analysis): PlanillaView => {
+  const paymentDate = slashToIso(summary.paymentDate) ?? null;
+  const { entities, warning } = planillaEntitiesFor(summary.paymentSummary?.entities ?? [], summary.paymentSummary?.liquidatedByRisk ?? {}, summary.period, paymentDate);
+  return {
+    period: summary.period,
+    paymentDate,
+    employees: summary.employees,
+    lateInterest: summary.lateInterest,
+    issues: summary.issues,
+    warnings: warning ? [warning] : [],
+    employerNit,
+    entities,
+  };
+};
 
 /** Aportes en Línea: usa el lector existente de la planilla (sin modificar «Resumen de planilla»). */
 const APORTES_EN_LINEA: PayrollOperator<Analysis> = {

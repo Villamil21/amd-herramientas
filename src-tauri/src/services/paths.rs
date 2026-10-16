@@ -43,4 +43,10 @@ impl AppPaths {
         std::fs::create_dir_all(&paths.backups_dir)?;
         Ok(paths)
     }
+
+    /// Carpetas con archivos del usuario (logos, firmas, RUT/Cámaras y adjuntos de socios). El reinicio total las
+    /// vacía archivo por archivo; una carpeta nueva con adjuntos persistentes se agrega aquí para que no queden huérfanos.
+    pub fn persistent_file_dirs(&self) -> [&PathBuf; 3] {
+        [&self.logos_dir, &self.signatures_dir, &self.company_documents_dir]
+    }
 }

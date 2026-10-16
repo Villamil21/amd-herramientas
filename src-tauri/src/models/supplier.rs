@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::models::clean;
+use crate::models::third_party::{self, ThirdPartyData};
 use crate::models::withholding::SupplierWithholdingRule;
 
 /// "purchase" = Compras, "service" = Servicios.
@@ -28,6 +29,86 @@ pub struct Supplier {
     pub fiscal_checked_at: Option<String>,
     #[serde(default)]
     pub withholding_rules: Vec<SupplierWithholdingRule>,
+    /// Datos tributarios para Información Exógena (el número de documento es `nit`). Ausentes en backups anteriores.
+    #[serde(default)]
+    pub doc_type_code: Option<String>,
+    #[serde(default)]
+    pub dv: String,
+    #[serde(default)]
+    pub first_surname: String,
+    #[serde(default)]
+    pub second_surname: String,
+    #[serde(default)]
+    pub first_name: String,
+    #[serde(default)]
+    pub other_names: String,
+    #[serde(default)]
+    pub address: String,
+    #[serde(default)]
+    pub country_code: String,
+    #[serde(default)]
+    pub country_name: String,
+    #[serde(default)]
+    pub dept_code: String,
+    #[serde(default)]
+    pub dept_name: String,
+    #[serde(default)]
+    pub muni_code: String,
+    #[serde(default)]
+    pub muni_name: String,
+    /// De dónde salieron los datos: manual, factura, rut, empresas.
+    #[serde(default)]
+    pub data_origin: String,
+    #[serde(default)]
+    pub data_verified_at: Option<String>,
+    /// «completo» / «requiere_datos»: lo calcula Rust al guardar.
+    #[serde(default = "default_data_status")]
+    pub data_status: String,
+}
+
+fn default_data_status() -> String {
+    third_party::STATUS_MISSING.to_string()
+}
+
+impl Supplier {
+    /// Datos tributarios del tercero (con el `person_type` de Retención en la fuente, que es el mismo dato).
+    pub fn third_party(&self) -> ThirdPartyData {
+        ThirdPartyData {
+            doc_type_code: self.doc_type_code.clone(),
+            dv: self.dv.clone(),
+            person_type: self.person_type.clone(),
+            first_surname: self.first_surname.clone(),
+            second_surname: self.second_surname.clone(),
+            first_name: self.first_name.clone(),
+            other_names: self.other_names.clone(),
+            address: self.address.clone(),
+            country_code: self.country_code.clone(),
+            country_name: self.country_name.clone(),
+            dept_code: self.dept_code.clone(),
+            dept_name: self.dept_name.clone(),
+            muni_code: self.muni_code.clone(),
+            muni_name: self.muni_name.clone(),
+        }
+    }
+}
+
+/// Datos tributarios que el usuario (o una factura / el RUT) aporta para un tercero.
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierTaxInput {
+    pub data: ThirdPartyData,
+    #[serde(default)]
+    pub data_origin: String,
+}
+
+impl SupplierTaxInput {
+    pub fn validated(self) -> AppResult<Self> {
+        let origin = clean(&self.data_origin, 20).to_ascii_lowercase();
+        if !["", "manual", "factura", "rut", "empresas"].contains(&origin.as_str()) {
+            return Err(AppError::user("El origen de los datos no es válido."));
+        }
+        Ok(SupplierTaxInput { data: self.data.normalized()?.without_inapplicable_names(), data_origin: if origin.is_empty() { "manual".into() } else { origin } })
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -48,8 +129,13 @@ pub fn normalize_nit(value: &str) -> String {
 
 impl SupplierInput {
     pub fn validated(self) -> AppResult<Self> {
+        self.validated_for(None)
+    }
+
+    /// Igual que `validated`, pero el número respeta el tipo de documento: un pasaporte conserva sus letras.
+    pub fn validated_for(self, doc_type: Option<&str>) -> AppResult<Self> {
         let v = SupplierInput {
-            nit: normalize_nit(&self.nit),
+            nit: if third_party::allows_letters(doc_type) { third_party::document_number(&self.nit, doc_type) } else { normalize_nit(&self.nit) },
             business_name: clean(&self.business_name, 250),
             vat_type: self.vat_type.map(|t| t.trim().to_ascii_lowercase()).filter(|t| !t.is_empty()),
         };

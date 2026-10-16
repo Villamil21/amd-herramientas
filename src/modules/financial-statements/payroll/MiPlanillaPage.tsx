@@ -1,30 +1,50 @@
+import { planillaEntitiesFor, type RawPlanillaEntity } from "../../exogena/domain/planillaEntities";
 import { PayrollFlow } from "./PayrollFlow";
 import { analyzeMiPlanilla, type MiPlanillaAnalysis } from "./miplanilla/analysis";
 import { PARAFISCALS } from "./miplanilla/types";
 import type { PayrollOperator, PlanillaView } from "./operators";
 
+const ENTITY_OF = { pension: "AFP", health: "EPS", risk: "ARL", ccf: "CCF" } as const;
+
+/** Administradoras de «Totales …» con su valor ANTES de mora (el aporte liquidado); la mora no entra. */
+function entitiesOf(summary: MiPlanillaAnalysis["summary"]) {
+  const raw: RawPlanillaEntity[] = [];
+  const expected: Partial<Record<"AFP" | "EPS" | "ARL" | "CCF", number>> = {};
+  for (const [sub, type] of Object.entries(ENTITY_OF) as [keyof typeof ENTITY_OF, (typeof ENTITY_OF)[keyof typeof ENTITY_OF]][]) {
+    const admin = summary.administrators[sub];
+    if (!admin) continue;
+    if (admin.contribution !== undefined) expected[type] = admin.contribution;
+    for (const e of admin.entities ?? []) raw.push({ type, name: e.name, code: e.code, nit: e.nit, dv: e.dv, liquidated: e.contribution });
+  }
+  return planillaEntitiesFor(raw, expected, summary.pensionPeriod, summary.paymentDate ?? null);
+}
+
 /** La mora es global: no se reparte entre empleados. «Cotización» = pensión + salud + riesgos + CCF. */
-const view = ({ summary, lateInterest, warnings }: MiPlanillaAnalysis): PlanillaView => ({
-  period: summary.pensionPeriod,
-  paymentDate: summary.paymentDate ?? null,
-  employees: summary.employees.map((e) => ({
-    identification: e.identification,
-    name: e.name,
-    pensionDays: e.pensionDays,
-    pensionIbc: e.pensionIbc,
-    pensionContribution: e.pensionContribution,
-    healthContribution: e.healthContribution,
-    riskContribution: e.riskContribution,
-    ccfContribution: e.ccfContribution,
-    otherContribution: PARAFISCALS.reduce((n, p) => n + e.parafiscales[p], 0),
-    parafiscales: e.parafiscales,
-  })),
-  lateInterest,
-  issues: summary.issues,
-  warnings,
-  employerNit: summary.employerNit,
-  planillaId: summary.planillaNumber,
-});
+const view = ({ summary, lateInterest, warnings }: MiPlanillaAnalysis): PlanillaView => {
+  const { entities, warning } = entitiesOf(summary);
+  return {
+    period: summary.pensionPeriod,
+    paymentDate: summary.paymentDate ?? null,
+    employees: summary.employees.map((e) => ({
+      identification: e.identification,
+      name: e.name,
+      pensionDays: e.pensionDays,
+      pensionIbc: e.pensionIbc,
+      pensionContribution: e.pensionContribution,
+      healthContribution: e.healthContribution,
+      riskContribution: e.riskContribution,
+      ccfContribution: e.ccfContribution,
+      otherContribution: PARAFISCALS.reduce((n, p) => n + e.parafiscales[p], 0),
+      parafiscales: e.parafiscales,
+    })),
+    lateInterest,
+    issues: summary.issues,
+    warnings: warning ? [...warnings, warning] : warnings,
+    employerNit: summary.employerNit,
+    planillaId: summary.planillaNumber,
+    entities,
+  };
+};
 
 /** MiPlanilla: lector propio del PDF; el resto del flujo es el mismo de Aportes en Línea. */
 const MI_PLANILLA: PayrollOperator<MiPlanillaAnalysis> = {

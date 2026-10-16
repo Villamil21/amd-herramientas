@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, ErrorCode, Row};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Row};
 
 use crate::error::{AppError, AppResult};
-use crate::models::supplier::{Supplier, SupplierInput};
+use crate::models::supplier::{Supplier, SupplierInput, SupplierTaxInput};
 #[cfg(test)]
 use crate::database::puc;
 use crate::models::withholding::{SupplierWithholdingRule, WithholdingProfileInput};
 use crate::services::time::now_iso;
 
-const COLUMNS: &str = "id, nit, business_name, vat_type, created_at, updated_at, person_type, fiscal_regime, fiscal_checked_at";
+const COLUMNS: &str = "id, nit, business_name, vat_type, created_at, updated_at, person_type, fiscal_regime, fiscal_checked_at, doc_type_code, dv, first_surname, second_surname, first_name, other_names, address, country_code, country_name, dept_code, dept_name, muni_code, muni_name, data_origin, data_verified_at, data_status";
 
 fn map(r: &Row) -> rusqlite::Result<Supplier> {
     Ok(Supplier {
@@ -23,6 +23,22 @@ fn map(r: &Row) -> rusqlite::Result<Supplier> {
         fiscal_regime: r.get(7)?,
         fiscal_checked_at: r.get(8)?,
         withholding_rules: Vec::new(),
+        doc_type_code: r.get(9)?,
+        dv: r.get(10)?,
+        first_surname: r.get(11)?,
+        second_surname: r.get(12)?,
+        first_name: r.get(13)?,
+        other_names: r.get(14)?,
+        address: r.get(15)?,
+        country_code: r.get(16)?,
+        country_name: r.get(17)?,
+        dept_code: r.get(18)?,
+        dept_name: r.get(19)?,
+        muni_code: r.get(20)?,
+        muni_name: r.get(21)?,
+        data_origin: r.get(22)?,
+        data_verified_at: r.get(23)?,
+        data_status: r.get(24)?,
     })
 }
 
@@ -62,6 +78,20 @@ pub fn list(conn: &Connection, search: Option<&str>) -> AppResult<Vec<Supplier>>
     Ok(rows)
 }
 
+pub fn get(conn: &Connection, id: i64) -> AppResult<Supplier> {
+    conn.query_row(&format!("SELECT {COLUMNS} FROM suppliers WHERE id = ?1"), [id], map)
+        .optional()?
+        .ok_or_else(|| AppError::user("El proveedor no existe o fue eliminado."))
+}
+
+/// Recalcula «completo / requiere datos» con las reglas de Exógena. No cambia `updated_at`: es un derivado.
+fn refresh_status(conn: &Connection, id: i64) -> AppResult<()> {
+    let Ok(s) = get(conn, id) else { return Ok(()) };
+    let status = s.third_party().status(&s.nit, &s.business_name);
+    conn.execute("UPDATE suppliers SET data_status = ?1 WHERE id = ?2 AND data_status <> ?1", params![status, id])?;
+    Ok(())
+}
+
 pub fn insert(conn: &Connection, s: &SupplierInput) -> AppResult<i64> {
     let now = now_iso();
     conn.execute(
@@ -69,14 +99,61 @@ pub fn insert(conn: &Connection, s: &SupplierInput) -> AppResult<i64> {
         params![s.nit, s.business_name, s.vat_type, now],
     )
     .map_err(|e| duplicate_nit(e, &s.nit))?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    refresh_status(conn, id)?;
+    Ok(id)
+}
+
+/// Escribe los datos tributarios de un proveedor ya guardado. Valida los códigos contra los catálogos Exógena y
+/// completa los nombres de país, departamento y municipio.
+fn write_tax(conn: &Connection, id: i64, tax: &SupplierTaxInput) -> AppResult<()> {
+    let mut d = tax.data.clone();
+    crate::database::exogena::resolve_third_party(conn, &mut d)?;
+    let now = now_iso();
+    let n = conn.execute(
+        "UPDATE suppliers SET doc_type_code = ?1, dv = ?2, person_type = ?3, first_surname = ?4, second_surname = ?5, first_name = ?6, other_names = ?7,
+                address = ?8, country_code = ?9, country_name = ?10, dept_code = ?11, dept_name = ?12, muni_code = ?13, muni_name = ?14,
+                data_origin = ?15, data_verified_at = ?16, updated_at = ?16
+         WHERE id = ?17",
+        params![d.doc_type_code, d.dv, d.person_type, d.first_surname, d.second_surname, d.first_name, d.other_names, d.address, d.country_code, d.country_name, d.dept_code, d.dept_name, d.muni_code, d.muni_name, tax.data_origin, now, id],
+    )?;
+    if n == 0 {
+        return Err(AppError::user("El proveedor no existe o fue eliminado."));
+    }
+    refresh_status(conn, id)
+}
+
+/// Crea (`id` = None) o actualiza un proveedor junto con sus datos tributarios, todo o nada. Devuelve su id.
+pub fn save_with_tax(conn: &mut Connection, id: Option<i64>, s: &SupplierInput, tax: &SupplierTaxInput) -> AppResult<i64> {
+    let tx = conn.transaction()?;
+    let id = match id {
+        Some(id) => {
+            update(&tx, id, s)?;
+            id
+        }
+        None => insert(&tx, s)?,
+    };
+    write_tax(&tx, id, tax)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Aplica datos tributarios a un proveedor existente sin tocar NIT, razón social ni Tipo IVA (por ejemplo, desde una factura).
+pub fn save_tax_data(conn: &mut Connection, id: i64, tax: &SupplierTaxInput) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    write_tax(&tx, id, tax)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Inserta un proveedor completo (restauración de backup), con sus reglas de retención.
 pub fn insert_full(conn: &Connection, s: &Supplier) -> AppResult<()> {
     conn.execute(
-        &format!("INSERT INTO suppliers ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
-        params![s.id, s.nit, s.business_name, s.vat_type, s.created_at, s.updated_at, s.person_type, s.fiscal_regime, s.fiscal_checked_at],
+        &format!("INSERT INTO suppliers ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"),
+        params![
+            s.id, s.nit, s.business_name, s.vat_type, s.created_at, s.updated_at, s.person_type, s.fiscal_regime, s.fiscal_checked_at, s.doc_type_code, s.dv, s.first_surname, s.second_surname, s.first_name,
+            s.other_names, s.address, s.country_code, s.country_name, s.dept_code, s.dept_name, s.muni_code, s.muni_name, s.data_origin, s.data_verified_at, s.data_status
+        ],
     )
     .map_err(|e| duplicate_nit(e, &s.nit))?;
     for r in &s.withholding_rules {
@@ -85,6 +162,7 @@ pub fn insert_full(conn: &Connection, s: &Supplier) -> AppResult<()> {
             params![r.id, s.id, r.rate_id, r.base_mode, r.is_default as i64, s.updated_at],
         )?;
     }
+    refresh_status(conn, s.id)?;
     Ok(())
 }
 
@@ -109,6 +187,7 @@ pub fn save_withholding_profile(conn: &mut Connection, id: i64, profile: &Withho
         return Err(AppError::user("El proveedor no existe o fue eliminado."));
     }
     replace_rules(&tx, id, profile, &now)?;
+    refresh_status(&tx, id)?;
     tx.commit()?;
     Ok(())
 }
@@ -123,6 +202,7 @@ pub fn insert_with_profile(conn: &mut Connection, s: &SupplierInput, profile: &W
         params![profile.person_type, fiscal_regime, now, id],
     )?;
     replace_rules(&tx, id, profile, &now)?;
+    refresh_status(&tx, id)?;
     tx.commit()?;
     Ok(id)
 }
@@ -155,7 +235,7 @@ pub fn update(conn: &Connection, id: i64, s: &SupplierInput) -> AppResult<()> {
     if n == 0 {
         return Err(AppError::user("El proveedor no existe o fue eliminado."));
     }
-    Ok(())
+    refresh_status(conn, id)
 }
 
 pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
@@ -309,5 +389,105 @@ mod tests {
         run_pending(&mut conn).unwrap();
         let bad = SupplierInput { nit: "1".into(), business_name: "A".into(), vat_type: Some("otro".into()) };
         assert!(insert(&conn, &bad).is_err());
+    }
+
+    fn tax(doc: &str, person: &str) -> SupplierTaxInput {
+        use crate::models::third_party::ThirdPartyData;
+        SupplierTaxInput {
+            data: ThirdPartyData {
+                doc_type_code: Some(doc.into()),
+                dv: "9".into(),
+                person_type: Some(person.into()),
+                address: "cl 77 b 57 103".into(),
+                country_code: "169".into(),
+                dept_code: "08".into(),
+                muni_code: "001".into(),
+                ..Default::default()
+            },
+            data_origin: "manual".into(),
+        }
+        .validated()
+        .unwrap()
+    }
+
+    #[test]
+    fn tax_data_resolves_territory_names_and_computes_status() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        let input = SupplierInput { nit: "901.741.186-9".into(), business_name: "GLOWING DIGITAL CLOUD S.A.S.".into(), vat_type: None }.validated().unwrap();
+        // Sin datos tributarios el proveedor existe, pero requiere datos (nada se inventa).
+        let id = insert(&conn, &input).unwrap();
+        assert_eq!(get(&conn, id).unwrap().data_status, "requiere_datos");
+        let id = save_with_tax(&mut conn, Some(id), &input, &tax("31", "PJ")).unwrap();
+        let s = get(&conn, id).unwrap();
+        assert_eq!((s.nit.as_str(), s.dv.as_str(), s.doc_type_code.as_deref(), s.person_type.as_deref()), ("901741186", "9", Some("31"), Some("PJ")));
+        assert_eq!((s.country_name.as_str(), s.dept_name.as_str(), s.muni_name.as_str()), ("COLOMBIA", "Atlántico", "Barranquilla"));
+        assert_eq!((s.dept_code.as_str(), s.muni_code.as_str(), s.address.as_str()), ("08", "001", "CL 77 B 57 103"), "ceros iniciales y mayúsculas");
+        assert_eq!(s.data_status, "completo");
+        assert!(s.data_verified_at.is_some() && s.data_origin == "manual");
+        // Pasarla a persona natural sin nombres vuelve a pedir datos, también desde Retención en la fuente.
+        save_withholding_profile(&mut conn, id, &WithholdingProfileInput { person_type: Some("PN".into()), rules: vec![] }).unwrap();
+        assert_eq!(get(&conn, id).unwrap().data_status, "requiere_datos");
+        save_withholding_profile(&mut conn, id, &WithholdingProfileInput { person_type: Some("PJ".into()), rules: vec![] }).unwrap();
+        assert_eq!(get(&conn, id).unwrap().data_status, "completo");
+    }
+
+    #[test]
+    fn invalid_territory_rolls_back_the_whole_supplier() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        let input = SupplierInput { nit: "900111222".into(), business_name: "X SAS".into(), vat_type: None }.validated().unwrap();
+        let mut bad = tax("31", "PJ");
+        bad.data.muni_code = "999".into();
+        assert!(save_with_tax(&mut conn, None, &input, &bad).is_err());
+        assert!(list(&conn, None).unwrap().is_empty(), "no queda un proveedor a medias");
+        let mut wrong_type = tax("31", "PJ");
+        wrong_type.data.doc_type_code = Some("77".into());
+        assert!(save_with_tax(&mut conn, None, &input, &wrong_type).is_err());
+    }
+
+    #[test]
+    fn natural_person_without_invoice_document_type_stays_pending_until_the_user_chooses() {
+        use crate::models::third_party::ThirdPartyData;
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        let input = SupplierInput { nit: "1192816998".into(), business_name: "ANGARITA LOPEZ RONALDO".into(), vat_type: None }.validated().unwrap();
+        let from_invoice = SupplierTaxInput {
+            data: ThirdPartyData { person_type: Some("PN".into()), first_surname: "angarita".into(), first_name: "ronaldo".into(), address: "cl 1".into(), country_code: "169".into(), dept_code: "76".into(), muni_code: "001".into(), ..Default::default() },
+            data_origin: "factura".into(),
+        }
+        .validated()
+        .unwrap();
+        let id = save_with_tax(&mut conn, None, &input, &from_invoice).unwrap();
+        let s = get(&conn, id).unwrap();
+        assert_eq!(s.doc_type_code, None, "no se inventa el 13");
+        assert_eq!(s.data_status, "requiere_datos");
+        assert!(s.third_party().missing_fields(&s.nit, &s.business_name).contains(&"Tipo de documento"));
+        let chosen = SupplierTaxInput { data: ThirdPartyData { doc_type_code: Some("13".into()), ..s.third_party() }, data_origin: "manual".into() }.validated().unwrap();
+        save_tax_data(&mut conn, id, &chosen).unwrap();
+        assert_eq!(get(&conn, id).unwrap().data_status, "completo");
+    }
+
+    #[test]
+    fn passports_keep_their_letters_and_other_documents_stay_numeric() {
+        let input = SupplierInput { nit: "ab-123 456".into(), business_name: "EXTRANJERO".into(), vat_type: None };
+        assert_eq!(input.clone().validated_for(Some("41")).unwrap().nit, "AB123456");
+        assert!(input.validated_for(Some("13")).is_err(), "una cédula solo lleva números");
+        let cc = SupplierInput { nit: "1.192.816.998".into(), business_name: "X".into(), vat_type: None };
+        assert_eq!(cc.validated_for(Some("13")).unwrap().nit, "1192816998");
+    }
+
+    #[test]
+    fn existing_suppliers_keep_id_nit_and_codes_after_tax_data_is_added() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        let input = SupplierInput { nit: "800197268".into(), business_name: "DIAN".into(), vat_type: Some("service".into()) };
+        let id = insert(&conn, &input).unwrap();
+        let record = |conn: &Connection| conn.query_row("SELECT id, nit FROM suppliers", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).unwrap();
+        let before = record(&conn);
+        save_tax_data(&mut conn, id, &tax("31", "PJ")).unwrap();
+        assert_eq!(record(&conn), before);
+        assert_eq!(get(&conn, id).unwrap().vat_type.as_deref(), Some("service"));
     }
 }

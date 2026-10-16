@@ -38,6 +38,11 @@ pub fn insert(conn: &Connection, company_id: i64, doc: &NewDocument, size_bytes:
     Ok(())
 }
 
+/// Un archivo está en uso si lo referencia una versión de la empresa o el RUT de un socio.
 pub fn is_referenced(conn: &Connection, stored_file: &str) -> AppResult<bool> {
-    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM company_documents WHERE stored_file = ?1)", [stored_file], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM company_documents WHERE stored_file = ?1) OR EXISTS(SELECT 1 FROM shareholder_documents WHERE stored_file = ?1)",
+        [stored_file],
+        |r| r.get(0),
+    )?)
 }

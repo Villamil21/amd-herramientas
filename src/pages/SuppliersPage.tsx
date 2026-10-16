@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { HandCoins, Pencil, Plus, Search, Store, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { HandCoins, IdCard, Pencil, Plus, Search, Store, Trash2 } from "lucide-react";
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Input, Loader, PageHeader, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
@@ -9,7 +9,10 @@ import { RETENTION_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier } from "../types/mo
 import { regimeCodes, SupplierFormModal } from "./suppliers/SupplierFormModal";
 import { SupplierWithholdingModal } from "./suppliers/SupplierWithholdingModal";
 
-export function SuppliersPage() {
+/** Un proveedor persona natural cuya factura no reveló el tipo de documento: el usuario debe elegirlo (no se supone el 13). */
+export const needsDocumentType = (s: Supplier) => (s.personType ?? null) === "PN" && !s.docTypeCode;
+
+export function SuppliersPage({ initialNit = "" }: { /** NIT que se quiere crear o buscar (viene de un pendiente de Exógena). */ initialNit?: string }) {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const query = useDebounced(search);
@@ -19,6 +22,20 @@ export function SuppliersPage() {
   const [withholding, setWithholding] = useState<Supplier | null>(null);
   const [deleting, setDeleting] = useState<Supplier | null>(null);
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<{ nit: string; businessName: string } | undefined>();
+
+  // Enlace desde un pendiente («Falta el proveedor DIAN»): abre la búsqueda y, si no existe, el formulario con el NIT puesto.
+  useEffect(() => {
+    if (!initialNit || !list.data) return;
+    const found = list.data.find((s) => s.nit === initialNit);
+    if (found) setEditing(found);
+    else {
+      setDraft({ nit: initialNit, businessName: "" });
+      setEditing(null);
+    }
+    // Solo al llegar con un NIT: después manda lo que haga el usuario.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialNit, list.data !== null]);
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -36,6 +53,7 @@ export function SuppliersPage() {
   }
 
   const suppliers = list.data ?? [];
+  const pendingDocumentType = suppliers.filter(needsDocumentType);
 
   return (
     <>
@@ -48,6 +66,20 @@ export function SuppliersPage() {
           </Button>
         }
       />
+      {pendingDocumentType.length > 0 && (
+        <Alert tone="warning" title="Tipo de documento pendiente">
+          <div className="stack stack--sm">
+            <span>Estas personas naturales no revelaron su tipo de documento en la factura. Elígelo en su ficha (no se supone): sin él no se pueden cerrar los formatos de Información Exógena.</span>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              {pendingDocumentType.map((s) => (
+                <Button key={s.id} size="sm" icon={<IdCard size={14} />} onClick={() => setEditing(s)}>
+                  {s.businessName} · {s.nit}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </Alert>
+      )}
       <Card
         flush
         title="Proveedores registrados"
@@ -81,6 +113,7 @@ export function SuppliersPage() {
                   <th>Razón social</th>
                   <th>Tipo IVA</th>
                   <th>PJ / PN</th>
+                  <th>Exógena</th>
                   <th>Régimen</th>
                   <th>Retención</th>
                   <th />
@@ -95,6 +128,9 @@ export function SuppliersPage() {
                       {s.vatType ? <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge> : <span className="muted">Sin configurar</span>}
                     </td>
                     <td>{s.personType ?? <span className="muted">—</span>}</td>
+                    <td>
+                      {s.dataStatus === "completo" ? <Badge tone="success">Completo</Badge> : needsDocumentType(s) ? <Badge tone="warning">Tipo de documento pendiente</Badge> : <Badge tone="warning">Requiere datos</Badge>}
+                    </td>
                     <td className="selectable">
                       {s.fiscalRegime ? (
                         <span className="regime-codes">
@@ -139,10 +175,15 @@ export function SuppliersPage() {
       <SupplierFormModal
         open={editing !== undefined}
         supplier={editing ?? null}
+        draft={editing === null ? draft : undefined}
         rates={rates.data ?? []}
-        onClose={() => setEditing(undefined)}
+        onClose={() => {
+          setEditing(undefined);
+          setDraft(undefined);
+        }}
         onSaved={() => {
           setEditing(undefined);
+          setDraft(undefined);
           void list.reload();
         }}
       />

@@ -8,6 +8,7 @@ import type { ModuleDef, SubmoduleDef } from "../types/modules";
 import { calculatorsModule } from "../modules/calculators";
 import { certificatesModule } from "../modules/certificates";
 import { dropiModule } from "../modules/dropi";
+import { exogenaModule } from "../modules/exogena";
 import { financialStatementsModule } from "../modules/financial-statements";
 import { regulatoryReportsModule } from "../modules/regulatory-reports";
 import { salesOrdersModule } from "../modules/sales-orders";
@@ -19,7 +20,7 @@ import { sortByName } from "../utils/text";
  * Extractos bancarios ya no es un módulo propio: vive en Estados Financieros → Extractos bancarios.
  * El orden del arreglo no importa: las tarjetas de Herramientas se muestran alfabéticamente.
  */
-export const MODULES: ModuleDef[] = sortByName([socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule, dropiModule, financialStatementsModule, calculatorsModule]);
+export const MODULES: ModuleDef[] = sortByName([socialSecurityModule, certificatesModule, salesOrdersModule, regulatoryReportsModule, taxesModule, dropiModule, financialStatementsModule, calculatorsModule, exogenaModule]);
 
 export function findModule(id: string | undefined) {
   return MODULES.find((m) => m.id === id);

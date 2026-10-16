@@ -47,6 +47,7 @@ export const paths = {
   /** Tabla de Autorretenciones filtrada por un código. */
   selfWithholdingCode: (code: string) => `/tabla-autorretenciones/${code}`,
   pucTable: "/tabla-puc",
+  exogenaCatalogs: "/catalogos-exogena",
   fsCatalog: "/catalogo-estados-financieros",
   minimumWages: "/smmlv",
   settings: "/configuracion",

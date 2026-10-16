@@ -21,6 +21,7 @@ import { SuppliersPage } from "../pages/SuppliersPage";
 import { WithholdingTablePage } from "../pages/WithholdingTablePage";
 import { SelfWithholdingTablePage } from "../pages/SelfWithholdingTablePage";
 import { PucTablePage } from "../pages/PucTablePage";
+import { ExogenaCatalogsPage } from "../pages/ExogenaCatalogsPage";
 import { FsCatalogPage } from "../pages/FsCatalogPage";
 import { MinimumWagesPage } from "../pages/MinimumWagesPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
@@ -74,13 +75,15 @@ function resolve(segments: string[]) {
     case "firmas":
       return { active: "signers", crumbs: [{ label: "Datos" }, { label: "Firmas" }], page: <SignersPage /> };
     case "proveedores":
-      return { active: "suppliers", crumbs: [{ label: "Datos" }, { label: "Proveedores" }], page: <SuppliersPage /> };
+      return { active: "suppliers", crumbs: [{ label: "Datos" }, { label: "Proveedores" }], page: <SuppliersPage initialNit={/^\d+$/.test(moduleId ?? "") ? moduleId : ""} /> };
     case "tabla-retenciones":
       return { active: "withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de retenciones" }], page: <WithholdingTablePage /> };
     case "tabla-autorretenciones":
       return { active: "self-withholding-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Autorretenciones" }], page: <SelfWithholdingTablePage initialSearch={moduleId ?? ""} /> };
     case "tabla-puc":
       return { active: "puc-table", crumbs: [{ label: "Datos" }, { label: "Tabla de Códigos PUC" }], page: <PucTablePage /> };
+    case "catalogos-exogena":
+      return { active: "exogena-catalogs", crumbs: [{ label: "Datos" }, { label: "Catálogos Exógena" }], page: <ExogenaCatalogsPage /> };
     case "catalogo-estados-financieros":
       return { active: "fs-catalog", crumbs: [{ label: "Datos" }, { label: "Catálogo de cuentas de Estados Financieros" }], page: <FsCatalogPage /> };
     case "smmlv":

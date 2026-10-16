@@ -46,11 +46,22 @@ export interface MiPlanillaTotals {
   grand?: SubsystemTotal;
 }
 
+/** Una administradora (EPS, AFP, ARL, CCF) de una sección «Totales …» con su valor ANTES de mora (el aporte liquidado). */
+export interface AdministratorRow {
+  code: string;
+  name: string;
+  nit: string;
+  dv: string;
+  contribution: number;
+}
+
 /** Suma de las filas de administradoras (EPS, AFP, ARL, CCF) de cada sección «Totales …». */
 export interface AdministratorSums {
   contribution?: number;
   toPay?: number;
   rows: number;
+  /** Cada administradora con NIT; vacío si la tabla no trae el nombre y el NIT. */
+  entities?: AdministratorRow[];
 }
 
 export interface MiPlanillaIssue {

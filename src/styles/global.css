@@ -4204,7 +4204,7 @@ body.is-reordering * {
 .shareholder-table__head,
 .shareholder-table__row {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) 90px 84px 32px;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) 90px minmax(0, 1.2fr) 96px 72px;
   gap: 8px;
   align-items: center;
 }
@@ -5463,4 +5463,27 @@ body.is-reordering * {
   .company-docs {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* Zona de peligro (Configuración): borde de advertencia para separarla del resto. */
+.card--danger {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.card--danger .card__header h2 {
+  color: var(--color-danger);
+}
+
+/* Revisión de un RUT importado: coincidencias en verde, conflictos en amarillo. */
+.table tr.row--ok td {
+  background: var(--color-success-soft);
+}
+
+.table tr.row--warning td {
+  background: var(--color-warning-soft);
+}
+
+.shareholder-table__row.is-clickable {
+  cursor: pointer;
 }

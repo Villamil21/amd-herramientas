@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::models::normalize;
 use crate::models::self_withholding::validate_ciiu;
+use crate::models::third_party::ThirdPartyData;
 
 pub const DOCUMENT_KINDS: [&str; 2] = ["rut", "camara"];
 pub const ROLE_PRINCIPAL: &str = "principal";
 pub const ROLE_ALTERNATE: &str = "alternate";
+/// Estado del RUT de un socio: sin importar, confirmado por el usuario, o con diferencias por resolver.
+pub const RUT_STATUSES: [&str; 3] = ["pendiente", "validado", "revisar"];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +66,47 @@ pub struct Shareholder {
     /// «principal» / «alternate» si este socio es el representante legal. Ausente en backups anteriores.
     #[serde(default)]
     pub legal_role: Option<String>,
+    /// Identificación, ubicación y tipo de persona del socio (alimentan el formato 1010 de Exógena).
+    #[serde(flatten)]
+    pub tax: ThirdPartyData,
+    #[serde(default)]
+    pub phone: String,
+    #[serde(default)]
+    pub email: String,
+    /// «pendiente», «validado» o «revisar».
+    #[serde(default = "default_rut_status")]
+    pub rut_status: String,
+    /// Historial del RUT del socio (más antiguo primero). Se llena al leer; no viaja en el backup.
+    #[serde(default)]
+    pub documents: Vec<CompanyDocument>,
+    /// RUT cargado en el formulario (ya copiado al almacenamiento) que se registra al guardar la empresa.
+    #[serde(default)]
+    pub new_documents: Vec<NewDocument>,
+}
+
+fn default_rut_status() -> String {
+    "pendiente".to_string()
+}
+
+#[cfg(test)]
+impl Shareholder {
+    /// Socio con solo los datos mínimos (los demás en blanco / pendientes).
+    pub fn basic(name: &str, identity_document: &str, percentage: f64, legal_role: Option<&str>) -> Self {
+        Shareholder {
+            id: None,
+            name: name.into(),
+            identity_document: identity_document.into(),
+            percentage,
+            sort_order: 0,
+            legal_role: legal_role.map(str::to_string),
+            tax: ThirdPartyData::default(),
+            phone: String::new(),
+            email: String::new(),
+            rut_status: default_rut_status(),
+            documents: Vec::new(),
+            new_documents: Vec::new(),
+        }
+    }
 }
 
 /// Una versión del RUT o de la Cámara de Comercio guardada en el almacenamiento de la app.
@@ -81,7 +125,7 @@ pub struct CompanyDocument {
 }
 
 /// Documento cargado en el formulario (ya copiado al almacenamiento) que se registra al guardar.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NewDocument {
     pub kind: String,
@@ -130,6 +174,45 @@ pub struct CompanyInput {
     /// Versiones nuevas del RUT / Cámara cargadas en esta edición.
     #[serde(default)]
     pub new_documents: Vec<NewDocument>,
+    /// Tamaño real de cada archivo nuevo (empresa y socios), que llena el comando antes de guardar.
+    #[serde(skip)]
+    pub document_sizes: std::collections::HashMap<String, i64>,
+}
+
+/// Normaliza a un socio: textos en mayúsculas, documento sin separadores, datos tributarios y contacto.
+fn normalize_shareholder(s: Shareholder, index: usize) -> AppResult<Shareholder> {
+    let tax = s.tax.normalized()?.without_inapplicable_names();
+    let mut name = normalize::upper_text(&s.name, 200);
+    if name.is_empty() && tax.person_type.as_deref() == Some("PN") {
+        // Persona natural: el nombre completo se arma con sus partes (apellidos primero, como en el RUT).
+        name = normalize::upper_text(&[tax.first_surname.as_str(), tax.second_surname.as_str(), tax.first_name.as_str(), tax.other_names.as_str()].join(" "), 200);
+    }
+    let email = s.email.trim().to_lowercase().chars().take(150).collect::<String>();
+    if !email.is_empty() && !(email.contains('@') && email.contains('.')) {
+        return Err(AppError::user(format!("El correo electrónico del socio «{name}» no es válido.")));
+    }
+    if !RUT_STATUSES.contains(&s.rut_status.as_str()) {
+        return Err(AppError::user("El estado del RUT del socio no es válido."));
+    }
+    for d in &s.new_documents {
+        if d.kind != "rut" {
+            return Err(AppError::user("El documento de un socio debe ser su RUT."));
+        }
+    }
+    Ok(Shareholder {
+        id: s.id,
+        name,
+        identity_document: normalize::document(&s.identity_document, 60),
+        percentage: s.percentage,
+        sort_order: index as i64,
+        legal_role: s.legal_role.filter(|r| !r.trim().is_empty()),
+        tax,
+        phone: normalize::phone(&s.phone, 60),
+        email,
+        rut_status: s.rut_status,
+        documents: Vec::new(),
+        new_documents: s.new_documents,
+    })
 }
 
 /// Tolerancia decimal para que los porcentajes sumen 100 (p. ej. 33,33 + 33,33 + 33,34).
@@ -166,21 +249,13 @@ impl CompanyInput {
             legal_rep_alt_document: normalize::document(&self.legal_rep_alt_document, 60),
             legal_rep_manual: self.legal_rep_manual,
             legal_rep_alt_manual: self.legal_rep_alt_manual,
-            shareholders: self
-                .shareholders
-                .into_iter()
-                .enumerate()
-                .map(|(i, s)| Shareholder {
-                    id: s.id,
-                    name: normalize::upper_text(&s.name, 200),
-                    identity_document: normalize::document(&s.identity_document, 60),
-                    percentage: s.percentage,
-                    sort_order: i as i64,
-                    legal_role: s.legal_role.filter(|r| !r.trim().is_empty()),
-                })
-                .collect(),
+            shareholders: Vec::new(),
             new_documents: self.new_documents,
+            document_sizes: self.document_sizes,
         };
+        for (i, s) in self.shareholders.into_iter().enumerate() {
+            v.shareholders.push(normalize_shareholder(s, i)?);
+        }
         if v.razon_social.is_empty() {
             return Err(AppError::user("La razón social es obligatoria."));
         }
@@ -218,6 +293,10 @@ impl CompanyInput {
         for s in &self.shareholders {
             if s.name.is_empty() || s.identity_document.is_empty() || !s.percentage.is_finite() || s.percentage <= 0.0 || s.percentage > 100.0 {
                 return Err(AppError::user("Cada accionista debe tener nombre, documento y porcentaje válido."));
+            }
+            // El porcentaje admite hasta dos decimales (50,20 %): más precisión no cabe en el formato 1010.
+            if ((s.percentage * 100.0) - (s.percentage * 100.0).round()).abs() > 1e-6 {
+                return Err(AppError::user(format!("La participación de «{}» admite hasta dos decimales.", s.name)));
             }
             if let Some(role) = &s.legal_role {
                 if role != ROLE_PRINCIPAL && role != ROLE_ALTERNATE {
@@ -290,7 +369,7 @@ mod tests {
     use super::*;
 
     fn shareholder(name: &str, doc: &str, pct: f64, role: Option<&str>) -> Shareholder {
-        Shareholder { id: None, name: name.into(), identity_document: doc.into(), percentage: pct, sort_order: 0, legal_role: role.map(str::to_string) }
+        Shareholder::basic(name, doc, pct, role)
     }
 
     fn input() -> CompanyInput {
@@ -317,6 +396,7 @@ mod tests {
             legal_rep_alt_manual: false,
             shareholders: vec![],
             new_documents: vec![],
+            document_sizes: Default::default(),
         }
     }
 

@@ -1,3 +1,4 @@
+import { IssuerReviewPanel } from "../../exogena/components/IssuerReviewPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, CalendarX2, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, ContextBar, MetricBar, PageHeader, useToast } from "../../../components/ui";
@@ -382,6 +383,9 @@ export default function PucCodesPage() {
             ]}
           />
 
+          {phase.status === "done" && suppliers && (
+            <IssuerReviewPanel invoices={phase.results.flatMap((r) => (r.kind === "parsed" ? [{ nit: r.doc.issuerNit, name: r.doc.issuerName, issuer: r.doc.issuer }] : []))} suppliers={suppliers} onApplied={loadSuppliers} />
+          )}
           <PendingPanel
             actions={actions}
             expanded={pendingExpanded}

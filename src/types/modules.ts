@@ -30,5 +30,7 @@ export interface ModuleDef {
   accent?: "blue" | "teal" | "violet" | "amber" | "rose" | "orange" | "green" | "indigo";
   /** "logo": logo + nombre (ej. selección de banco). "name": la misma tarjeta, solo con el nombre. */
   submoduleCards?: "logo" | "name";
+  /** Pantalla propia del módulo (en lugar de las tarjetas de sus submódulos), por ejemplo para elegir empresa y año antes. */
+  landing?: LazyExoticComponent<ComponentType>;
   submodules: SubmoduleDef[];
 }

@@ -100,6 +100,7 @@ export function parsePucDocument(doc: PdfDocumentText): ParsedPucDocument {
     issueDate: parseIssueDate(findField(documentRows, ISSUE_DATE_LABEL) ?? qrField(pages, "FecFac")),
     issuerNit: invoice.supplierNit,
     issuerName: invoice.supplierName,
+    issuer: invoice.issuer,
     buyerNit: buyer.nit ?? (qrField(pages, "NitAdq") ? normalizeNit(qrField(pages, "NitAdq")!) || undefined : undefined),
     buyerName: buyer.name,
     products,

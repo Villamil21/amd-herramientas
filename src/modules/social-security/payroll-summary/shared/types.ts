@@ -38,6 +38,23 @@ export interface PayrollDetailTotals {
   totalContribution?: number;
 }
 
+/** Tipo de administradora de seguridad social. */
+export type PaymentEntityType = "AFP" | "EPS" | "ARL" | "CCF" | "OTRO";
+
+/**
+ * Una administradora del «Resumen de pago» (a quién se le debe cada aporte). `liquidated` es SOLO el valor liquidado del
+ * aporte: los intereses de mora, los fondos de solidaridad / subsistencia y el «valor a pagar» no entran.
+ */
+export interface PaymentEntity {
+  type: PaymentEntityType;
+  name: string;
+  /** Código de la administradora en la planilla (EPS010, CCF07, 14-11…). */
+  code: string;
+  nit: string;
+  dv: string;
+  liquidated: number;
+}
+
 /** Fila TOTAL y subtotales por riesgo del «Resumen de pago». */
 export interface PaymentSummary {
   liquidated?: number;
@@ -45,6 +62,8 @@ export interface PaymentSummary {
   toPay?: number;
   /** Valor liquidado por riesgo: AFP, EPS, CCF, ARL… */
   liquidatedByRisk: Record<string, number>;
+  /** Administradoras con NIT y valor liquidado (vacío si la planilla no trae ese detalle). */
+  entities?: PaymentEntity[];
 }
 
 /** Texto dentro de la tabla que parecía un empleado pero no se pudo interpretar. */

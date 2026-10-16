@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { BadgePercent, BookOpenText, Building2, CalendarRange, Database, Download, LayoutGrid, ListTree, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
+import { BadgePercent, BookOpenText, Building2, CalendarRange, Database, Download, LayoutGrid, ListTree, MapPinned, PanelLeftClose, PanelLeftOpen, Percent, Settings, Store, UserRound } from "lucide-react";
 import { navigate, paths } from "../app/router";
 import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
@@ -42,6 +42,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = ([
     items: [
       { key: "withholding-table", label: "Tabla de retenciones", icon: Percent, path: paths.withholdingTable },
       { key: "self-withholding-table", label: "Tabla de Autorretenciones", icon: BadgePercent, path: paths.selfWithholdingTable },
+      { key: "exogena-catalogs", label: "Catálogos Exógena", icon: MapPinned, path: paths.exogenaCatalogs },
     ],
   },
   { title: "Sistema", items: [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }] },

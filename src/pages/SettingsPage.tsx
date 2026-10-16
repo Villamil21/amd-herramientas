@@ -4,6 +4,7 @@ import { useAsync } from "../hooks/useAsync";
 import { appService } from "../services/appService";
 import { AboutSection } from "./settings/AboutSection";
 import { BackupSection } from "./settings/BackupSection";
+import { DangerZoneSection } from "./settings/DangerZoneSection";
 
 export function SettingsPage() {
   const info = useAsync(() => Promise.all([appService.startupInfo(), appService.dataLocation()]), []);
@@ -26,6 +27,8 @@ export function SettingsPage() {
           </Button>
         </div>
       </Card>
+
+      <DangerZoneSection />
     </>
   );
 }

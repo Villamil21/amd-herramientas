@@ -1,3 +1,4 @@
+import { IssuerReviewPanel } from "../../exogena/components/IssuerReviewPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
 import { Alert, Button, Card, PageHeader, useToast } from "../../../components/ui";
@@ -320,6 +321,9 @@ export default function WithholdingPage() {
             <PeriodPanel period={report.period} onChoose={setPeriodChoice} />
           </div>
           <LotStatusIndicator actions={actions} />
+          {phase.status === "done" && (
+            <IssuerReviewPanel invoices={phase.results.flatMap((r) => (r.kind === "parsed" ? [{ nit: r.doc.supplierNit, name: r.doc.supplierName, issuer: r.doc.issuer }] : []))} suppliers={suppliers} onApplied={loadData} />
+          )}
           <PendingPanel
             actions={actions}
             expanded={pendingExpanded}

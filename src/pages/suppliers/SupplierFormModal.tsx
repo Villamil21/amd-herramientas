@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
-import { Alert, Button, Field, FormSection, Input, Modal, Select, useToast } from "../../components/ui";
+import { Alert, Badge, Button, Field, FormSection, Input, Modal, Select, useToast } from "../../components/ui";
+import { IdentityFields, LocationFields, type IdentityValue, type LocationValue } from "../../modules/exogena/components/ThirdPartyForm";
+import { useCatalogs } from "../../modules/exogena/hooks";
+import { COLOMBIA, DOC_NIT, documentNumber, missingFields, personName, thirdPartyOf } from "../../modules/exogena/domain/thirdParty";
 import { pucService } from "../../services/pucService";
 import { supplierService } from "../../services/supplierService";
 import { errorMessage } from "../../services/tauri";
 import { withholdingService } from "../../services/withholdingService";
-import { PERSON_TYPE_LABEL, VAT_TYPE_LABEL, type PersonType, type Supplier, type VatType, type WithholdingRate } from "../../types/models";
+import { PERSON_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier, type SupplierTaxInput, type VatType, type WithholdingRate } from "../../types/models";
 import { formatDateForDisplay } from "../../utils/dates";
+import { formatDateTimeForDisplay } from "../../utils/dates";
 import { completeRules, rulesFromSupplier, WithholdingRulesEditor, type RuleDraft } from "./WithholdingRulesEditor";
 
 interface Props {
@@ -17,7 +21,7 @@ interface Props {
    * el que la reconoce) y la razón social se puede corregir. Si el NIT ya está
    * registrado no se crea otro: se usa el existente.
    */
-  draft?: { nit: string; businessName: string };
+  draft?: { nit: string; businessName: string; /** Datos tributarios leídos de la factura (para revisar antes de guardar). */ tax?: Partial<IdentityValue & LocationValue>; origin?: SupplierTaxInput["dataOrigin"] };
   /** Subtipos de retención (Tabla de retenciones). */
   rates?: WithholdingRate[];
   onClose: () => void;
@@ -51,6 +55,12 @@ function toggleCode(regime: string, code: string): string {
   return (codes.includes(code) ? codes.filter((c) => c !== code) : [...codes, code]).join("; ");
 }
 
+const EMPTY_IDENTITY: IdentityValue = { personType: "", docTypeCode: "", docNumber: "", dv: "", firstSurname: "", secondSurname: "", firstName: "", otherNames: "", legalName: "" };
+const EMPTY_LOCATION: LocationValue = { address: "", countryCode: "", deptCode: "", muniCode: "" };
+
+/** Solo los campos de ubicación de unos datos tributarios parciales. */
+const pickLocation = (tax?: Partial<IdentityValue & LocationValue>): Partial<LocationValue> => (tax ? { address: tax.address ?? "", countryCode: tax.countryCode ?? "", deptCode: tax.deptCode ?? "", muniCode: tax.muniCode ?? "" } : {});
+
 /**
  * Proveedor completo. Nuevo: NIT, razón social y Tipo IVA. Existente:
  * Identificación, IVA, Clasificación fiscal, Retención e Historial de
@@ -58,10 +68,11 @@ function toggleCode(regime: string, code: string): string {
  */
 export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, onSaved }: Props) {
   const toast = useToast();
-  const [nit, setNit] = useState("");
   const [name, setName] = useState("");
   const [vatType, setVatType] = useState<VatType | "">("");
-  const [personType, setPersonType] = useState<PersonType | "">("");
+  const { catalogs } = useCatalogs();
+  const [identity, setIdentity] = useState<IdentityValue>(EMPTY_IDENTITY);
+  const [location, setLocation] = useState<LocationValue>(EMPTY_LOCATION);
   const [regime, setRegime] = useState("");
   const [rules, setRules] = useState<RuleDraft[]>([]);
   const [errors, setErrors] = useState<{ nit?: string; name?: string }>({});
@@ -70,10 +81,22 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
 
   useEffect(() => {
     if (!open) return;
-    setNit(supplier?.nit ?? draft?.nit ?? "");
     setName(supplier?.businessName ?? draft?.businessName ?? "");
     setVatType(supplier?.vatType ?? "");
-    setPersonType(supplier?.personType ?? "");
+    const t = thirdPartyOf(supplier ?? {});
+    setIdentity({
+      ...EMPTY_IDENTITY,
+      personType: t.personType ?? "",
+      docTypeCode: t.docTypeCode ?? "",
+      docNumber: supplier?.nit ?? draft?.nit ?? "",
+      dv: t.dv,
+      firstSurname: t.firstSurname,
+      secondSurname: t.secondSurname,
+      firstName: t.firstName,
+      otherNames: t.otherNames,
+      ...(supplier ? {} : draft?.tax),
+    });
+    setLocation({ address: t.address, countryCode: t.countryCode, deptCode: t.deptCode, muniCode: t.muniCode, ...(supplier ? {} : pickLocation(draft?.tax)) });
     setRegime(supplier?.fiscalRegime ?? "");
     setRules(rulesFromSupplier(supplier, rates));
     setErrors({});
@@ -82,11 +105,35 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, supplier]);
 
+  /** Datos tributarios tal como se guardan: el tipo de documento solo se define si el usuario (o la factura) lo trae. */
+  function taxInput(): SupplierTaxInput {
+    const legal = identity.personType === "PJ";
+    return {
+      data: {
+        docTypeCode: legal ? DOC_NIT : identity.docTypeCode || null,
+        dv: identity.docTypeCode === DOC_NIT || legal ? identity.dv : "",
+        personType: identity.personType || null,
+        firstSurname: legal ? "" : identity.firstSurname,
+        secondSurname: legal ? "" : identity.secondSurname,
+        firstName: legal ? "" : identity.firstName,
+        otherNames: legal ? "" : identity.otherNames,
+        address: location.address,
+        countryCode: location.countryCode,
+        deptCode: location.countryCode === COLOMBIA ? location.deptCode : "",
+        muniCode: location.countryCode === COLOMBIA ? location.muniCode : "",
+      },
+      dataOrigin: draft?.origin ?? "manual",
+    };
+  }
+
   async function save() {
     const errs: typeof errors = {};
-    const cleanNit = normalizeNit(nit);
-    if (!cleanNit) errs.nit = "Escribe el NIT (solo números, sin dígito de verificación).";
-    if (!name.trim()) errs.name = "La razón social es obligatoria.";
+    const docType = identity.personType === "PJ" ? DOC_NIT : identity.docTypeCode || null;
+    const cleanNit = docType && documentNumber(identity.docNumber, docType) ? documentNumber(identity.docNumber, docType) : normalizeNit(identity.docNumber);
+    // Una persona natural sin razón social toma su nombre completo de los apellidos y nombres.
+    const displayName = name.trim() || (identity.personType === "PN" ? personName(identity) : "");
+    if (!cleanNit) errs.nit = "Escribe el NIT o documento (solo números, sin dígito de verificación).";
+    if (!displayName) errs.name = "La razón social o el nombre es obligatorio.";
     setErrors(errs);
     if (Object.keys(errs).length) return;
     const checked = completeRules(rules);
@@ -94,19 +141,19 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
 
     setSaving(true);
     setError(null);
-    // NIT y razón social bastan: el Tipo IVA puede quedar sin configurar, nunca se inventa.
-    const input = { nit: cleanNit, businessName: name.trim(), vatType: vatType || null };
+    // NIT y razón social bastan: el Tipo IVA y los datos de Exógena pueden quedar sin configurar, nunca se inventan.
+    const input = { nit: cleanNit, businessName: displayName, vatType: vatType || null };
     try {
       if (supplier) {
-        await supplierService.update(supplier.id, input);
+        await supplierService.saveWithTax(supplier.id, input, taxInput());
         if (regime.trim() !== (supplier.fiscalRegime ?? "")) await withholdingService.setFiscalRegime(supplier.id, regime.trim());
         const before = JSON.stringify({ p: supplier.personType ?? null, r: completeRules(rulesFromSupplier(supplier, rates)).rules });
-        const after = JSON.stringify({ p: personType || null, r: checked.rules });
-        if (before !== after) await withholdingService.saveSupplierProfile(supplier.id, { personType: personType || null, rules: checked.rules });
+        const after = JSON.stringify({ p: identity.personType || null, r: checked.rules });
+        if (before !== after) await withholdingService.saveSupplierProfile(supplier.id, { personType: identity.personType || null, rules: checked.rules });
         toast("Proveedor actualizado.");
       } else {
         const existing = draft ? (await supplierService.list(cleanNit)).find((s) => s.nit === cleanNit) : undefined;
-        if (!existing) await supplierService.create(input);
+        if (!existing) await supplierService.saveWithTax(null, input, taxInput());
         toast(existing ? `El NIT ${cleanNit} ya estaba registrado: se usa el proveedor existente.` : "Proveedor creado.");
       }
       onSaved();
@@ -123,7 +170,7 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
   return (
     <Modal
       open={open}
-      size={supplier ? "xl" : undefined}
+      size="xl"
       title={supplier ? "Editar proveedor" : "Nuevo proveedor"}
       onClose={onClose}
       locked={saving}
@@ -146,13 +193,10 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
         }}
       >
         {error && <Alert tone="danger">{error}</Alert>}
-        <div className={supplier ? "supplier-form" : "stack"}>
-          <FormSection step={supplier ? 1 : undefined} title="Identificación" className="span-full">
-            <div className={`form-grid form-grid--compact${supplier ? " form-grid--3" : ""}`}>
-              <Field label="NIT" required hint="Sin dígito de verificación. Reconoce las facturas." error={errors.nit}>
-                {(id) => <Input id={id} value={nit} onChange={(e) => setNit(e.target.value)} invalid={!!errors.nit} placeholder="900319753" inputMode="numeric" autoFocus={!draft && !supplier} readOnly={!!draft} />}
-              </Field>
-              <Field label="Razón social" required error={errors.name}>
+        <div className="supplier-form">
+          <FormSection step={1} title="Identificación" className="span-full" hint="El NIT o documento reconoce las facturas del proveedor; los datos de persona y documento alimentan Información Exógena.">
+            <div className="form-grid form-grid--compact form-grid--3">
+              <Field label="Razón social o nombre" required error={errors.name} className="span-2">
                 {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} invalid={!!errors.name} placeholder="PRICESMART COLOMBIA S.A.S." autoFocus={!!draft} />}
               </Field>
               <Field label="Tipo IVA" hint="Opcional. IVA de compras lo pide cuando lo necesita.">
@@ -168,24 +212,27 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
                 )}
               </Field>
             </div>
+            <IdentityFields
+              value={identity}
+              onChange={(p) => setIdentity((v) => ({ ...v, ...p }))}
+              catalogs={catalogs}
+              errors={{ docNumber: errors.nit }}
+              numberLabel="NIT o documento"
+              numberHint="Sin puntos ni DV. Reconoce las facturas."
+              numberReadOnly={!!draft}
+              hideLegalName
+            />
+          </FormSection>
+
+          <FormSection step={2} title="Ubicación" className="span-full">
+            <LocationFields value={location} onChange={(p) => setLocation((v) => ({ ...v, ...p }))} catalogs={catalogs} />
+            <ExogenaStatus {...exogenaStatus(identity, location, name)} verifiedAt={supplier?.dataVerifiedAt} origin={supplier?.dataOrigin} />
           </FormSection>
 
           {supplier && (
             <>
-              <FormSection step={2} title="Datos fiscales" className="span-full">
+              <FormSection step={3} title="Datos fiscales" className="span-full">
                 <div className="form-grid form-grid--compact">
-                  <Field label="Tipo de persona">
-                    {(id) => (
-                      <Select id={id} value={personType} onChange={(e) => setPersonType(e.target.value as PersonType | "")}>
-                        <option value="">Sin configurar</option>
-                        {(Object.keys(PERSON_TYPE_LABEL) as PersonType[]).map((p) => (
-                          <option key={p} value={p}>
-                            {p} — {PERSON_TYPE_LABEL[p]}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
                   <Field label="Régimen / responsabilidades fiscales" hint="Como aparece en la factura. Usa los botones o escribe otros códigos.">
                     {(id) => <Input id={id} value={regime} onChange={(e) => setRegime(e.target.value)} placeholder="Sin verificar" />}
                   </Field>
@@ -200,15 +247,15 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
                 {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención).</Alert>}
               </FormSection>
 
-              <FormSection step={3} title="Retención" className="span-full" hint="Se reutiliza en cada factura del proveedor en Retención en la fuente compras.">
+              <FormSection step={4} title="Retención" className="span-full" hint="Se reutiliza en cada factura del proveedor en Retención en la fuente compras.">
                 <WithholdingRulesEditor rules={rules} onChange={setRules} rates={rates} />
               </FormSection>
 
-              <FormSection step={4} title="Códigos PUC utilizados" className="span-full" hint="Solo sugieren la clasificación de compras futuras; ninguna compra se clasifica sin tu confirmación.">
+              <FormSection step={5} title="Códigos PUC utilizados" className="span-full" hint="Solo sugieren la clasificación de compras futuras; ninguna compra se clasifica sin tu confirmación.">
                 <PucCodesSection supplierId={supplier.id} />
               </FormSection>
 
-              <FormSection step={5} title="Historial de decisiones" className="span-full">
+              <FormSection step={6} title="Historial de decisiones" className="span-full">
                 <DecisionHistory supplier={supplier} rates={rates} />
               </FormSection>
             </>
@@ -217,6 +264,44 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
         <button type="submit" hidden />
       </form>
     </Modal>
+  );
+}
+
+/** Qué falta para Información Exógena con lo que hay hoy en el formulario. */
+function exogenaStatus(identity: IdentityValue, location: LocationValue, name: string): { missing: string[] } {
+  const t = {
+    docTypeCode: identity.personType === "PJ" ? DOC_NIT : identity.docTypeCode || null,
+    dv: identity.dv,
+    personType: identity.personType || null,
+    firstSurname: identity.firstSurname,
+    secondSurname: identity.secondSurname,
+    firstName: identity.firstName,
+    otherNames: identity.otherNames,
+    address: location.address,
+    countryCode: location.countryCode,
+    countryName: "",
+    deptCode: location.deptCode,
+    deptName: "",
+    muniCode: location.muniCode,
+    muniName: "",
+  };
+  const number = documentNumber(identity.docNumber, t.docTypeCode) || identity.docNumber.replace(/\D/g, "");
+  return { missing: missingFields(t, number, name) };
+}
+
+function ExogenaStatus({ missing, verifiedAt, origin }: { missing: string[]; verifiedAt?: string | null; origin?: string }) {
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <strong>Datos para Exógena</strong>
+      {missing.length === 0 ? <Badge tone="success">Completo</Badge> : <Badge tone="warning">Requiere datos</Badge>}
+      {missing.length > 0 && <span className="muted">Falta: {missing.join(", ")}.</span>}
+      {verifiedAt && (
+        <span className="muted">
+          Verificado {formatDateTimeForDisplay(verifiedAt)}
+          {origin ? ` · origen: ${origin}` : ""}
+        </span>
+      )}
+    </div>
   );
 }
 

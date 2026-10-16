@@ -206,6 +206,10 @@ function paymentSummaryPage(emps: Emp[], interest: number, o: { liquidated?: num
     { text: "Solidaridad", x: 436.1, y: H - 8.2, width: 36.4, height: 7 },
     ...row("AFP (ADMINISTRADORAS: 1)", 449.2, sum((e) => e.pension), 0, sum((e) => e.pension)),
     ...row("PORVENIR", 436.5, sum((e) => e.pension), 0, sum((e) => e.pension)),
+    // Código, NIT con comas y DV de la administradora, cada uno bajo su encabezado.
+    t("230301", 150.1, 436.5, 6),
+    t("800,224,808", 190, 436.5, 6),
+    t("8", 229, 436.5, 6),
     ...row("ARL (ADMINISTRADORAS: 1)", 423.7, sum((e) => e.risk), 0, sum((e) => e.risk)),
     ...row("CCF (ADMINISTRADORAS: 1)", 410.9, sum((e) => e.ccf), 0, sum((e) => e.ccf)),
     ...row("EPS (ADMINISTRADORAS: 1)", 398.2, sum((e) => e.health), 0, sum((e) => e.health)),
@@ -525,5 +529,17 @@ describe("exportación", () => {
     expect(employees.rows[0]).toEqual(["CC 1192816998", "ANGARITA LOPEZ RONALDO", 30, 1_750_905, 280_200, 70_100, 70_100, 9_200, 429_600]);
     expect(employees.rows).toHaveLength(3);
     expect(suggestedPayrollExportName(s)).toBe("Resumen_Planilla_AportesEnLinea_2026-03");
+  });
+});
+
+describe("resumen de pago por administradora", () => {
+  it("lee nombre, código, NIT, DV y SOLO el valor liquidado de cada administradora, bajo el tipo de su grupo", () => {
+    const { entities } = parseAportesEnLinea(planilla(EMPS)).paymentSummary!;
+    expect(entities).toEqual([{ type: "AFP", name: "PORVENIR", code: "230301", nit: "800224808", dv: "8", liquidated: 831_300 }]);
+  });
+
+  it("los intereses de mora de la planilla no cambian el valor de la entidad", () => {
+    const withMora = parseAportesEnLinea(planilla(EMPS, { interest: 123_456 })).paymentSummary!;
+    expect(withMora.entities?.[0].liquidated).toBe(831_300);
   });
 });

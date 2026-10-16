@@ -1,3 +1,4 @@
+import type { IssuerData } from "../../taxes/invoice-vat/types";
 import type { TitleCategory } from "../../../types/models";
 
 /** Fila de «Detalles de Productos»: solo lo que usa este módulo. Valores en centavos. */
@@ -26,6 +27,8 @@ export interface ParsedPucDocument {
   /** Solo dígitos, sin dígito de verificación. */
   issuerNit: string;
   issuerName: string;
+  /** Tipo de contribuyente, dirección y ubicación del emisor (para prellenar su ficha de proveedor). */
+  issuer?: IssuerData;
   /** Adquiriente / comprador: identifica la empresa (por NIT, sin dígito de verificación). */
   buyerNit?: string;
   buyerName?: string;

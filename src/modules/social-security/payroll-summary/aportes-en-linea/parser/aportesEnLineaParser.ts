@@ -39,7 +39,7 @@ import { StatementError } from "../../../../bank-analysis/shared/types";
 import { center, joinWords, splitWords, type Word } from "../../../../bank-analysis/shared/pdf/rows";
 import type { PdfDocumentText, PdfPageText, PdfTextItem } from "../../../../bank-analysis/shared/pdf/pdfTypes";
 import { isPesoAmount, parsePesoAmount } from "../../shared/money";
-import type { PaymentSummary, PayrollDetailTotals, PayrollEmployee, PayrollIssue, PayrollSummary } from "../../shared/types";
+import type { PaymentEntity, PaymentEntityType, PaymentSummary, PayrollDetailTotals, PayrollEmployee, PayrollIssue, PayrollSummary } from "../../shared/types";
 
 export const MESSAGES = {
   format: "El archivo no coincide con el formato de Aportes en Línea soportado.",
@@ -495,6 +495,9 @@ function parseEmployee(raw: RawEmployee, layout: DetailLayout, issue: (text: str
 // ---------------------------------------------------------------------------
 
 const RISK_ROW = /^([A-Z]+) \(ADMINISTRADORAS/;
+const ENTITY_TYPES: Record<string, PaymentEntityType> = { AFP: "AFP", EPS: "EPS", ARL: "ARL", CCF: "CCF" };
+/** NIT de una administradora tal como lo escribe la planilla: «800,227,940» (con comas) o solo dígitos. */
+const ENTITY_NIT = /^(?:\d{1,3}(?:,\d{3})+|\d{6,12})$/;
 
 function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
   const title = findHeading(rows, HEADINGS.payment);
@@ -502,7 +505,8 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
   const header = rows.findIndex((r, i) => i > title && r.cells.some((c) => c.key === "VALOR LIQUIDADO") && r.cells.some((c) => c.key === "VALOR A PAGAR"));
   if (header < 0) return undefined;
   const headers = rows[header].cells;
-  const summary: PaymentSummary = { liquidatedByRisk: {} };
+  const summary: PaymentSummary = { liquidatedByRisk: {}, entities: [] };
+  let entityType: PaymentEntityType = "OTRO";
 
   for (let i = header + 1; i < rows.length; i++) {
     const row = rows[i];
@@ -510,7 +514,13 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
     const label = row.cells[0]?.key ?? "";
     const isTotal = label === "TOTAL";
     const risk = RISK_ROW.exec(label)?.[1];
-    if (!isTotal && !risk) continue; // administradoras individuales y rótulos de varias líneas
+    if (risk) entityType = ENTITY_TYPES[risk] ?? "OTRO";
+    if (!isTotal && !risk) {
+      // Administradoras individuales (y rótulos de varias líneas, que no traen NIT y se ignoran).
+      const entity = parseEntityRow(row, headers, entityType);
+      if (entity) summary.entities!.push(entity);
+      continue;
+    }
     const values = new Map<string, number>();
     for (const w of row.words) {
       const value = parsePesoAmount(w.text);
@@ -527,6 +537,25 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
     if (risk && liquidated !== undefined) summary.liquidatedByRisk[risk] = liquidated;
   }
   return summary;
+}
+
+/**
+ * Fila de una administradora: nombre | código | NIT | DV | afiliados | valor liquidado | intereses de mora | …
+ * Cada dato se toma de la columna de su encabezado; solo cuenta como administradora una fila con NIT, DV y valor liquidado.
+ */
+function parseEntityRow(row: Row, headers: Cell[], type: PaymentEntityType): PaymentEntity | undefined {
+  const byColumn = new Map<string, Word[]>();
+  for (const w of row.words) {
+    const column = nearest(headers, center(w), (h) => h.center)?.key;
+    if (column) byColumn.set(column, [...(byColumn.get(column) ?? []), w]);
+  }
+  const nit = byColumn.get("NIT")?.find((w) => ENTITY_NIT.test(w.text.trim()))?.text.trim();
+  const dv = byColumn.get("DV")?.find((w) => /^\d$/.test(w.text.trim()))?.text.trim();
+  const liquidated = (byColumn.get("VALOR LIQUIDADO") ?? []).map((w) => parsePesoAmount(w.text)).find((v) => v !== null);
+  const first = row.cells[0];
+  if (!nit || dv === undefined || liquidated === undefined || liquidated === null || !first) return undefined;
+  const code = (byColumn.get("CODIGO") ?? []).map((w) => w.text.trim()).join("");
+  return { type, name: first.item.text.replace(/\s+/g, " ").trim(), code, nit: nit.replace(/\D/g, ""), dv, liquidated };
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,11 @@ describe.skipIf(files.length === 0)("planilla Aportes en Línea real", () => {
       }
       for (const check of validation.checks) expect(check, check.detail).toMatchObject({ status: "ok" });
       expect(validation.validated).toBe(true);
+      // Las administradoras suman el valor liquidado de cada riesgo.
+      for (const [risk, total] of Object.entries(s.paymentSummary?.liquidatedByRisk ?? {})) {
+        const sum = (s.paymentSummary?.entities ?? []).filter((e) => e.type === risk).reduce((n, e) => n + e.liquidated, 0);
+        expect(sum, `administradoras de ${risk}`).toBe(total);
+      }
 
       if (s.period === "2026-01" && s.paymentAmount === 1_300_500) {
         const values = { pensionDays: 30, pensionIbc: 1_750_905, pensionContribution: 280_200, healthContribution: 70_100, ccfContribution: 70_100, riskContribution: 9_200, totalContribution: 429_600 };
@@ -89,6 +94,18 @@ describe.skipIf(files.length === 0)("planilla Aportes en Línea real", () => {
       // Caso 10: segunda página.
       expect(s.paymentSummary).toMatchObject({ liquidated: 1_676_000, lateInterest: 8_000, toPay: 1_684_000 });
       expect(s.paymentSummary?.liquidatedByRisk).toEqual({ AFP: 1_111_500, ARL: 36_500, CCF: 249_900, EPS: 278_100 });
+      // Resumen de pago por administradora: solo el valor liquidado (sin intereses de mora ni fondos adicionales).
+      expect(s.paymentSummary?.entities?.map((e) => [e.type, e.name, e.nit, e.dv, e.liquidated])).toEqual([
+        ["AFP", "COLFONDOS", "800227940", "6", 280_200],
+        ["AFP", "COLPENSIONES", "900336004", "7", 270_900],
+        ["AFP", "PORVENIR", "800224808", "8", 560_400],
+        ["ARL", "ARL SURA", "890903790", "5", 36_500],
+        ["CCF", "COMFAMILIAR ATLANTICO", "890101994", "9", 249_900],
+        ["EPS", "EPS SURA (ANTES SUSALUD)", "800088702", "2", 140_200],
+        ["EPS", "FAMISANAR", "830003564", "7", 67_800],
+        ["EPS", "FOSYGA RÉGIMEN DE EXCEPCIÓN", "901037916", "1", 70_100],
+      ]);
+      expect(s.paymentSummary?.entities?.find((e) => e.name === "COLFONDOS")?.code).toBe("231001");
     });
   }
 });

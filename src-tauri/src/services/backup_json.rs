@@ -141,6 +141,10 @@ pub struct BackupFile {
     /// Estados Financieros: tabla → filas. `None` en backups anteriores: se conserva la información actual.
     #[serde(default)]
     pub financial_statements: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
+    /// Información Exógena (estado y registros por formato, sincronizaciones) y catálogos Exógena con sus ajustes.
+    /// `None` en backups anteriores: se conserva la información actual. El RUT de los socios (PDF) no viaja en el backup.
+    #[serde(default)]
+    pub exogena: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -255,6 +259,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, documen
         supplier_puc_codes: Some(puc::list_all_supplier_codes(conn)?),
         minimum_wages: Some(minimum_wages::list(conn)?),
         financial_statements: Some(dump_financial_statements(conn)?),
+        exogena: Some(dump_tables(conn, EXO_TABLES)?),
     })
 }
 
@@ -303,9 +308,17 @@ const FS_TABLES: &[&str] = &[
 type FsDump = BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>;
 
 fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
+    dump_tables(conn, FS_TABLES)
+}
+
+/// Tablas de Información Exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso):
+/// los catálogos con sus ajustes, la auditoría de catálogos y el estado / registros / sincronizaciones por formato.
+const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_status", "exo_records", "exo_sync_runs"];
+
+fn dump_tables(conn: &Connection, tables: &[&str]) -> AppResult<FsDump> {
     use rusqlite::types::Value as Sql;
     let mut out = BTreeMap::new();
-    for table in FS_TABLES {
+    for table in tables {
         let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
         let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
         let rows = stmt
@@ -332,10 +345,20 @@ fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
 /// usan las columnas que existen en esta versión; las restricciones de SQLite
 /// validan cada fila.
 fn restore_financial_statements(tx: &Connection, data: &FsDump) -> AppResult<()> {
-    for table in FS_TABLES.iter().rev() {
+    restore_tables(tx, FS_TABLES, data, "La información de Estados Financieros del backup está dañada o incompleta.")?;
+    // Backup anterior a los pagos parciales: sus fechas de pago pasan a ser un pago por el saldo completo.
+    if !data.contains_key("fs_tax_payments") {
+        crate::database::tax::convert_legacy_payment_dates(tx)?;
+    }
+    Ok(())
+}
+
+/// Reemplaza el contenido de unas tablas por el del backup (solo columnas que existen en esta versión).
+fn restore_tables(tx: &Connection, tables: &[&str], data: &FsDump, damaged: &str) -> AppResult<()> {
+    for table in tables.iter().rev() {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     }
-    for table in FS_TABLES {
+    for table in tables {
         let Some(rows) = data.get(*table) else { continue };
         let columns: Vec<String> = tx.prepare(&format!("PRAGMA table_info({table})"))?.query_map([], |r| r.get(1))?.collect::<Result<_, _>>()?;
         for row in rows {
@@ -358,13 +381,9 @@ fn restore_financial_statements(tx: &Connection, data: &FsDump) -> AppResult<()>
             tx.execute(&format!("INSERT INTO {table} ({names}) VALUES ({marks})"), rusqlite::params_from_iter(values))
                 .map_err(|e| {
                     eprintln!("[backup] {table}: {e}");
-                    AppError::user("La información de Estados Financieros del backup está dañada o incompleta.")
+                    AppError::user(damaged)
                 })?;
         }
-    }
-    // Backup anterior a los pagos parciales: sus fechas de pago pasan a ser un pago por el saldo completo.
-    if !data.contains_key("fs_tax_payments") {
-        crate::database::tax::convert_legacy_payment_dates(tx)?;
     }
     Ok(())
 }
@@ -597,6 +616,7 @@ fn company_input(c: &Company) -> CompanyInput {
         legal_rep_alt_manual: c.legal_rep_alt_manual,
         shareholders,
         new_documents: Vec::new(),
+        document_sizes: Default::default(),
     }
 }
 
@@ -729,6 +749,8 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
         // Las empresas se reemplazan conservando su id: la información de Estados
         // Financieros que las referencia se revisa al final, no fila por fila.
         tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
+        // Un backup anterior a Exógena no la trae: se conserva la actual (borrar las empresas la borraría en cascada).
+        let kept_exogena = if file.exogena.is_none() { Some(dump_tables(&tx, EXO_TABLES)?) } else { None };
         tx.execute("DELETE FROM companies", [])?;
         tx.execute("DELETE FROM retention_concepts", [])?;
         let placeholders = INTERNAL_SETTINGS.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -836,6 +858,8 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                         fiscal_regime: s.fiscal_regime.clone(),
                         fiscal_checked_at: s.fiscal_checked_at.clone(),
                         withholding_rules: s.withholding_rules.clone(),
+                        // Datos tributarios de Exógena: el backup los trae tal cual (códigos con sus ceros).
+                        ..s.clone()
                     },
                 )?;
             }
@@ -1006,6 +1030,16 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                 crate::database::set_setting(&tx, k, v)?;
             }
         }
+        if let Some(data) = &file.exogena {
+            restore_tables(&tx, EXO_TABLES, data, "La información de Exógena del backup está dañada o incompleta.")?;
+        } else if let Some(mut data) = kept_exogena {
+            // Solo las empresas que el backup devuelve: la información de una empresa que ya no existe no puede conservarse.
+            let ids: Vec<i64> = file.companies.iter().map(|c| c.company.id).collect();
+            for rows in data.values_mut() {
+                rows.retain(|r| r.get("company_id").and_then(|v| v.as_i64()).map_or(true, |id| ids.contains(&id)));
+            }
+            restore_tables(&tx, EXO_TABLES, &data, "No se pudo conservar la información de Exógena.")?;
+        }
         if let Some(data) = &file.financial_statements {
             restore_financial_statements(&tx, data)?;
         }
@@ -1107,7 +1141,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
-        let shareholder = |name: &str, doc: &str, pct: f64, role: Option<&str>| Shareholder { id: None, name: name.into(), identity_document: doc.into(), percentage: pct, sort_order: 0, legal_role: role.map(str::to_string) };
+        let shareholder = |name: &str, doc: &str, pct: f64, role: Option<&str>| Shareholder::basic(name, doc, pct, role);
         let input = CompanyInput {
             razon_social: "Empresa Docs".into(),
             nit: "900.555.111".into(),
@@ -1131,6 +1165,7 @@ mod tests {
             legal_rep_alt_manual: false,
             shareholders: vec![shareholder("ana gómez", "cc 1.020", 60.0, Some("principal")), shareholder("luis ruiz", "cc 2.030", 40.0, Some("alternate"))],
             new_documents: vec![],
+            document_sizes: Default::default(),
         }
         .validated()
         .unwrap();
@@ -1221,6 +1256,7 @@ mod tests {
                 legal_rep_alt_manual: false,
                 shareholders: vec![],
                 new_documents: vec![],
+                document_sizes: Default::default(),
             },
         )
         .unwrap();
@@ -1431,5 +1467,63 @@ mod tests {
     #[test]
     fn rejects_foreign_json() {
         assert!(parse(br#"{"hello": 1}"#).is_err());
+    }
+
+    /// Información Exógena (estado, registros, sincronizaciones y ajustes de catálogos) sobrevive a exportar y restaurar,
+    /// y un backup anterior a Exógena no borra la que ya hay.
+    #[test]
+    fn exogena_survives_backup_and_old_backups_keep_it() {
+        use crate::database::exogena;
+        use crate::models::exogena::{ApplySyncInput, CatalogEntryInput, SyncProposal};
+        let dir = std::env::temp_dir().join(format!("amd-json-exo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x')", []).unwrap();
+        exogena::save_catalog_entry(&mut conn, &CatalogEntryInput { catalog: "document_types".into(), code: "99".into(), parent_code: String::new(), name: "Propio".into(), is_active: true }).unwrap();
+        let sync = ApplySyncInput {
+            company_id: 5,
+            year: 2025,
+            format_code: "1010".into(),
+            source: "empresas".into(),
+            proposals: vec![SyncProposal { source_key: "shareholder:1".into(), origin: "empresas".into(), origin_ref: String::new(), data: serde_json::json!({"name": "ANA", "address": "CL 1"}) }],
+            remove_missing: true,
+            source_fingerprint: Some("abc".into()),
+            overwrite_manual: vec![],
+            summary: serde_json::Value::Null,
+        };
+        exogena::apply_sync(&mut conn, &sync).unwrap();
+        let record = exogena::list_records(&conn, 5, 2025, "1010").unwrap()[0].id;
+        exogena::update_record(&mut conn, record, &serde_json::json!({"address": "CL 2 CORREGIDA"})).unwrap();
+        exogena::set_status(&conn, 5, 2025, "1010", "listo", "").unwrap();
+
+        let file = build(&conn, &dir, &dir, &dir, "1.40.0").unwrap();
+        let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert!(parsed.exogena.as_ref().unwrap().contains_key("exo_records"));
+
+        // Una base distinta recibe el backup completo.
+        let mut target = Connection::open_in_memory().unwrap();
+        target.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut target).unwrap();
+        restore(&mut target, &dir, &dir, &dir, &parsed).unwrap();
+        let restored = exogena::list_records(&target, 5, 2025, "1010").unwrap();
+        assert_eq!((restored.len(), restored[0].manual_fields.clone()), (1, vec!["address".to_string()]));
+        assert_eq!(restored[0].data["address"], "CL 2 CORREGIDA");
+        assert_eq!(exogena::list_status(&target, 5, 2025).unwrap()[0].status, "listo");
+        assert!(exogena::list_catalogs(&target).unwrap().document_types.iter().any(|t| t.code == "99" && !t.is_system));
+        assert_eq!(exogena::list_audit(&target, 10).unwrap().len(), 1);
+
+        // Un backup anterior a Exógena (sin esa sección) no borra la información que ya hay.
+        let older = BackupFile { exogena: None, ..parsed.clone() };
+        restore(&mut target, &dir, &dir, &dir, &older).unwrap();
+        assert_eq!(exogena::list_records(&target, 5, 2025, "1010").unwrap().len(), 1, "se conserva");
+        assert_eq!(exogena::list_status(&target, 5, 2025).unwrap()[0].status, "listo");
+        // Y si el backup anterior no trae esa empresa, su información de Exógena no puede conservarse (no se rompe la restauración).
+        let without_company = BackupFile { exogena: None, companies: vec![], ..parsed };
+        restore(&mut target, &dir, &dir, &dir, &without_company).unwrap();
+        assert!(exogena::list_records(&target, 5, 2025, "1010").unwrap().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

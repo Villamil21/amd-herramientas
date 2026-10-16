@@ -125,7 +125,7 @@ pub async fn save_pdf(
 }
 
 /// Nombre sugerido seguro con la extensión indicada (reutiliza la limpieza de PDF).
-fn sanitize_with_extension(name: &str, ext: &str) -> String {
+pub(crate) fn sanitize_with_extension(name: &str, ext: &str) -> String {
     let stem = name.trim().trim_end_matches(&format!(".{ext}")).trim_end_matches(&format!(".{}", ext.to_uppercase()));
     let pdf = sanitize_file_name(stem);
     format!("{}.{ext}", pdf.trim_end_matches(".pdf"))

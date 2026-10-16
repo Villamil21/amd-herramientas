@@ -225,7 +225,8 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
       periodStart: `${period}-01`,
       periodEnd: lastDayOfMonth(period),
       dedupeKey: operator.dedupeKey(summary),
-      metadata: { provider: operator.provider, period, paymentDate, employees: months.length, ...(summary.planillaId ? { planillaId: summary.planillaId } : {}) },
+      // `entities`: resumen de pago por administradora (valor liquidado, sin mora) para el 1009 de Información Exógena.
+      metadata: { provider: operator.provider, period, paymentDate, employees: months.length, ...(summary.planillaId ? { planillaId: summary.planillaId } : {}), ...(summary.entities.length ? { entities: summary.entities } : {}) },
       movements,
       payrollRows: months.map((m) => ({
         employeeId: m.employee!.id,

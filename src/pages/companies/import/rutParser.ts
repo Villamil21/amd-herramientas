@@ -40,7 +40,7 @@ const isBoxDigit = (item: PdfTextItem) => /^\d$/.test(item.text.trim());
 
 const sameRow = (a: PdfTextItem, b: PdfTextItem) => Math.abs(a.y - b.y) <= 2.5;
 
-interface ReadOptions {
+export interface ReadOptions {
   /** `digits` junta las casillas numéricas; `text` ignora los dígitos sueltos de códigos. */
   mode: "text" | "digits";
   /** Hasta dónde puede estar el valor debajo del rótulo (puntos del PDF). */
@@ -84,9 +84,9 @@ function valueOf(items: PdfTextItem[], label: PdfTextItem, options: ReadOptions)
   return options.mode === "digits" && beside.length ? join(beside) : undefined;
 }
 
-const pick = (items: PdfTextItem[], re: RegExp): PdfTextItem | undefined => items.find((i) => re.test(i.text));
+export const pick = (items: PdfTextItem[], re: RegExp): PdfTextItem | undefined => items.find((i) => re.test(i.text));
 
-function readField(items: PdfTextItem[], re: RegExp, options: ReadOptions): string | undefined {
+export function readField(items: PdfTextItem[], re: RegExp, options: ReadOptions): string | undefined {
   const label = pick(items, re);
   return label ? valueOf(items, label, options) : undefined;
 }

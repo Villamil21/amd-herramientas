@@ -46,6 +46,18 @@ export interface LineIssue {
   reason: string;
 }
 
+/** Datos del emisor que trae la factura («Datos del Emisor / Vendedor»), tal como están impresos. */
+export interface IssuerData {
+  /** «Persona Jurídica» → PJ, «Persona Natural» → PN. */
+  personType?: "PJ" | "PN";
+  address?: string;
+  country?: string;
+  department?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+}
+
 export interface ParsedInvoice {
   pageCount: number;
   /** Título tal como aparece (ej. «FACTURA ELECTRÓNICA DE VENTA»). */
@@ -54,6 +66,8 @@ export interface ParsedInvoice {
   /** Solo dígitos, sin dígito de verificación. */
   supplierNit: string;
   supplierName: string;
+  /** Tipo de contribuyente, dirección y ubicación del emisor (para prellenar su ficha de proveedor). */
+  issuer?: IssuerData;
   lines: InvoiceLine[];
   lineIssues: LineIssue[];
   /** Todas las filas de la tabla (interpretadas o no), para «Detalle de productos». */

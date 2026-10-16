@@ -32,6 +32,16 @@ describe.skipIf(files.length === 0)("planilla real de MiPlanilla", () => {
       const total = summary.employees.reduce((n, e) => n + cotizacionOf(e), 0);
       expect(total).toBe(summary.totals.grand?.contribution);
       expect(analysis.lateInterest).toBe((summary.totalToPay ?? 0) - total);
+      // Cada administradora con su NIT y su valor ANTES de mora: sumadas dan el total del subsistema.
+      for (const [sub, admin] of Object.entries(summary.administrators)) {
+        expect(admin?.entities?.length, `administradoras de ${sub}`).toBe(admin?.rows);
+        expect(admin?.entities?.reduce((n, e) => n + e.contribution, 0)).toBe(admin?.contribution);
+        for (const e of admin?.entities ?? []) {
+          expect(e.nit).toMatch(/^\d{5,12}$/);
+          expect(e.dv).toMatch(/^\d$/);
+          expect(e.name.length).toBeGreaterThan(2);
+        }
+      }
     });
   }
 });

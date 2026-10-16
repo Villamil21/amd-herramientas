@@ -65,6 +65,8 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/021_company_documents_and_legal_reps.sql"),
         rebuilds_tables: false,
     },
+    Migration { version: 22, name: "exogena_foundation", sql: include_str!("../../migrations/022_exogena_foundation.sql"), rebuilds_tables: false },
+    Migration { version: 23, name: "exogena_catalog_seed", sql: include_str!("../../migrations/023_exogena_catalog_seed.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
@@ -185,5 +187,54 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = 'ok_table'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(exists, 0, "la parte aplicada se revierte");
+    }
+
+    /// Un 76001 de cinco caracteres se descompone en departamento «76» + municipio «001»: el catálogo sembrado lo respeta
+    /// y todos los municipios apuntan a un departamento existente.
+    #[test]
+    fn exogena_catalogs_are_seeded_and_consistent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM exo_departments"), 33);
+        assert_eq!(count("SELECT COUNT(*) FROM exo_municipalities"), 1122);
+        assert!(count("SELECT COUNT(*) FROM exo_countries") > 200);
+        assert_eq!(count("SELECT COUNT(*) FROM exo_document_types WHERE is_system = 1"), 16);
+        for code in ["11", "12", "13", "14", "15", "21", "22", "31", "33", "41", "42", "43", "44", "46"] {
+            assert_eq!(conn.query_row("SELECT COUNT(*) FROM exo_document_types WHERE code = ?1", [code], |r| r.get::<_, i64>(0)).unwrap(), 1, "tipo {code}");
+        }
+        let cali: String = conn.query_row("SELECT name FROM exo_municipalities WHERE dept_code = '76' AND code = '001'", [], |r| r.get(0)).unwrap();
+        assert_eq!(cali, "Cali");
+        let colombia: String = conn.query_row("SELECT name FROM exo_countries WHERE code = '169'", [], |r| r.get(0)).unwrap();
+        assert_eq!(colombia, "COLOMBIA");
+        assert_eq!(count("SELECT COUNT(*) FROM exo_municipalities m LEFT JOIN exo_departments d ON d.code = m.dept_code WHERE d.code IS NULL"), 0);
+        assert!(conn.prepare("PRAGMA foreign_key_check").unwrap().query([]).unwrap().next().unwrap().is_none());
+    }
+
+    /// Los datos de proveedores y socios anteriores a la 022 se conservan tal cual; los campos nuevos quedan vacíos / pendientes.
+    #[test]
+    fn exogena_migration_keeps_existing_suppliers_and_shareholders() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 21) {
+            if m.rebuilds_tables {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+            }
+            ensure_migrations_table(&conn).unwrap();
+            apply(&mut conn, m).unwrap();
+        }
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute("INSERT INTO suppliers (id, nit, business_name, vat_type, created_at, updated_at) VALUES (7, '900319753', 'PRICESMART', 'purchase', 'x', 'x')", []).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (1, 'E', '1', 'x', 'x')", []).unwrap();
+        conn.execute("INSERT INTO shareholders (id, company_id, name, identity_document, percentage, sort_order, created_at, updated_at) VALUES (3, 1, 'ANA', 'CC 1020', 100, 0, 'x', 'x')", []).unwrap();
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string()]);
+        let (id, nit, status, dv): (i64, String, String, String) = conn
+            .query_row("SELECT id, nit, data_status, dv FROM suppliers", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap();
+        assert_eq!((id, nit.as_str(), status.as_str(), dv.as_str()), (7, "900319753", "requiere_datos", ""));
+        let (sid, doc, rut): (i64, String, String) = conn
+            .query_row("SELECT id, identity_document, rut_status FROM shareholders", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        assert_eq!((sid, doc.as_str(), rut.as_str()), (3, "CC 1020", "pendiente"));
     }
 }

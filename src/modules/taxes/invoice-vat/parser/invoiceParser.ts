@@ -2,7 +2,7 @@ import type { PdfDocumentText } from "../../../bank-analysis/shared/pdf/pdfTypes
 import { buildRows, center, joinWords, type TextRow, type Word } from "../../../bank-analysis/shared/pdf/rows";
 import { normalizeKey } from "../../../../utils/text";
 import { productRowKey, readProductDescriptions } from "../../withholding/parser/productTable";
-import type { InvoiceLine, LineIssue, ParsedInvoice, ProductLine } from "../types";
+import type { InvoiceLine, IssuerData, LineIssue, ParsedInvoice, ProductLine } from "../types";
 import { isCopAmount, parseCopAmount, parseDotDecimal, parseRate } from "./amounts";
 
 /**
@@ -78,6 +78,32 @@ export function findField(rows: TextRow[], label: RegExp): string | undefined {
     }
   }
   return undefined;
+}
+
+const CONTRIBUTOR_LABEL = /^tipo de contribuyente\s*:/i;
+const ADDRESS_LABEL = /^direcci[oó]n\s*:/i;
+const COUNTRY_LABEL = /^pa[ií]s\s*:/i;
+const DEPARTMENT_LABEL = /^departamento\s*:/i;
+const CITY_LABEL = /^municipio\s*\/\s*ciudad\s*:/i;
+const PHONE_LABEL = /^tel[eé]fono(\s*\/\s*m[oó]vil)?\s*:/i;
+const EMAIL_LABEL = /^correo\s*:/i;
+
+/**
+ * Datos del tercero que trae la sección «Datos del Emisor / Vendedor»: tipo de contribuyente, dirección y ubicación. Solo lo
+ * que el PDF dice con claridad; lo que no aparece queda sin definir (nunca se supone).
+ */
+export function readIssuerData(issuer: TextRow[]): IssuerData {
+  const clean = (v: string | undefined) => v?.replace(/\s+/g, " ").trim() || undefined;
+  const contributor = normalizeKey(findField(issuer, CONTRIBUTOR_LABEL) ?? "");
+  return {
+    personType: /juridica/.test(contributor) ? "PJ" : /natural/.test(contributor) ? "PN" : undefined,
+    address: clean(findField(issuer, ADDRESS_LABEL)),
+    country: clean(findField(issuer, COUNTRY_LABEL)),
+    department: clean(findField(issuer, DEPARTMENT_LABEL)),
+    city: clean(findField(issuer, CITY_LABEL)),
+    phone: clean(findField(issuer, PHONE_LABEL)?.replace(/\|/g, "")),
+    email: clean(findField(issuer, EMAIL_LABEL))?.toLowerCase(),
+  };
 }
 
 /** "900.319.753-1" → "900319753". */
@@ -391,6 +417,7 @@ export function parseInvoice(doc: PdfDocumentText): ParsedInvoice {
     invoiceNumber: invoiceNumber || undefined,
     supplierNit,
     supplierName,
+    issuer: readIssuerData(issuer),
     lines: table.lines,
     lineIssues: table.issues,
     products: table.products,

@@ -1,4 +1,5 @@
 import type { PdfDocumentText } from "../../bank-analysis/shared/pdf/pdfTypes";
+import type { PlanillaEntity } from "../../exogena/domain/planillaEntities";
 import type { PlanillaEmployee } from "./calc";
 
 /** Lo que el flujo de Nómina necesita de una planilla, venga del operador que venga. Importes en pesos enteros. */
@@ -17,6 +18,11 @@ export interface PlanillaView {
   employerNit?: string;
   /** Identificador de la planilla en el operador (para distinguir planillas del mismo período). */
   planillaId?: string;
+  /**
+   * Resumen de pago por entidad (AFP, EPS, ARL, CCF): a quién se le debe cada aporte, con su valor liquidado. Se guarda con
+   * el lote para Información Exógena; vacío si la planilla no lo trae o no cuadra con sus totales.
+   */
+  entities: PlanillaEntity[];
 }
 
 /**

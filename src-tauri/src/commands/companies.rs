@@ -19,18 +19,21 @@ fn check_logo(state: &AppState, input: &CompanyInput) -> AppResult<()> {
     Ok(())
 }
 
-/// Cada versión nueva debe existir ya en el almacenamiento de la app (la cargó `pick_company_document`).
-fn check_new_documents(state: &AppState, input: &CompanyInput) -> AppResult<Vec<u64>> {
-    input
-        .new_documents
-        .iter()
-        .map(|d| {
-            let path = storage::path_for(&state.paths.company_documents_dir, &d.stored_file)?;
-            std::fs::metadata(&path)
-                .map(|m| m.len())
-                .map_err(|_| crate::error::AppError::user(format!("No se encontró el archivo de «{}». Vuelve a cargarlo.", d.file_name)))
-        })
-        .collect()
+/// Cada versión nueva (de la empresa o del RUT de un socio) debe existir ya en el almacenamiento de la app (la cargó
+/// `pick_company_document`). Devuelve el tamaño de las de la empresa, en orden, y deja el de todas en `input.document_sizes`.
+fn check_new_documents(state: &AppState, input: &mut CompanyInput) -> AppResult<Vec<u64>> {
+    let size_of = |d: &crate::models::company::NewDocument| -> AppResult<u64> {
+        let path = storage::path_for(&state.paths.company_documents_dir, &d.stored_file)?;
+        std::fs::metadata(&path)
+            .map(|m| m.len())
+            .map_err(|_| crate::error::AppError::user(format!("No se encontró el archivo de «{}». Vuelve a cargarlo.", d.file_name)))
+    };
+    let company_sizes = input.new_documents.iter().map(size_of).collect::<AppResult<Vec<u64>>>()?;
+    for doc in input.shareholders.iter().flat_map(|s| s.new_documents.iter()) {
+        let size = size_of(doc)?;
+        input.document_sizes.insert(doc.stored_file.clone(), size as i64);
+    }
+    Ok(company_sizes)
 }
 
 fn register_documents(c: &rusqlite::Connection, company_id: i64, input: &CompanyInput, sizes: &[u64]) -> AppResult<()> {
@@ -47,9 +50,9 @@ pub fn list_companies(db: State<'_, Db>, search: Option<String>) -> AppResult<Ve
 
 #[tauri::command]
 pub fn create_company(db: State<'_, Db>, state: State<'_, AppState>, input: CompanyInput) -> AppResult<Company> {
-    let input = input.validated()?;
+    let mut input = input.validated()?;
     check_logo(&state, &input)?;
-    let sizes = check_new_documents(&state, &input)?;
+    let sizes = check_new_documents(&state, &mut input)?;
     db.with(|c| {
         let tx = c.transaction()?;
         let id = companies::insert(&tx, &input)?;
@@ -61,9 +64,9 @@ pub fn create_company(db: State<'_, Db>, state: State<'_, AppState>, input: Comp
 
 #[tauri::command]
 pub fn update_company(db: State<'_, Db>, state: State<'_, AppState>, id: i64, input: CompanyInput) -> AppResult<Company> {
-    let input = input.validated()?;
+    let mut input = input.validated()?;
     check_logo(&state, &input)?;
-    let sizes = check_new_documents(&state, &input)?;
+    let sizes = check_new_documents(&state, &mut input)?;
     db.with(|c| {
         let before = companies::get(c, id)?;
         let tx = c.transaction()?;
@@ -81,9 +84,13 @@ pub fn update_company(db: State<'_, Db>, state: State<'_, AppState>, id: i64, in
 pub fn delete_company(db: State<'_, Db>, state: State<'_, AppState>, id: i64) -> AppResult<()> {
     db.with(|c| {
         let company = companies::get(c, id)?;
+        let shareholder_files = crate::database::shareholder_documents::stored_files_for_company(c, id)?;
         companies::delete(c, id)?;
         for d in &company.documents {
             storage::remove(&state.paths.company_documents_dir, &d.stored_file);
+        }
+        for file in &shareholder_files {
+            storage::remove(&state.paths.company_documents_dir, file);
         }
         if let Some(logo) = company.logo_file {
             logos::remove(&state.paths.logos_dir, &logo);

@@ -12,6 +12,7 @@ import { INVOICES_ANCHOR, InvoicesTable, type InvoiceFilter } from "./components
 import { InvoiceStats } from "./components/InvoiceStats";
 import { NameMismatchPanel } from "./components/NameMismatchPanel";
 import { TaxSection } from "../shared/TaxSection";
+import { IssuerReviewPanel } from "../../exogena/components/IssuerReviewPanel";
 import { LotStatusIndicator, PendingPanel, pendingItemId } from "./components/PendingPanel";
 import { TitleMappingsModal } from "./components/TitleMappingsModal";
 import { VatSummary } from "./components/VatSummary";
@@ -273,6 +274,9 @@ export default function InvoiceVatPage() {
         <>
           <TaxSection letter="C" title="Estado y pendientes">
           <LotStatusIndicator actions={actions} />
+          {phase.status === "done" && (
+            <IssuerReviewPanel invoices={phase.results.flatMap((r) => (r.kind === "parsed" ? [{ nit: r.invoice.supplierNit, name: r.invoice.supplierName, issuer: r.invoice.issuer }] : []))} suppliers={suppliers} onApplied={loadData} />
+          )}
           <PendingPanel
             actions={actions}
             expanded={pendingExpanded}

@@ -147,7 +147,7 @@ function readAdministrators(band: PdfTextItem[], subsystem: Subsystem): Administ
   const headers = band.filter((i) => !isMoney(i));
   const contributionHeader = headers.filter((i) => CONTRIBUTION_HEADER[subsystem].test(i.text.trim())).sort((a, b) => a.x - b.x)[0];
   const payHeader = headers.filter((i) => /^Total a Pagar$/i.test(i.text.trim())).sort((a, b) => a.x - b.x)[0];
-  const sums: AdministratorSums = { rows: 0 };
+  const sums: AdministratorSums = { rows: 0, entities: [] };
   if (!contributionHeader) return sums;
   for (const row of rowsOf(band)) {
     // Fila de administradora: un código a la izquierda y varias cifras a la derecha.
@@ -158,6 +158,16 @@ function readAdministrators(band: PdfTextItem[], subsystem: Subsystem): Administ
     if (!contribution) continue;
     sums.rows += 1;
     sums.contribution = (sums.contribution ?? 0) + toPesos(contribution.text);
+    // Nombre y NIT («800251440-6») de la administradora: solo su valor antes de mora, sin intereses ni «total a pagar».
+    const nitItem = row.items.find((i) => /^\d{5,12}-\d$/.test(i.text.trim()));
+    if (nitItem) {
+      const name = row.items
+        .filter((i) => i !== code && i !== nitItem && i.x > code.x + 2 && i.x < nitItem.x - 1 && !isMoney(i))
+        .map((i) => i.text.trim())
+        .join(" ");
+      const [nit, dv] = nitItem.text.trim().split("-");
+      sums.entities!.push({ code: code.text.trim(), name: name.replace(/\s+/g, " ").trim(), nit, dv, contribution: toPesos(contribution.text) });
+    }
     const pay = payHeader ? nearest(values, cx(payHeader), 14) : undefined;
     if (pay) sums.toPay = (sums.toPay ?? 0) + toPesos(pay.text);
   }

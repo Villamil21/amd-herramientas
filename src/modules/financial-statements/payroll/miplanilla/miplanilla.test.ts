@@ -36,8 +36,18 @@ describe("parser de MiPlanilla", () => {
     expect(summary.totals.subsystems.ccf?.contribution).toBe(197_200);
     expect(summary.totals.parafiscales.sena?.contribution).toBe(0);
     expect(summary.totals.grand).toMatchObject({ contribution: 1_275_700, toPay: 1_280_100 });
-    expect(summary.administrators.health).toEqual({ rows: 2, contribution: 210_300, toPay: 211_100 });
+    expect(summary.administrators.health).toMatchObject({ rows: 2, contribution: 210_300, toPay: 211_100 });
     expect(summary.administrators.risk?.rows).toBe(1);
+  });
+
+  it("cada administradora trae nombre, NIT, DV y su valor ANTES de mora (el «total a pagar» no entra)", () => {
+    expect(summary.administrators.health?.entities).toEqual([
+      { code: "ADM00", name: "Administradora", nit: "890000000", dv: "1", contribution: 140_200 },
+      { code: "ADM01", name: "Administradora", nit: "890000000", dv: "1", contribution: 70_100 },
+    ]);
+    // Pensión: 560.400 + 280.200 antes de mora; los 562.200 y 281.100 son valores a pagar con mora y no se usan.
+    expect(summary.administrators.pension?.entities?.map((e) => e.contribution)).toEqual([560_400, 280_200]);
+    expect(summary.administrators.pension?.entities?.reduce((n, e) => n + e.contribution, 0)).toBe(summary.totals.subsystems.pension?.contribution);
   });
 
   it("separa SENA, ICBF, ESAP y MEN por empleado", () => {

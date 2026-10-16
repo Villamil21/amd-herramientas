@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ImagePlus, Plus, Trash2 } from "lucide-react";
+import { ImagePlus, Trash2 } from "lucide-react";
 import { Alert, Badge, Button, Field, FormSection, Input, Modal, Select, Textarea, useToast } from "../../components/ui";
 import { taxService } from "../../modules/financial-statements/tax-obligations/services/taxService";
 import type { VatPeriodicity } from "../../modules/financial-statements/tax-obligations/types";
@@ -10,6 +10,7 @@ import { CamaraRepWarnings, CompanyDocumentsSection } from "./import/CompanyDocu
 import { SOURCE_LABEL, type ImportField } from "./import/importPlan";
 import { assignRole, selectedRep } from "./import/legalReps";
 import { useCompanyImport } from "./import/useCompanyImport";
+import { ShareholdersSection } from "./ShareholdersSection";
 import { capitalTotal, normalizeDocument, normalizePhone, splitNitAndDv, sumsTo100, totalPercent, upperText } from "./normalize";
 
 const EMPTY: CompanyInput = {
@@ -44,6 +45,8 @@ function validate(v: CompanyInput): Errors {
   const people = v.shareholders;
   if (people.some((s) => !s.name.trim() || !s.identityDocument.trim() || !(s.percentage > 0) || s.percentage > 100)) {
     e.shareholders = "Cada accionista necesita nombre, documento y un porcentaje mayor que 0 y hasta 100.";
+  } else if (people.some((s) => Math.abs(s.percentage * 100 - Math.round(s.percentage * 100)) > 1e-6)) {
+    e.shareholders = "La participación admite hasta dos decimales (por ejemplo 50,20).";
   } else if (people.length && !sumsTo100(people)) {
     e.shareholders = `La participación debe sumar exactamente 100 % (hoy suma ${totalPercent(people)} %).`;
   }
@@ -97,8 +100,6 @@ export function CompanyFormModal({ open, company, initial, onClose, onSaved }: P
   const subscribedTotal = capitalTotal(values.subscribedTotalShares, values.subscribedNominalValue);
   const paidTotal = capitalTotal(values.paidTotalShares, values.paidNominalValue);
   const capitalGap = (subscribedTotal ?? 0) - (paidTotal ?? 0);
-  const totalPct = totalPercent(values.shareholders);
-  const shareholdersOk = values.shareholders.length === 0 || sumsTo100(values.shareholders);
 
   const set = (key: keyof CompanyInput) => (e: { target: { value: string } }) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
@@ -131,6 +132,8 @@ export function CompanyFormModal({ open, company, initial, onClose, onSaved }: P
 
   async function close() {
     await imports.discardPending();
+    // El RUT de un socio cargado y aún sin guardar tampoco debe quedar huérfano al cancelar.
+    await Promise.allSettled(values.shareholders.flatMap((s) => (s.newDocuments ?? []).map((d) => companyService.discardDocument(d.storedFile))));
     onClose();
   }
 
@@ -318,47 +321,7 @@ export function CompanyFormModal({ open, company, initial, onClose, onSaved }: P
             })}
           </div>
           {capitalGap > 0 && <div className="field__hint">Por pagar (132505 — A socios): {cop(capitalGap)}</div>}
-          <div className="row row--between">
-            <strong className="form-section__subtitle">Socios / accionistas</strong>
-            <Button size="sm" variant="secondary" icon={<Plus size={14} />} onClick={() => updateShareholders((list) => [...list, { name: "", identityDocument: "", percentage: list.length === 0 ? 100 : 0, sortOrder: list.length, legalRole: null }])}>
-              Agregar socio
-            </Button>
-          </div>
-          {values.shareholders.length === 0 ? (
-            <span className="muted">Sin socios registrados.</span>
-          ) : (
-            <div className="shareholder-table">
-              <div className="shareholder-table__head">
-                <span>Nombre</span>
-                <span>Documento</span>
-                <span className="num">%</span>
-                <span>Cargo</span>
-                <span />
-              </div>
-              {values.shareholders.map((s, index) => {
-                const update = (patch: Partial<typeof s>) => updateShareholders((list) => list.map((x, i) => (i === index ? { ...x, ...patch } : x)));
-                return (
-                  <div className="shareholder-table__row" key={index}>
-                    <Input aria-label={`Nombre del accionista ${index + 1}`} value={s.name} onChange={(e) => update({ name: e.target.value })} />
-                    <Input aria-label={`Documento del accionista ${index + 1}`} value={s.identityDocument} onChange={(e) => update({ identityDocument: e.target.value })} />
-                    <Input aria-label={`Porcentaje del accionista ${index + 1}`} className="input--right" type="number" step="any" value={s.percentage || ""} onChange={(e) => update({ percentage: Number(e.target.value) })} />
-                    <span>{s.legalRole ? <Badge tone="gold">{s.legalRole === "principal" ? "Rep. legal" : "Suplente"}</Badge> : null}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      iconOnly
-                      icon={<Trash2 size={14} />}
-                      aria-label={`Quitar accionista ${index + 1}`}
-                      onClick={() => updateShareholders((list) => list.filter((_, i) => i !== index))}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className={`field__hint ${errors.shareholders || (values.shareholders.length > 0 && !shareholdersOk) ? "text-danger" : ""}`}>
-            {errors.shareholders ?? `Participación total: ${totalPct} %. Debe sumar exactamente 100 % para guardar.`}
-          </div>
+          <ShareholdersSection values={values} company={company} update={updateShareholders} error={errors.shareholders} />
         </FormSection>
 
         <FormSection step={4} title="Representación legal" hint="El principal firma los Estados Financieros como «Representante Legal». El suplente es opcional y no lo reemplaza automáticamente. Se eligen entre los socios para no duplicar nombre y documento.">

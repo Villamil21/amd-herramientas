@@ -7,6 +7,8 @@ export interface ProductTable {
 }
 
 /** Datos de una factura o nota leídos del PDF. Valores en centavos. */
+import type { IssuerData } from "../invoice-vat/types";
+
 export interface ParsedDocument {
   pageCount: number;
   /** Título tal como aparece (ej. «FACTURA ELECTRÓNICA DE VENTA»). */
@@ -19,6 +21,8 @@ export interface ParsedDocument {
   supplierName: string;
   /** «Tipo de Contribuyente» del emisor (ej. «Persona Jurídica»). */
   taxpayerType?: string;
+  /** Dirección y ubicación del emisor (para prellenar su ficha de proveedor). */
+  issuer?: IssuerData;
   /** Campos de régimen / responsabilidad del emisor, como texto para mostrar. */
   fiscalText?: string;
   /** Códigos tributarios del emisor (R-99-PN, O-13, O-15…), sin repetir y ordenados. */

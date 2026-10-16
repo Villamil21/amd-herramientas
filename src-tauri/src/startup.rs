@@ -86,7 +86,7 @@ fn init_inner(paths: &AppPaths, current_version: &str, info: &mut StartupInfo) -
 
     // Lo mismo para documentos (RUT / Cámara) cargados en formularios que se cancelaron.
     let documents: Vec<String> = conn
-        .prepare("SELECT stored_file FROM company_documents")?
+        .prepare("SELECT stored_file FROM company_documents UNION SELECT stored_file FROM shareholder_documents")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     crate::services::company_documents::remove_orphans(&paths.company_documents_dir, &documents);

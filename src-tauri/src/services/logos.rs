@@ -84,6 +84,15 @@ pub fn path_for(logos_dir: &Path, name: &str) -> AppResult<PathBuf> {
     Ok(logos_dir.join(name))
 }
 
+/// Bytes del logo (para incrustarlo en un Excel). `None` si el archivo ya no existe.
+pub fn read_bytes(logos_dir: &Path, name: &str) -> AppResult<Option<Vec<u8>>> {
+    let path = path_for(logos_dir, name)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(std::fs::read(&path)?))
+}
+
 pub fn read_data_url(logos_dir: &Path, name: &str) -> AppResult<Option<String>> {
     let path = path_for(logos_dir, name)?;
     if !path.exists() {
