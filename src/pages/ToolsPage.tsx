@@ -1,4 +1,4 @@
-import { MODULES } from "../app/modules";
+import { isAvailable, MODULES } from "../app/modules";
 import { navigate, paths } from "../app/router";
 import { ModuleCard } from "../components/ModuleCard";
 
@@ -13,7 +13,7 @@ export function ToolsPage() {
       </header>
       <div className="module-grid">
         {modules.map((m) => (
-          <ModuleCard key={m.id} title={m.name} description={m.description} icon={m.icon} accent={m.accent} onOpen={() => navigate(paths.module(m.id))} />
+          <ModuleCard key={m.id} title={m.name} icon={m.icon} accent={m.accent} available={m.submodules.some(isAvailable)} onOpen={() => navigate(paths.module(m.id))} />
         ))}
       </div>
     </>

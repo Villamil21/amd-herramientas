@@ -46,7 +46,7 @@ export default function IndependentContributionsPage() {
         eyebrow="Calculadoras"
         title="Calculadora de aportes para Independientes"
         actions={
-          <Button variant="ghost" icon={<Eraser size={15} />} onClick={clear}>
+          <Button icon={<Eraser size={15} />} onClick={clear}>
             Limpiar
           </Button>
         }
@@ -85,23 +85,40 @@ export default function IndependentContributionsPage() {
               </Alert>
             </div>
           ) : (
-            <dl className="calc__ibc">
-              <div>
-                <dt>40 % de los ingresos</dt>
-                <dd>{formatCalcPesos(ibc.status === "ok" ? ibc.fortyPercentPesos : 0)}</dd>
+            <div className="calc__ibc">
+              <div className="calc__formula">
+                IBC = máximo entre <strong>40 % del ingreso</strong> y <strong>SMMLV {year}</strong>
               </div>
-              <div>
-                <dt>SMMLV {year}</dt>
-                <dd>{formatCalcPesos(wage.valuePesos)}</dd>
+              <div className="calc__ibc-options">
+                <div className={`calc__ibc-option${ibc.status === "ok" && !ibc.usesMinimumWage ? " is-used" : ""}`}>
+                  <span>40 % de los ingresos</span>
+                  <strong>{formatCalcPesos(ibc.status === "ok" ? ibc.fortyPercentPesos : 0)}</strong>
+                  {ibc.status === "ok" && !ibc.usesMinimumWage && <em>Se usa: es mayor que el SMMLV</em>}
+                </div>
+                <span className="calc__ibc-vs" aria-hidden>
+                  vs.
+                </span>
+                <div className={`calc__ibc-option${ibc.status === "ok" && ibc.usesMinimumWage ? " is-used" : ""}`}>
+                  <span>SMMLV {year}</span>
+                  <strong>{formatCalcPesos(wage.valuePesos)}</strong>
+                  {ibc.status === "ok" && ibc.usesMinimumWage && <em>Se usa: el 40 % es menor</em>}
+                </div>
+                <span className="calc__ibc-vs" aria-hidden>
+                  =
+                </span>
+                <div className="calc__ibc-option calc__ibc-option--result">
+                  <span>IBC</span>
+                  <strong>{formatCalcPesos(ibc.status === "ok" ? ibc.ibcPesos : 0)}</strong>
+                </div>
               </div>
-              <div className="calc__ibc-total">
-                <dt>
-                  Ingreso base cotización (IBC)
-                  {ibc.status === "ok" && <span className="muted">{ibc.usesMinimumWage ? "Se usa el SMMLV: el 40 % de los ingresos es menor." : "Se usa el 40 % de los ingresos."}</span>}
-                </dt>
-                <dd>{formatCalcPesos(ibc.status === "ok" ? ibc.ibcPesos : 0)}</dd>
-              </div>
-            </dl>
+              <p className="calc__ibc-why">
+                {ibc.status !== "ok"
+                  ? "Escribe los ingresos para calcular el IBC."
+                  : ibc.usesMinimumWage
+                    ? "Se usa el SMMLV porque el 40 % de los ingresos es menor."
+                    : "Se usa el 40 % de los ingresos porque supera el SMMLV."}
+              </p>
+            </div>
           )}
 
           <ContributionsTable lines={INDEPENDENT_LINES} selection={selection} onSelect={(line, option) => setSelection((s) => ({ ...s, [line]: option }))} result={result} />

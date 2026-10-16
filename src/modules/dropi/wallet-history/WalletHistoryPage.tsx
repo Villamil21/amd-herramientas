@@ -14,7 +14,7 @@ import { WithdrawalsTable, type WithdrawalFilter } from "./components/Withdrawal
 import { analyzeWallet } from "./services/analysis";
 import { exportWalletExcel } from "./services/excelExport";
 import { readWalletWorkbook } from "./services/workbookReader";
-import { WalletHistoryError, type AnalyzedMovement, type Incident, type ReadResult } from "./types";
+import { WalletHistoryError, type AnalyzedMovement, type Incident, type ManualEdit, type ReadResult } from "./types";
 
 const LABELS = { pick: "Seleccionar Excel", pickAnother: "Seleccionar otro Excel", analyzing: "Leyendo historial…" };
 
@@ -38,7 +38,7 @@ export default function WalletHistoryPage() {
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<WithdrawalFilter>("all");
   /** Valor pagado editado a mano por fila de Excel (solo esta sesión; el MONTO original no cambia). */
-  const [manual, setManual] = useState<ReadonlyMap<number, number>>(new Map());
+  const [manual, setManual] = useState<ReadonlyMap<number, ManualEdit>>(new Map());
   const tableRef = useRef<HTMLDivElement>(null);
   const busy = picking || state.status === "analyzing";
 
@@ -76,11 +76,16 @@ export default function WalletHistoryPage() {
   const loaded = state.status === "done" ? state.analysis : undefined;
   const file = loaded?.kind === "ok" ? loaded.file : undefined;
   const analysis = useMemo(() => (file ? analyzeWallet(file.movements, { checkType: file.hasType, manual }) : undefined), [file, manual]);
+  /** Edición manual con trazabilidad: guarda los valores que había antes y la fecha/hora. */
   const editPaid = (rowNumber: number, paidCents: number | null) =>
     setManual((prev) => {
       const next = new Map(prev);
-      if (paidCents === null) next.delete(rowNumber);
-      else next.set(rowNumber, paidCents);
+      if (paidCents === null) {
+        next.delete(rowNumber);
+        return next;
+      }
+      const current = analysis?.movements.find((m) => m.rowNumber === rowNumber);
+      next.set(rowNumber, { paidCents, previousPaidCents: current?.paidCents ?? null, previousGmfCents: current?.gmfCents ?? null, editedAt: new Date().toISOString() });
       return next;
     });
   /** El archivo puede no traer ningún retiro de saldo: los demás conceptos se ignoran. */
@@ -140,6 +145,7 @@ export default function WalletHistoryPage() {
               <span>Hoja «{file.sheetName}»</span>
               <span>· {plural(file.movements.length, "1 movimiento", "# movimientos")}</span>
               {file.period && <span>· {file.period}</span>}
+              {file.ignoredSheets.length > 0 && <span>· No usadas: {file.ignoredSheets.join(", ")}</span>}
             </>
           )
         }
@@ -164,16 +170,6 @@ export default function WalletHistoryPage() {
 
       {file && analysis && (
         <>
-          <Card title="Archivo" description={file.sheetReason}>
-            <div className="summary-grid">
-              <Info label="Archivo seleccionado" value={file.fileName} />
-              <Info label="Hoja utilizada" value={file.sheetName} />
-              <Info label="Movimientos" value={formatInteger(file.movements.length)} />
-              <Info label="Periodo (columna FECHA)" value={file.period ?? "—"} />
-              <Info label="Otras hojas (no usadas)" value={file.ignoredSheets.join(", ") || "—"} />
-            </div>
-          </Card>
-
           {!hasWithdrawals && <Alert tone="info">No se encontraron retiros de saldo en cartera en este archivo.</Alert>}
         </>
       )}
@@ -200,16 +196,21 @@ function WalletBand({ analysis, filter, onReview, onValidated }: { analysis: Ret
   return (
     <div className="wallet-band">
       <div className="stat-row">
-        <Stat label="Retiros" value={formatInteger(t.count)} onClick={onValidated} active={filter === "validated"} title="Ver solo los retiros validados" />
+        <Stat label="Retiros encontrados" value={formatInteger(t.count)} onClick={onValidated} active={filter === "validated"} title="Ver solo los retiros validados" />
         <Stat label="Valor pagado" value={formatCop(t.paidCents)} />
-        <Stat label="4x1000" value={formatCop(t.gmfCents)} />
+        <Stat label="Cargo 4x1000 / GMF" value={formatCop(t.gmfCents)} />
         <Stat label="Total retirado" value={formatCop(t.amountCents)} />
         {analysis.review.count > 0 && <Stat label="Por revisar" value={formatInteger(analysis.review.count)} tone="negative" onClick={onReview} active={filter === "review"} title="Ver solo los retiros que requieren revisión (no se suman)" />}
       </div>
-      <div className={`wallet-band__check ${reconciled ? "is-ok" : "is-bad"}`}>
-        {reconciled ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
-        Valor pagado + 4x1000 = Total retirado: {formatCop(t.paidCents)} + {formatCop(t.gmfCents)} = {formatCop(t.paidCents + t.gmfCents)}
-        {analysis.review.count > 0 && <span className="muted"> · Por revisar (no incluido): {formatCop(analysis.review.amountCents)}</span>}
+      <div className={`wallet-band__check ${reconciled ? "is-ok" : "is-bad"}`} role="status">
+        {reconciled ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+        <strong>{reconciled ? "Conciliado" : "Requiere revisión"}</strong>
+        <span>
+          Valor pagado + Cargo = Total retirado: {formatCop(t.paidCents)} + {formatCop(t.gmfCents)} = {formatCop(t.paidCents + t.gmfCents)}
+        </span>
+        {!reconciled && <span>Diferencia: {formatCop(t.paidCents + t.gmfCents - t.amountCents)}</span>}
+        <span className="wallet-band__note">{reconciled ? (analysis.review.count === 0 ? `Los ${formatInteger(t.count)} retiros quedaron conciliados.` : "Conciliado sin los retiros por revisar.") : "El MONTO original no se modifica."}</span>
+        {analysis.review.count > 0 && <span className="wallet-band__note">Por revisar (no incluido): {formatCop(analysis.review.amountCents)}</span>}
       </div>
     </div>
   );
@@ -234,11 +235,6 @@ function Alerts({
 
   return (
     <>
-      {analysis.review.count === 0 && (
-        <Alert tone="success" title="Archivo validado">
-          {plural(analysis.totals.count, "El retiro de saldo en cartera encontrado quedó validado.", "Los # retiros de saldo en cartera encontrados quedaron validados.")}
-        </Alert>
-      )}
       {c.type > 0 && (
         <Alert
           tone="warning"
@@ -267,20 +263,11 @@ function Alerts({
           title={plural(c.gmf_review, "1 retiro requiere revisar el 4x1000.", "# retiros requieren revisar el 4x1000.")}
           items={firstOf(gmf.map((m) => describe(m, `fila ${m.rowNumber}`)))}
         >
-          Ningún valor pagado entero produce ese MONTO con la regla de Dropi (MONTO = valor pagado / 0,996). Despliega la fila y escribe el valor pagado: el 4x1000 es la diferencia con el MONTO.
+          No se pudo identificar una base cerrada para ese MONTO. Despliega la fila y escribe el valor pagado: el cargo 4x1000 / GMF es la diferencia con el MONTO original, que no cambia.
           {filterButton("gmf_review")}
         </Alert>
       )}
       {!hasId && <Alert tone="info">El archivo no trae la columna ID: no fue posible detectar movimientos duplicados.</Alert>}
     </>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="summary-item">
-      <span className="summary-item__label">{label}</span>
-      <span className="summary-item__value selectable">{value}</span>
-    </div>
   );
 }

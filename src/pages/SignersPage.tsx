@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
-import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
+import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, FormSection, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { signerService } from "../services/signerService";
 import { SIGNER_FS_ROLE_LABEL, signerFsRole, type CertificateSigner, type CertificateSignerInput, type SignerFsRole } from "../types/models";
@@ -67,27 +67,34 @@ export function SignersPage() {
   return <>
     <PageHeader eyebrow="Datos" title="Firmas" description="Firmantes reutilizables para certificados y Estados Financieros." actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => open(null)}>Nueva firma</Button>} />
     <Card flush title="Firmas registradas">
-      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firma</th><th>Firmante</th><th>Cargo</th><th>Rol EEFF</th><th>Documento profesional</th><th>Documento de identidad</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><SignatureThumb signer={s} /></td><td><span className="table__primary">{s.name}</span>{!s.signatureAvailable && <> <Badge tone="warning">Firma faltante</Badge></>}</td><td>{s.role}</td><td><Badge tone={ROLE_TONE[signerFsRole(s)]}>{SIGNER_FS_ROLE_LABEL[signerFsRole(s)]}</Badge></td><td>{s.professionalDocument}</td><td>{s.personalDocument || "—"}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en los certificados." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
+      {list.loading && !list.data ? <Loader /> : list.data?.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Firma</th><th>Firmante</th><th>Estado</th><th>Cargo</th><th>Rol EEFF</th><th>Documento profesional</th><th>Documento de identidad</th><th /></tr></thead><tbody>{list.data.map(s => <tr key={s.id} className="is-clickable" onClick={() => open(s)}><td><SignatureThumb signer={s} /></td><td><span className="table__primary">{s.name}</span></td><td>{s.signatureAvailable ? <Badge tone="success">Firma cargada</Badge> : <Badge tone="danger">Sin firma</Badge>}</td><td>{s.role}</td><td><Badge tone={ROLE_TONE[signerFsRole(s)]}>{SIGNER_FS_ROLE_LABEL[signerFsRole(s)]}</Badge></td><td>{s.professionalDocument}</td><td>{s.personalDocument || "—"}</td><td className="actions" onClick={e => e.stopPropagation()}><Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => open(s)} /><Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setRemoving(s)} /></td></tr>)}</tbody></table></div> : <EmptyState title="Aún no hay firmas" description="Crea un firmante para usarlo en los certificados." action={<Button variant="primary" onClick={() => open(null)}>Nueva firma</Button>} />}
     </Card>
-    <Modal open={editing !== undefined} title={editing ? "Editar firma" : "Nueva firma"} onClose={() => setEditing(undefined)} locked={busy} footer={<><Button variant="ghost" onClick={() => setEditing(undefined)}>Cancelar</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Guardar</Button></>}>
+    <Modal open={editing !== undefined} size="lg" title={editing ? "Editar firma" : "Nueva firma"} onClose={() => setEditing(undefined)} locked={busy} footer={<><Button variant="ghost" onClick={() => setEditing(undefined)}>Cancelar</Button><Button variant="primary" loading={busy} onClick={() => void save()}>Guardar</Button></>}>
       <div className="stack">
         {error && <Alert tone="danger">{error}</Alert>}
-        <div className="stack stack--sm">
-          {status === "ok" && preview ? <>
-            <div className="field__label">{editing && !changed ? "Firma actual" : "Vista previa de la firma"}</div>
-            <div style={signatureBox}><img src={preview} alt="Firma" style={{ maxHeight: 90, maxWidth: "100%", objectFit: "contain" }} /></div>
-          </> : status === "loading" ? <div style={signatureBox}><Loader /></div> : <>
-            {status === "missing" && <Alert tone="warning">Firma no disponible. La imagen de firma guardada ya no está disponible; vuelve a cargarla.</Alert>}
-            {status === "none" && <div className="field__hint">No hay firma cargada.</div>}
-          </>}
-          <div className="row"><Button icon={<ImagePlus size={14} />} loading={picking} disabled={status === "loading"} onClick={() => void pick()}>{status === "ok" ? "Cambiar firma PNG" : "Cargar firma PNG"}</Button></div>
-          <span className="field__hint">PNG, máximo 5 MB. Se conserva tal cual, con su transparencia.</span>
+        <div className="signer-form">
+          <FormSection step={1} title="Firma" className="signer-form__signature">
+            {status === "ok" && preview ? <div style={signatureBox}><img src={preview} alt="Firma" style={{ maxHeight: 90, maxWidth: "100%", objectFit: "contain" }} /></div>
+              : status === "loading" ? <div style={signatureBox}><Loader /></div>
+              : <div style={{ ...signatureBox, color: "var(--color-muted)" }}>{status === "missing" ? "La imagen guardada ya no está disponible" : "Sin firma"}</div>}
+            {status === "missing" && <Alert tone="warning">Vuelve a cargar la firma PNG.</Alert>}
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span className="field__hint">{editing && !changed && status === "ok" ? "Firma actual · " : ""}PNG, máximo 5 MB, con transparencia.</span>
+              <Button size="sm" icon={<ImagePlus size={14} />} loading={picking} disabled={status === "loading"} onClick={() => void pick()}>{status === "ok" ? "Cambiar" : "Cargar firma PNG"}</Button>
+            </div>
+          </FormSection>
+          <FormSection step={2} title="Identificación">
+            <Field label="Nombre" required>{id => <Input id={id} value={values.name} onChange={e => setValues(v => ({ ...v, name: e.target.value }))} />}</Field>
+            <Field label="Documento de identidad" hint="Opcional. Aparece bajo la firma del certificado de ingresos.">{id => <Input id={id} value={values.personalDocument} onChange={e => setValues(v => ({ ...v, personalDocument: e.target.value }))} placeholder="CC 1192729629" />}</Field>
+          </FormSection>
+          <FormSection step={3} title="Información profesional">
+            <Field label="Cargo" required>{id => <Input id={id} value={values.role} onChange={e => setValues(v => ({ ...v, role: e.target.value }))} />}</Field>
+            <Field label="Documento profesional" required hint="Ej. TP-290048">{id => <Input id={id} value={values.professionalDocument} onChange={e => setValues(v => ({ ...v, professionalDocument: e.target.value }))} />}</Field>
+          </FormSection>
+          <FormSection step={4} title="Uso en Estados Financieros" className="signer-form__signature" hint="No se deduce del nombre. Sin definir, la firma no se puede usar en el PDF de Estados Financieros.">
+            <Field label="Se muestra como">{id => <Select id={id} value={signerFsRole(values)} onChange={e => setValues(v => ({ ...v, ...roleFields(e.target.value as SignerFsRole) }))}><option value="pending">Sin definir (Pendiente EEFF)</option><option value="Contador Público">Contador Público</option><option value="Contadora Pública">Contadora Pública</option><option value="excluded">No usar como contador en EEFF</option></Select>}</Field>
+          </FormSection>
         </div>
-        <Field label="Nombre" required>{id => <Input id={id} value={values.name} onChange={e => setValues(v => ({ ...v, name: e.target.value }))} />}</Field>
-        <Field label="Cargo" required>{id => <Input id={id} value={values.role} onChange={e => setValues(v => ({ ...v, role: e.target.value }))} />}</Field>
-        <Field label="Documento profesional" required hint="Ej. TP-290048">{id => <Input id={id} value={values.professionalDocument} onChange={e => setValues(v => ({ ...v, professionalDocument: e.target.value }))} />}</Field>
-        <Field label="Documento de identidad" hint="Opcional. Ej. CC 1192729629. Aparece bajo la firma del certificado de ingresos.">{id => <Input id={id} value={values.personalDocument} onChange={e => setValues(v => ({ ...v, personalDocument: e.target.value }))} />}</Field>
-        <Field label="En Estados Financieros se muestra como" hint="Para firmar como contador en los Estados Financieros. No se deduce del nombre; mientras esté «Sin definir» la firma no se puede usar en el PDF.">{id => <Select id={id} value={signerFsRole(values)} onChange={e => setValues(v => ({ ...v, ...roleFields(e.target.value as SignerFsRole) }))}><option value="pending">Sin definir (Pendiente EEFF)</option><option value="Contador Público">Contador Público</option><option value="Contadora Pública">Contadora Pública</option><option value="excluded">No usar como contador en EEFF</option></Select>}</Field>
       </div>
     </Modal>
     <ConfirmDialog open={!!removing} danger title="Eliminar firma" message="La firma y su imagen se eliminarán." confirmLabel="Eliminar" loading={busy} onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />

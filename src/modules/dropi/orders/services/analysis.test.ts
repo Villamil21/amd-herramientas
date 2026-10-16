@@ -148,7 +148,7 @@ describe("Copiar resumen (informe mensual)", () => {
     const lines = text.split("\n");
     expect(lines.every((l) => l.split("\t").length === 2)).toBe(true);
     const labels = lines.map((l) => l.split("\t")[0]);
-    expect(labels.indexOf("Pedidos despachados Dropi")).toBeGreaterThan(labels.indexOf("Entregado"));
+    expect(labels.indexOf("Entregado")).toBe(labels.indexOf("Pedidos despachados Dropi") - 1);
     expect(labels[labels.length - 1]).toBe("Costo producto Dropi");
     expect(text).not.toContain("$");
   });

@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.29.0",
+    "date": "2026-10-15",
+    "notes": [
+      "Menú lateral reorganizado por grupos: Inicio, Datos maestros, Contabilidad y EEFF, Impuestos y Sistema. Las tarjetas de Herramientas y de cada módulo muestran solo el título, con el mismo alto y el punto de estado abajo a la derecha.",
+      "Empresas: la tabla muestra logo, razón social, NIT, CIIU y ciudad. El formulario va por bloques (Identificación, Representación legal, Información societaria, Configuración tributaria e Información adicional); teléfono y correo siguen guardados en Información adicional. Nueva: la periodicidad de IVA se configura desde la empresa.",
+      "Proveedores: formulario completo con Identificación (y Tipo IVA), Datos fiscales (PJ / PN, régimen con botones O-13, O-15, O-23, O-47, R-99-PN), Retención editable, Códigos PUC utilizados e Historial de decisiones por módulo.",
+      "Firmas: miniatura de la firma, estado «Firma cargada» / «Sin firma» y Rol EEFF en la tabla; el formulario va por bloques.",
+      "Tabla de retenciones con filtro por tipo, búsqueda, grupos y barra fija «Guardar cambios»; Autorretenciones con filtros por tarifa y rango; SMMLV como tabla histórica compacta; Tabla de Códigos PUC con sangría por nivel, acciones con íconos y sin scroll horizontal.",
+      "Catálogo EEFF: el arrastre para ordenar las líneas es más robusto y muestra el puesto de cada línea y la zona de destino.",
+      "Generador de Estados Financieros en 7 secciones numeradas, con un panel de estado (total activo, pasivo + patrimonio, diferencia y verificación). Movimientos contables con «Editar» visible en cada fila; Saldos iniciales con la columna Valor siempre legible.",
+      "Impuestos: IVA de compras, Retención en la fuente compras y ventas comparten la misma estructura (archivo, estado, resumen, documentos y resumen para declaración). IVA de compras: «Copiar tabla» en Factura electrónica y Notas crédito, listo para pegar en Excel.",
+      "Dropi → Órdenes: Ventas, Pedidos y Costos juntos en «Resumen para informe mensual» con Copiar resumen (incluye Entregado), Copiar como tabla y Exportar Excel.",
+      "Dropi → Historial de cartera: método de cada retiro (Campo directo, Base identificada o Revisión manual), Cargo 4x1000 / GMF, barra «Conciliado», monto original visible y trazabilidad de la edición manual. 4.016.064 → 4.000.000 + 16.064.",
+      "Certificados: barra de pasos que no se corta en ventanas estrechas; Certificado de ingresos con la vista previa en un panel aparte; Composición Accionaria más compacta.",
+      "Calculadora de Independientes: muestra cuál valor se usa como IBC (40 % de los ingresos o SMMLV) y por qué. Configuración: «Buscar actualizaciones» primero y destacado."
+    ]
+  },
+  {
     "version": "1.28.0",
     "date": "2026-10-15",
     "notes": [

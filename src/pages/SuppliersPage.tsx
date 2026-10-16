@@ -6,7 +6,7 @@ import { useDebounced } from "../hooks/useDebounced";
 import { supplierService } from "../services/supplierService";
 import { withholdingService } from "../services/withholdingService";
 import { RETENTION_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier } from "../types/models";
-import { SupplierFormModal } from "./suppliers/SupplierFormModal";
+import { regimeCodes, SupplierFormModal } from "./suppliers/SupplierFormModal";
 import { SupplierWithholdingModal } from "./suppliers/SupplierWithholdingModal";
 
 export function SuppliersPage() {
@@ -95,7 +95,19 @@ export function SuppliersPage() {
                       {s.vatType ? <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge> : <span className="muted">Sin configurar</span>}
                     </td>
                     <td>{s.personType ?? <span className="muted">—</span>}</td>
-                    <td className="selectable">{s.fiscalRegime ?? <span className="muted">—</span>}</td>
+                    <td className="selectable">
+                      {s.fiscalRegime ? (
+                        <span className="regime-codes">
+                          {regimeCodes(s.fiscalRegime).map((c) => (
+                            <span key={c} className="regime-code">
+                              {c}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td style={{ minWidth: 200 }}>
                       {(s.withholdingRules ?? []).length === 0 ? (
                         <span className="muted">Sin configurar</span>
@@ -128,10 +140,6 @@ export function SuppliersPage() {
         open={editing !== undefined}
         supplier={editing ?? null}
         rates={rates.data ?? []}
-        onEditWithholding={(s) => {
-          setEditing(undefined);
-          setWithholding(s);
-        }}
         onClose={() => setEditing(undefined)}
         onSaved={() => {
           setEditing(undefined);

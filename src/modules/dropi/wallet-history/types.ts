@@ -7,8 +7,20 @@
 /** Incidencias posibles de un movimiento; una fila puede tener varias. */
 export type Incident = "type" | "duplicate" | "invalid_amount" | "gmf_review";
 
-/** Cómo se obtuvo el valor pagado: la regla de Dropi (MONTO = pagado / 0,996) o una edición manual. */
-export type SplitMethod = "calculated" | "manual";
+/**
+ * Cómo se obtuvo el valor pagado: campos separados del archivo («Campo
+ * directo»), la regla de Dropi MONTO = pagado / 0,996 («Base identificada») o
+ * una edición manual («Revisión manual»).
+ */
+export type SplitMethod = "direct" | "calculated" | "manual";
+
+/** Edición manual de un retiro: valores anteriores, nuevos y cuándo (trazabilidad de la sesión). */
+export interface ManualEdit {
+  paidCents: number;
+  previousPaidCents: number | null;
+  previousGmfCents: number | null;
+  editedAt: string;
+}
 
 export interface WalletMovement {
   /** Número de fila en Excel (1 = primera fila de la hoja). */
@@ -31,6 +43,8 @@ export interface WalletMovement {
   description: string;
   /** CONCEPTO DE RETIRO tal como viene en el archivo. */
   concept: string;
+  /** Valor pagado y 4x1000 en columnas propias del archivo, si las trae. */
+  direct?: { paidCents: number; gmfCents: number };
 }
 
 export interface ParsedWalletFile {
@@ -62,6 +76,8 @@ export interface AnalyzedMovement extends WalletMovement {
   /** Valor pagado según la regla de Dropi (aunque luego se haya editado); null si no tiene solución. */
   calculatedPaidCents: number | null;
   method: SplitMethod | null;
+  /** Trazabilidad de la edición manual (valores anteriores y fecha/hora). */
+  manualEdit?: ManualEdit;
   incidents: Incident[];
   /** Explicación del valor inválido (vacío, no numérico, negativo o cero). */
   amountProblem?: string;

@@ -18,7 +18,7 @@ export function StatusDetailTable({ analysis }: { analysis: DropiOrdersAnalysis 
 
   return (
     <Card flush title="Detalle por estado" description={`${statuses.length === 1 ? "1 estado encontrado" : `${statuses.length} estados encontrados`} en el archivo.`}>
-      <div className="table-wrap">
+      <div className="table-wrap table-wrap--scroll">
         <table className="table">
           <thead>
             <tr>

@@ -1,4 +1,4 @@
-import type { AnalyzedMovement, Incident, WalletAnalysis, WalletMovement } from "../types";
+import type { AnalyzedMovement, Incident, ManualEdit, WalletAnalysis, WalletMovement } from "../types";
 
 /** DESCRIPCIÓN de un retiro de cartera: el único concepto que se procesa. */
 export const EXPECTED_DESCRIPTION = "SALIDA POR PETICION DE RETIRO DE SALDO EN CARTERA";
@@ -8,10 +8,16 @@ export const INCIDENT_LABEL: Record<Incident, string> = {
   type: "Tipo inesperado",
   duplicate: "Posible duplicado",
   invalid_amount: "Valor inválido",
-  gmf_review: "4x1000 por revisar",
+  gmf_review: "Requiere revisión (4x1000)",
 };
 
-export const METHOD_LABEL = { calculated: "Regla Dropi (MONTO = valor pagado / 0,996)", manual: "Editado manualmente" } as const;
+export const METHOD_LABEL = { direct: "Campo directo", calculated: "Base identificada", manual: "Revisión manual" } as const;
+
+export const METHOD_DETAIL = {
+  direct: "Valor pagado y 4x1000 tomados de columnas del archivo",
+  calculated: "Base cerrada identificada: MONTO = valor pagado / 0,996 (regla de Dropi)",
+  manual: "Valor pagado escrito a mano; el cargo es la diferencia con el MONTO",
+} as const;
 
 export const INCIDENTS = Object.keys(INCIDENT_LABEL) as Incident[];
 
@@ -79,7 +85,7 @@ function amountProblem(m: WalletMovement): string | undefined {
  * alguna incidencia requieren revisión y no se suman a los totales; un ID
  * repetido marca todas sus filas (no se elige cuál es la buena).
  */
-export function analyzeWallet(allMovements: WalletMovement[], opts: { checkType: boolean; manual?: ReadonlyMap<number, number> }): WalletAnalysis {
+export function analyzeWallet(allMovements: WalletMovement[], opts: { checkType: boolean; manual?: ReadonlyMap<number, number | ManualEdit> }): WalletAnalysis {
   const movements = allMovements.filter((m) => isExpectedDescription(m.description));
   const idCount = new Map<string, number>();
   for (const m of movements) if (m.id) idCount.set(m.id, (idCount.get(m.id) ?? 0) + 1);
@@ -90,9 +96,12 @@ export function analyzeWallet(allMovements: WalletMovement[], opts: { checkType:
     if (opts.checkType && !isExpectedType(m.type)) incidents.push("type");
     if (m.id && idCount.get(m.id)! > 1) incidents.push("duplicate");
     if (problem) incidents.push("invalid_amount");
-    const calculated = problem ? null : splitGmf(m.amountCents!);
+    // Campos separados del archivo: se usan solo si suman exactamente el MONTO.
+    const direct = !problem && m.direct && m.direct.paidCents + m.direct.gmfCents === m.amountCents ? m.direct : null;
+    const calculated = problem ? null : (direct ?? splitGmf(m.amountCents!));
     // Edición manual (Valor pagado; el 4x1000 es la diferencia con el MONTO).
-    const manualPaid = problem ? undefined : opts.manual?.get(m.rowNumber);
+    const edit = problem ? undefined : opts.manual?.get(m.rowNumber);
+    const manualPaid = typeof edit === "object" ? edit.paidCents : edit;
     const manual = manualPaid === undefined ? null : manualSplit(m.amountCents!, manualPaid);
     const split = manual && typeof manual !== "string" ? manual : calculated;
     if (!problem && !split) incidents.push("gmf_review");
@@ -101,9 +110,10 @@ export function analyzeWallet(allMovements: WalletMovement[], opts: { checkType:
       paidCents: split?.paidCents ?? null,
       gmfCents: split?.gmfCents ?? null,
       calculatedPaidCents: calculated?.paidCents ?? null,
-      method: split === null ? null : split === calculated ? "calculated" : "manual",
+      method: split === null ? null : split !== calculated ? "manual" : direct ? "direct" : "calculated",
       incidents,
       amountProblem: problem,
+      ...(typeof edit === "object" && split !== calculated ? { manualEdit: edit } : {}),
     };
   });
 

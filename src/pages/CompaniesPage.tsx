@@ -75,10 +75,9 @@ export function CompaniesPage() {
               <thead>
                 <tr>
                   <th>Empresa</th>
+                  <th>NIT</th>
                   <th>Código CIIU</th>
                   <th>Ciudad</th>
-                  <th>Teléfono</th>
-                  <th>Correo</th>
                   <th />
                 </tr>
               </thead>
@@ -88,16 +87,15 @@ export function CompaniesPage() {
                     <td>
                       <div className="company-cell">
                         <LogoThumb logoFile={c.logoFile} />
-                        <div>
-                          <div className="table__primary">{c.razonSocial}</div>
-                          <div className="table__secondary">NIT {c.nit}</div>
-                        </div>
+                        <div className="table__primary">{c.razonSocial}</div>
                       </div>
+                    </td>
+                    <td className="nowrap selectable">
+                      {c.nit}
+                      {c.dv ? `-${c.dv}` : ""}
                     </td>
                     <td>{c.ciiuCode || <span className="muted">—</span>}</td>
                     <td>{c.ciudad || <span className="muted">—</span>}</td>
-                    <td>{c.telefono || <span className="muted">—</span>}</td>
-                    <td>{c.correo || <span className="muted">—</span>}</td>
                     <td className="actions" onClick={(e) => e.stopPropagation()}>
                       <Button variant="ghost" size="sm" iconOnly icon={<Pencil size={14} />} aria-label="Editar" onClick={() => setEditing(c)} />
                       <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => setDeleting(c)} />

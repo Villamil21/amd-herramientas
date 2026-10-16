@@ -5,19 +5,42 @@ import { useUpdater } from "../app/UpdateProvider";
 import { GlobalSearch } from "../components/GlobalSearch";
 import { Breadcrumbs, type Crumb } from "../components/ui";
 
-const NAV = [{ key: "tools", label: "Herramientas", icon: LayoutGrid, path: paths.tools }];
-const DATA_NAV = [
-  { key: "companies", label: "Empresas", icon: Building2, path: paths.companies },
-  { key: "signers", label: "Firmas", icon: UserRound, path: paths.signers },
-  { key: "concepts", label: "Conceptos", icon: Database, path: paths.concepts },
-  { key: "suppliers", label: "Proveedores", icon: Store, path: paths.suppliers },
-  { key: "withholding-table", label: "Tabla de retenciones", icon: Percent, path: paths.withholdingTable },
-  { key: "self-withholding-table", label: "Tabla de Autorretenciones", icon: BadgePercent, path: paths.selfWithholdingTable },
-  { key: "puc-table", label: "Tabla de Códigos PUC", icon: BookOpenText, path: paths.pucTable },
-  { key: "fs-catalog", label: "Catálogo de cuentas EEFF", icon: ListTree, path: paths.fsCatalog },
-  { key: "minimum-wages", label: "SMMLV por año", icon: CalendarRange, path: paths.minimumWages },
+interface NavItem {
+  key: string;
+  label: string;
+  icon: typeof LayoutGrid;
+  path: string;
+}
+
+/** Menú por grupos: cada grupo con su encabezado (contraído queda un separador y el tooltip de cada ícono). */
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  { title: "Inicio", items: [{ key: "tools", label: "Herramientas", icon: LayoutGrid, path: paths.tools }] },
+  {
+    title: "Datos maestros",
+    items: [
+      { key: "companies", label: "Empresas", icon: Building2, path: paths.companies },
+      { key: "suppliers", label: "Proveedores", icon: Store, path: paths.suppliers },
+      { key: "signers", label: "Firmas", icon: UserRound, path: paths.signers },
+      { key: "concepts", label: "Conceptos", icon: Database, path: paths.concepts },
+    ],
+  },
+  {
+    title: "Contabilidad y EEFF",
+    items: [
+      { key: "puc-table", label: "Tabla de Códigos PUC", icon: BookOpenText, path: paths.pucTable },
+      { key: "fs-catalog", label: "Catálogo de cuentas EEFF", icon: ListTree, path: paths.fsCatalog },
+      { key: "minimum-wages", label: "SMMLV por año", icon: CalendarRange, path: paths.minimumWages },
+    ],
+  },
+  {
+    title: "Impuestos",
+    items: [
+      { key: "withholding-table", label: "Tabla de retenciones", icon: Percent, path: paths.withholdingTable },
+      { key: "self-withholding-table", label: "Tabla de Autorretenciones", icon: BadgePercent, path: paths.selfWithholdingTable },
+    ],
+  },
+  { title: "Sistema", items: [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }] },
 ];
-const SYSTEM_NAV = [{ key: "settings", label: "Configuración", icon: Settings, path: paths.settings }];
 
 const COLLAPSE_KEY = "ui.sidebarCollapsed";
 
@@ -48,12 +71,12 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
     }
   }, [collapsed]);
 
-  const item = (n: (typeof NAV)[number]) => (
+  const item = (n: NavItem) => (
     <button
       key={n.key}
       className={`nav-item ${active === n.key ? "is-active" : ""}`}
       onClick={() => navigate(n.path)}
-      title={collapsed ? n.label : undefined}
+      title={n.label}
       aria-label={collapsed ? n.label : undefined}
       aria-current={active === n.key ? "page" : undefined}
     >
@@ -78,11 +101,14 @@ export function AppLayout({ active, crumbs, version, children }: Props) {
           </div>
         </div>
         <nav className="sidebar__nav" aria-label="Navegación principal">
-          {NAV.map(item)}
-          <div className="sidebar__section">Datos</div>
-          {DATA_NAV.map(item)}
-          <div className="sidebar__section">Sistema</div>
-          {SYSTEM_NAV.map(item)}
+          {NAV_GROUPS.map((g) => (
+            <div key={g.title} className="sidebar__group" role="group" aria-label={g.title}>
+              <div className="sidebar__section" title={g.title}>
+                {g.title}
+              </div>
+              {g.items.map(item)}
+            </div>
+          ))}
         </nav>
         <div className="sidebar__footer">
           {/* La versión queda visible siempre; contraído se abrevia (v1.9.0) y el texto completo va en el tooltip. */}

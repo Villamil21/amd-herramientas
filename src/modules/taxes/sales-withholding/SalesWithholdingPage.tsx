@@ -25,6 +25,7 @@ import { normalizeCiiu } from "./services/ciiu";
 import { exportSalesExcel } from "./services/excelExport";
 import { readSalesWorkbook } from "./services/workbookReader";
 import { SalesWithholdingError, type IssuerNit, type ReadResult, type SalesAnalysis } from "./types";
+import { TaxSection } from "../shared/TaxSection";
 
 const LABELS = { pick: "Seleccionar Excel", pickAnother: "Seleccionar otro Excel", analyzing: "Leyendo ventas…" };
 
@@ -188,6 +189,7 @@ export default function SalesWithholdingPage() {
 
       {masterError && <Alert tone="danger">{masterError}</Alert>}
 
+      <TaxSection letter="B" title="Archivo fuente">
       <StatementFileCard
         state={state}
         details={
@@ -205,6 +207,7 @@ export default function SalesWithholdingPage() {
         onPick={() => void pick()}
         labels={LABELS}
       />
+      </TaxSection>
 
       {loaded?.kind === "choose-sheet" && (
         <Card title="Elige la hoja de ventas" description="Varias hojas del archivo tienen los encabezados de facturación DIAN. Selecciona la que corresponde; no se elige una automáticamente.">
@@ -220,6 +223,8 @@ export default function SalesWithholdingPage() {
 
       {file && analysis && (
         <>
+          <TaxSection letter="C" title="Estado y pendientes">
+          <LotStatus blocking={blocking} />
           {issuerNit && rows && (
             <Alert tone="info" title={`Lote de ${analysis.company?.razonSocial ?? `NIT ${issuerNit}`}`}>
               Se procesan solo sus {plural(rows.length, "1 fila", "# filas")} de {formatInteger(file.rows.length)} del archivo. Las demás empresas se procesan por separado.
@@ -230,8 +235,6 @@ export default function SalesWithholdingPage() {
               </div>
             </Alert>
           )}
-
-          <CompanyCard analysis={analysis} blocking={blocking} />
 
           <PendingList
             pending={analysis.pending.filter((p) => p.kind !== "new_type")}
@@ -247,10 +250,19 @@ export default function SalesWithholdingPage() {
             onShowReview={showReview}
           />
           {analysis.newTypes.length > 0 && <NewTypesPanel key={file.fileName} types={analysis.newTypes} onSaved={types.reload} />}
+          </TaxSection>
 
-          <Totals analysis={analysis} />
+          <TaxSection letter="D" title="Resumen">
+            <CompanyCard analysis={analysis} />
+          </TaxSection>
 
-          <SalesDocumentsTable key={`${file.fileName}:${file.sheetName}`} rows={analysis.rows} filter={filter} onFilterChange={setFilter} />
+          <TaxSection letter="E" title="Documentos">
+            <SalesDocumentsTable key={`${file.fileName}:${file.sheetName}`} rows={analysis.rows} filter={filter} onFilterChange={setFilter} />
+          </TaxSection>
+
+          <TaxSection letter="F" title="Resumen para declaración">
+            <Totals analysis={analysis} />
+          </TaxSection>
         </>
       )}
 
@@ -278,25 +290,30 @@ function Info({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/** Empresa → CIIU → Tarifa, con el estado del cierre. */
-function CompanyCard({ analysis: a, blocking }: { analysis: SalesAnalysis; blocking: number }) {
-  const status =
-    blocking === 0 ? (
-      <div className="lot-status lot-status--ready" role="status">
-        <span className="lot-status__dot" aria-hidden /> Listo para declaración
-      </div>
-    ) : (
-      <div className="lot-status lot-status--attention" role="status">
-        <span className="lot-status__dot" aria-hidden /> Requiere atención — {blocking === 1 ? "1 pendiente" : `${blocking} pendientes`}
-      </div>
-    );
+/** Estado del lote: listo para declaración o requiere atención (mismo indicador que IVA y Retefuente compras). */
+function LotStatus({ blocking }: { blocking: number }) {
+  return blocking === 0 ? (
+    <div className="lot-status lot-status--ready" role="status">
+      <span className="lot-status__dot" aria-hidden /> Listo para declaración
+    </div>
+  ) : (
+    <div className="lot-status lot-status--attention" role="status">
+      <span className="lot-status__dot" aria-hidden /> Requiere atención — {blocking === 1 ? "1 pendiente" : `${blocking} pendientes`}
+    </div>
+  );
+}
+
+/** Empresa → CIIU → Tarifa y conteo de documentos. */
+function CompanyCard({ analysis: a }: { analysis: SalesAnalysis }) {
   return (
-    <Card title="Empresa" actions={status}>
+    <Card title="Empresa y tarifa">
       <div className="summary-grid">
         <Info label="Empresa" value={a.company?.razonSocial ?? (a.issuer ? `${a.issuer.name || "—"} (no registrada)` : a.nits.length > 1 ? "Varios NIT Emisor" : "—")} />
         <Info label="NIT Emisor" value={a.issuer?.nit ?? (a.nits.length > 1 ? a.nits.map((n) => n.nit).join(", ") : "—")} />
         <Info label="Código CIIU" value={a.company?.ciiuCode || "—"} />
         <Info label="Tarifa" value={a.rate ? formatRateBp(a.rate.rateBp, true) : "—"} />
+        <Info label="Facturas" value={formatInteger(a.invoices.count)} />
+        <Info label="Notas crédito" value={formatInteger(a.creditNotes.count)} />
       </div>
       {a.rate?.economicActivity && (
         <p className="muted" style={{ fontSize: "var(--text-sm)", marginBottom: 0 }}>

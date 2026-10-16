@@ -23,6 +23,7 @@ import { processWithholdingFolder } from "./services/folder";
 import { belowMinimumLines, ignoredGroup } from "./services/labels";
 import { actionable, actionsByFile, buildPendingActions, lotStatus, nextPending, type PendingAction } from "./services/pending";
 import type { DocDecision, DocRow, FileResult, PendingSupplier } from "./types";
+import { TaxSection } from "../shared/TaxSection";
 
 type Phase = { status: "idle" } | { status: "ready" } | { status: "processing"; done: number; total: number } | { status: "done"; results: FileResult[] };
 
@@ -260,6 +261,7 @@ export default function WithholdingPage() {
         }
       />
 
+      <TaxSection letter="B" title="Archivo fuente">
       <Card>
         {!folder ? (
           <div className="row row--between">
@@ -307,11 +309,13 @@ export default function WithholdingPage() {
           </div>
         )}
       </Card>
+      </TaxSection>
 
       {processing && <LotStatusIndicator processing />}
 
       {report && (
         <>
+          <TaxSection letter="C" title="Estado y pendientes">
           <div id={PERIOD_ANCHOR}>
             <PeriodPanel period={report.period} onChoose={setPeriodChoice} />
           </div>
@@ -342,9 +346,20 @@ export default function WithholdingPage() {
               items={failed.map((r) => `${r.fileName}: ${r.issues[0]}`)}
             />
           )}
-          <WithholdingStats stats={report.stats} filter={filter} onFilter={showDocuments} />
+          </TaxSection>
 
-          <DocumentsTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r) => setSelected(r.fileName)} onAction={runAction} />
+          <TaxSection letter="D" title="Resumen">
+            <WithholdingStats stats={report.stats} filter={filter} onFilter={showDocuments} />
+          </TaxSection>
+
+          <TaxSection letter="E" title="Documentos">
+            <DocumentsTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r) => setSelected(r.fileName)} onAction={runAction} />
+            {belowRows.length > 0 && <BelowMinimumTable rows={belowRows} onOpen={(r) => setSelected(r.fileName)} />}
+            {noteRows.length > 0 && <NotesSection rows={noteRows} totalCents={report.totals.notesCents} onOpen={(r) => setSelected(r.fileName)} />}
+            {ignoredRows.length > 0 && <IgnoredSection rows={ignoredRows} onOpen={(r) => setSelected(r.fileName)} />}
+          </TaxSection>
+
+          <TaxSection letter="F" title="Resumen para declaración">
 
           {report.stats.pending > 0 && (
             <Alert tone="warning" title={plural(report.stats.pending, "1 documento pendiente no está incluido en el resumen.", "# documentos pendientes no están incluidos en el resumen.")}>
@@ -359,10 +374,8 @@ export default function WithholdingPage() {
           <DeclarationSummary report={report} />
           <NotesSummary notes={report.notesSummary} />
           <SubtypeDetailTable report={report} />
-          {belowRows.length > 0 && <BelowMinimumTable rows={belowRows} onOpen={(r) => setSelected(r.fileName)} />}
-          {noteRows.length > 0 && <NotesSection rows={noteRows} totalCents={report.totals.notesCents} onOpen={(r) => setSelected(r.fileName)} />}
-          {ignoredRows.length > 0 && <IgnoredSection rows={ignoredRows} onOpen={(r) => setSelected(r.fileName)} />}
           <TotalsCard totals={report.totals} />
+          </TaxSection>
         </>
       )}
 

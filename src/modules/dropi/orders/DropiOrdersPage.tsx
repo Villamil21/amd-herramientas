@@ -141,6 +141,14 @@ export default function DropiOrdersPage() {
               <span>· {plural(file.rows.length, "1 registro", "# registros")}</span>
               {file.company && <span>· {file.company}</span>}
               {file.period && <span>· {file.period}</span>}
+              {analysis && (
+                <>
+                  <span>· {plural(analysis.summary.uniqueOrders, "1 pedido único", "# pedidos únicos")}</span>
+                  <span>· {plural(analysis.statuses.length, "1 estado", "# estados")}</span>
+                  {analysis.pending.length > 0 && <span className="text-danger">· {plural(analysis.pending.length, "1 estado sin clasificar", "# estados sin clasificar")}</span>}
+                </>
+              )}
+              {file.ignoredSheets.length > 0 && <span>· No usadas: {file.ignoredSheets.join(", ")}</span>}
             </>
           )
         }
@@ -165,19 +173,6 @@ export default function DropiOrdersPage() {
 
       {file && analysis && (
         <>
-          <Card title="Archivo" description={file.sheetReason}>
-            <div className="summary-grid">
-              <Info label="Hoja utilizada" value={file.sheetName} />
-              <Info label="Registros" value={formatInteger(analysis.summary.totalRows)} />
-              <Info label="Pedidos únicos" value={formatInteger(analysis.summary.uniqueOrders)} />
-              <Info label="Estados encontrados" value={formatInteger(analysis.statuses.length)} />
-              <Info label="Estados pendientes de clasificar" value={formatInteger(analysis.pending.length)} />
-              <Info label="Empresa (según el archivo)" value={file.company ?? "—"} />
-              <Info label="Periodo (columna FECHA)" value={file.period ?? "—"} />
-              <Info label="Otras hojas (no usadas)" value={file.ignoredSheets.join(", ") || "—"} />
-            </div>
-          </Card>
-
           {file.invalidMoney.length > 0 && (
             <Alert
               tone="danger"
@@ -219,7 +214,7 @@ export default function DropiOrdersPage() {
 
           {analysis.pending.length > 0 && <PendingStatusesPanel key={file.fileName} pending={analysis.pending} onSaved={loadMappings} />}
 
-          <ClosingSummary analysis={analysis} />
+          <ClosingSummary analysis={analysis} onExport={() => void exportExcel()} exporting={exporting} />
           <StatusDetailTable analysis={analysis} />
           <OrdersTable key={`${file.fileName}:${file.sheetName}`} rows={file.rows} rules={rules} />
         </>
@@ -227,14 +222,5 @@ export default function DropiOrdersPage() {
 
       <StatusRulesModal open={rulesOpen} mappings={mappings} onClose={() => setRulesOpen(false)} onChanged={loadMappings} />
     </>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="summary-item">
-      <span className="summary-item__label">{label}</span>
-      <span className="summary-item__value selectable">{value}</span>
-    </div>
   );
 }

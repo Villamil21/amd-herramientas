@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Eye, EyeOff, ListTree, Pencil, Search, Trash2 } from "lucide-react";
 import { Badge, Button, EmptyState, Input, Modal, Select } from "../../../../components/ui";
 import { useDebounced } from "../../../../hooks/useDebounced";
 import type { PucCode } from "../../../../types/models";
@@ -51,10 +51,17 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
   const uses = admin?.usage.get(row.code) ?? 0;
   const mapping = admin?.classification.get(row.code);
   const canAssign = !missing && assignable(row);
+  // Sangría real por nivel: cuenta (4) → subcuenta (6) → personalizado más largo.
+  const depth = row.level === "account" ? 0 : row.code.length > 6 ? 2 : 1;
+  const icon = (label: string, Icon: typeof Pencil, onClick: () => void, extra?: string) => (
+    <Button size="sm" variant="ghost" iconOnly icon={<Icon size={14} />} aria-label={`${label} ${row.code}`} title={label} className={extra} onClick={onClick} />
+  );
   return (
     <tr className={`puc-row puc-row--${row.level}${row.inactive ? " is-inactive" : ""}`}>
-      <td className="puc-row__code selectable">{row.code}</td>
-      <td className="selectable">
+      <td className="puc-row__code selectable" style={{ paddingLeft: 16 + depth * 16 }}>
+        {row.code}
+      </td>
+      <td className="selectable puc-row__concept" style={{ paddingLeft: 12 + depth * 16 }}>
         {missing ? <span className="puc-row__missing">Cuenta sin denominación en el catálogo fuente</span> : row.concept}
         {row.custom && <> <Badge>Personalizado</Badge></>}
         {row.inactive && <> <Badge tone="warning">Inactivo</Badge></>}
@@ -62,38 +69,26 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
       </td>
       {admin && (
         <>
+          <td className="puc-row__fs" title={mapping && !mapping.excluded ? mapping.label : undefined}>
+            {!canAssign ? null : mapping ? mapping.excluded ? <Badge tone="dark">No afecta EEFF</Badge> : <span className="puc-row__line">{mapping.label}</span> : <span className="muted">Sin clasificar</span>}
+          </td>
           <td className="puc-row__usage">
             {missing ? null : uses > 0 ? (
               <button type="button" className="link-button" onClick={() => admin.onReferences(row.code)} title="Ver referencias">
-                {uses === 1 ? "1 referencia" : `${formatInteger(uses)} referencias`}
+                {formatInteger(uses)}
               </button>
             ) : (
-              <span className="muted">No</span>
+              <span className="muted">—</span>
             )}
           </td>
-          <td className="puc-row__fs">{!canAssign ? null : mapping ? mapping.excluded ? <Badge tone="dark">No afecta EEFF</Badge> : mapping.label : <span className="muted">Sin clasificar</span>}</td>
           <td className="actions">
             {!missing && (
               <span className="puc-row__actions">
-                <Button size="sm" variant="ghost" onClick={() => admin.onEdit(row.code)}>
-                  Editar
-                </Button>
-                {canAssign && (
-                  <Button size="sm" variant="ghost" onClick={() => admin.onClassify(row.code)}>
-                    Clasificar en EEFF
-                  </Button>
-                )}
-                {canAssign && (
-                  <Button size="sm" variant="ghost" onClick={() => admin.onToggleActive(row.code)}>
-                    {row.inactive ? "Reactivar" : "Desactivar"}
-                  </Button>
-                )}
+                {icon("Editar", Pencil, () => admin.onEdit(row.code))}
+                {canAssign && icon("Clasificar en EEFF", ListTree, () => admin.onClassify(row.code))}
+                {canAssign && icon(row.inactive ? "Reactivar" : "Desactivar", row.inactive ? Eye : EyeOff, () => admin.onToggleActive(row.code))}
                 {/* Oficial: nunca. Personalizado con uso: explica por qué no y ofrece Desactivar. */}
-                {row.custom && !row.inactive && (
-                  <Button size="sm" variant="ghost" className={uses > 0 ? "puc-row__delete is-muted" : "puc-row__delete"} title={uses > 0 ? "Tiene movimientos o referencias: no se puede eliminar" : undefined} onClick={() => admin.onDelete(row.code)}>
-                    Eliminar
-                  </Button>
-                )}
+                {row.custom && !row.inactive && icon(uses > 0 ? "Tiene movimientos o referencias: no se puede eliminar" : "Eliminar", Trash2, () => admin.onDelete(row.code), uses > 0 ? "puc-row__delete is-muted" : "puc-row__delete")}
               </span>
             )}
           </td>
@@ -137,9 +132,13 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
 
   return (
     <>
-      <div className="toolbar row--between">
-        <div className="row">
-          <Select aria-label="Clase del catálogo" value={classCode} onChange={(e) => setClassCode(e.target.value)} disabled={Boolean(query)} style={{ width: "auto" }}>
+      <div className="toolbar row--between puc-toolbar">
+        <div className="search puc-toolbar__search">
+          <Search size={14} aria-hidden />
+          <Input type="search" placeholder="Buscar por código o concepto…" aria-label="Buscar por código o concepto" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="row puc-toolbar__filters">
+          <Select aria-label="Clase del catálogo" value={classCode} onChange={(e) => setClassCode(e.target.value)} disabled={Boolean(query)} style={{ width: "auto", maxWidth: 210 }}>
             {admin && <option value="">Todas las clases</option>}
             {classes.map((c) => (
               <option key={c.code} value={c.code}>
@@ -150,47 +149,45 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
           {admin && (
             <>
               <Select aria-label="Tipo" value={kind} onChange={(e) => setKind(e.target.value as KindFilter)} style={{ width: "auto" }}>
-                <option value="">Oficiales y personalizados</option>
+                <option value="">Todos los tipos</option>
                 <option value="official">Oficiales</option>
                 <option value="custom">Personalizados</option>
               </Select>
               <Select aria-label="Estado" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} style={{ width: "auto" }}>
-                <option value="">Activos e inactivos</option>
+                <option value="">Todos los estados</option>
                 <option value="active">Activos</option>
                 <option value="inactive">Inactivos</option>
               </Select>
               <Select aria-label="Clasificación EEFF" value={classified} onChange={(e) => setClassified(e.target.value as ClassFilter)} style={{ width: "auto" }}>
-                <option value="">Cualquier clasificación EEFF</option>
+                <option value="">Toda clasificación</option>
                 <option value="classified">Clasificados en EEFF</option>
                 <option value="excluded">No afecta EEFF</option>
                 <option value="unclassified">Sin clasificar</option>
               </Select>
             </>
           )}
-          <span className="muted" style={{ fontSize: "var(--text-sm)" }}>
-            {query ? "Buscando en todo el catálogo · " : ""}
-            {leaves === 1 ? "1 código asignable" : `${formatInteger(leaves)} códigos asignables`}
-          </span>
         </div>
-        <div className="search" style={{ width: 320 }}>
-          <Search size={14} aria-hidden />
-          <Input type="search" placeholder="Buscar por código o concepto..." aria-label="Buscar por código o concepto" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
+        <span className="muted puc-toolbar__count">
+          {query ? "Buscando en todo el catálogo · " : ""}
+          {leaves === 1 ? "1 código asignable" : `${formatInteger(leaves)} códigos asignables`}
+        </span>
       </div>
       {rows.length === 0 ? (
         <EmptyState icon={<Search size={20} />} title="Sin resultados" description={query ? `Ningún código ni concepto coincide con «${query}».` : "Ningún código cumple los filtros."} />
       ) : (
         <div className="table-wrap table-wrap--scroll" style={maxHeight ? { maxHeight } : undefined}>
-          <table className={`table puc-table${admin ? " puc-table--admin" : ""}`}>
+          <table className={`table table--dense puc-table${admin ? " puc-table--admin" : ""}`}>
             <thead>
               <tr>
-                <th style={{ width: 130 }}>Código</th>
+                <th style={{ width: 128 }}>Código</th>
                 <th>Concepto</th>
                 {admin && (
                   <>
-                    <th style={{ width: 120 }}>En uso</th>
-                    <th style={{ width: 200 }}>Clasificación EEFF</th>
-                    <th />
+                    <th style={{ width: "24%" }}>Clasificación EEFF</th>
+                    <th className="num" style={{ width: 64 }} title="Movimientos y referencias">
+                      Uso
+                    </th>
+                    <th style={{ width: 138 }} />
                   </>
                 )}
               </tr>

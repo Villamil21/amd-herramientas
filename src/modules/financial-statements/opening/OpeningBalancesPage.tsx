@@ -3,7 +3,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Alert, Button, Card, DateInput, Field, Input, PageHeader, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
-import type { BatchInput } from "../../../types/fs";
+import { SECTION_LABEL, type BatchInput } from "../../../types/fs";
 import { parseNumericText } from "../../../utils/numbers";
 import { ClassifyPucModal, lineLabel } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
@@ -164,15 +164,20 @@ export default function OpeningBalancesPage() {
             }
           >
             <div className="table-wrap">
-              <table className="table fs-opening-table">
+              <table className="table table--dense fs-opening-table">
+                <colgroup>
+                  <col style={{ width: 150 }} />
+                  <col />
+                  <col style={{ width: "32%" }} />
+                  <col style={{ width: 190 }} />
+                  <col style={{ width: 44 }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Código PUC</th>
                     <th>Concepto</th>
                     <th>Ubicación en los estados</th>
-                    <th className="fs-opening-table__value" style={{ textAlign: "right" }}>
-                      Valor
-                    </th>
+                    <th className="num">Valor</th>
                     <th />
                   </tr>
                 </thead>
@@ -183,15 +188,24 @@ export default function OpeningBalancesPage() {
                     return (
                       <tr key={i}>
                         <td>
-                          <PucField index={data.index} value={r.pucCode || undefined} onChange={(code) => update(i, { pucCode: code })} placeholder="Buscar PUC" mappings={data.mappingMap} onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])} />
+                          <PucField compact index={data.index} value={r.pucCode || undefined} onChange={(code) => update(i, { pucCode: code })} placeholder="Buscar PUC" mappings={data.mappingMap} onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])} />
                         </td>
-                        <td>{r.pucCode ? (data.index.concepts.get(r.pucCode) ?? "—") : "—"}</td>
+                        <td className="fs-opening-table__concept">{r.pucCode ? (data.index.concepts.get(r.pucCode) ?? "—") : "—"}</td>
                         <td>
                           {!r.pucCode ? (
                             "—"
                           ) : m ? (
-                            <button type="button" className="btn btn--ghost btn--sm fs-opening-table__location" onClick={() => setClassifying(r.pucCode)}>
-                              {m.excluded ? "No afecta Estados Financieros" : line ? lineLabel(line) : "—"}
+                            <button type="button" className="fs-opening-table__location" title={m.excluded ? "No afecta Estados Financieros" : line ? lineLabel(line) : undefined} onClick={() => setClassifying(r.pucCode)}>
+                              {m.excluded ? (
+                                <strong>No afecta Estados Financieros</strong>
+                              ) : line ? (
+                                <>
+                                  <strong>{line.name}</strong>
+                                  <span>{SECTION_LABEL[line.section]}</span>
+                                </>
+                              ) : (
+                                "—"
+                              )}
                             </button>
                           ) : (
                             <Button size="sm" variant="primary" onClick={() => setClassifying(r.pucCode)}>
@@ -200,7 +214,7 @@ export default function OpeningBalancesPage() {
                           )}
                         </td>
                         <td className="fs-opening-table__value">
-                          <Input className="input--right" value={r.text} invalid={r.text.trim() !== "" && r.cents === null} placeholder="-2.000.000" onChange={(e) => update(i, { text: e.target.value })} />
+                          <Input aria-label={`Valor ${r.pucCode || `fila ${i + 1}`}`} className="input--right" value={r.text} invalid={r.text.trim() !== "" && r.cents === null} placeholder="-2.000.000" onChange={(e) => update(i, { text: e.target.value })} />
                         </td>
                         <td className="actions">
                           <Button size="sm" variant="ghost" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar fila" onClick={() => { setRows((prev) => prev.filter((_, j) => j !== i)); setDirty(true); }} />

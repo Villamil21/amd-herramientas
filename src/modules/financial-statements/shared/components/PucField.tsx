@@ -20,13 +20,15 @@ interface Props {
   onCodesChanged?: () => Promise<unknown> | void;
   mappings?: Map<string, FsPucMapping>;
   placeholder?: string;
+  /** Solo el código (el concepto queda en el tooltip): para tablas con columna Concepto propia. */
+  compact?: boolean;
 }
 
 /**
  * Campo de cuenta PUC: muestra el código elegido con su concepto y abre el
  * buscador para elegir otro (con confirmación) o crear una cuenta nueva.
  */
-export function PucField({ index, value, onChange, suggestions, title = "Cuenta PUC", disabled, size = "sm", onCodesChanged, mappings, placeholder = "Elegir cuenta PUC" }: Props) {
+export function PucField({ index, value, onChange, suggestions, title = "Cuenta PUC", disabled, size = "sm", onCodesChanged, mappings, placeholder = "Elegir cuenta PUC", compact }: Props) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
   const concept = leafConcept(index, value);
@@ -36,7 +38,8 @@ export function PucField({ index, value, onChange, suggestions, title = "Cuenta 
       {value ? (
         <span className="row" style={{ gap: 6, flexWrap: "nowrap", minWidth: 0 }}>
           <span className="puc-chip" title={`${value} — ${concept ?? "código no encontrado"}`} style={{ cursor: "default" }}>
-            <strong>{value}</strong> — {concept ?? <span className="amount--negative">no existe en la tabla</span>}
+            <strong>{value}</strong>
+            {!compact && <> — {concept ?? <span className="amount--negative">no existe en la tabla</span>}</>}
           </span>
           {index.custom.has(value) && <Badge>Personalizado</Badge>}
           {index.inactive.has(value) && <Badge tone="warning">Inactivo</Badge>}

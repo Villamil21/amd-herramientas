@@ -21,7 +21,7 @@ export function BankCard({ name, logo, available, onOpen }: Props) {
   const showLogo = Boolean(src) && !failed;
 
   return (
-    <button className="card bank-card" onClick={onOpen}>
+    <button className={`card bank-card ${showLogo ? "" : "bank-card--name"}`} onClick={onOpen}>
       {showLogo && (
         <div className="bank-card__logo">
           <img

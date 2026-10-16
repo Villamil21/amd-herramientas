@@ -1,7 +1,7 @@
 import { CheckCircle2, Download, RefreshCw, RotateCw } from "lucide-react";
 import { useUpdater } from "../../app/UpdateProvider";
 import { changelogFor } from "../../app/changelog";
-import { Alert, Badge, Button, Card } from "../../components/ui";
+import { Alert, Button, Card } from "../../components/ui";
 import { formatDateTimeForDisplay } from "../../utils/dates";
 
 /** Primera sección de Configuración: versión instalada, estado y búsqueda de actualizaciones. */
@@ -10,81 +10,66 @@ export function AboutSection({ version }: { version: string }) {
   const notes = changelogFor(version);
   const hasUpdate = (status === "available" || status === "downloading") && !!update;
 
+  const state = hasUpdate ? "available" : status === "up-to-date" ? "ok" : status === "ready" ? "ready" : status === "checking" ? "checking" : "unknown";
+  const stateLabel = { available: "Actualización disponible", ok: "Actualizada", ready: "Lista para reiniciar", checking: "Buscando…", unknown: "Sin comprobar en esta sesión" }[state];
+
   return (
-    <Card title="Actualizaciones" description="Versión instalada y búsqueda de nuevas versiones.">
-      <div className="stack">
-        <dl className="definition-list">
-          <dt>Versión instalada</dt>
-          <dd>
-            <strong style={{ fontFamily: "var(--font-display)" }}>{version}</strong>
-          </dd>
-          <dt>Estado</dt>
-          <dd>
-            <span className="row" style={{ gap: 8 }}>
-              {status === "up-to-date" && <Badge tone="success">Actualizada</Badge>}
-              {hasUpdate && <Badge tone="warning">Actualización disponible</Badge>}
-              {status === "ready" && <Badge tone="success">Lista para reiniciar</Badge>}
+    <Card className="update-card">
+      <div className="update-hero">
+        <div className="update-hero__info">
+          <span className="update-hero__eyebrow">Actualizaciones</span>
+          <div className="update-hero__version">
+            Versión <strong>{version}</strong>
+            <span className={`update-state update-state--${state}`}>
+              {state === "ok" && <CheckCircle2 size={14} />}
+              {stateLabel}
             </span>
-          </dd>
-          <dt>Última comprobación</dt>
-          <dd>{lastChecked ? formatDateTimeForDisplay(lastChecked) : "Aún no se ha comprobado en esta sesión."}</dd>
-          <dt>Detalle</dt>
-          <dd>
-            {status === "checking" && "Buscando actualizaciones…"}
-            {(status === "idle" || status === "error") && "La aplicación busca actualizaciones automáticamente al iniciar."}
-            {status === "up-to-date" && (
-              <span className="row" style={{ gap: 6 }}>
-                <CheckCircle2 size={14} color="var(--color-success)" /> Tu aplicación está actualizada.
-              </span>
-            )}
-            {hasUpdate && <>Nueva versión disponible: <strong>{update.version}</strong></>}
-            {status === "ready" && "La actualización está instalada. Reinicia para usar la nueva versión."}
-          </dd>
-        </dl>
-
-        {status === "downloading" && (
-          <div className="progress">
-            <div className="progress__bar" style={{ width: `${Math.round((progress ?? 0.15) * 100)}%` }} />
           </div>
-        )}
-        {error && <Alert tone="warning">{error}</Alert>}
-        {update?.notes && (status === "available" || status === "downloading") && (
-          <Alert tone="info" title={`Novedades de la versión ${update.version}`}>
-            <span style={{ whiteSpace: "pre-wrap" }}>{update.notes}</span>
-          </Alert>
-        )}
-
-        <div className="row">
+          <span className="update-hero__meta">
+            Última comprobación: {lastChecked ? formatDateTimeForDisplay(lastChecked) : "—"} · La aplicación también busca actualizaciones al iniciar.
+          </span>
+        </div>
+        <div className="update-hero__actions">
           {status === "available" && (
-            <Button variant="primary" icon={<Download size={15} />} onClick={() => void install()}>
-              Actualizar ahora
+            <Button variant="primary" className="btn--lg" icon={<Download size={17} />} onClick={() => void install()}>
+              Actualizar a {update?.version}
             </Button>
           )}
           {status === "ready" && (
-            <Button variant="primary" icon={<RotateCw size={15} />} onClick={() => void restart()}>
+            <Button variant="primary" className="btn--lg" icon={<RotateCw size={17} />} onClick={() => void restart()}>
               Reiniciar ahora
             </Button>
           )}
           {status !== "downloading" && status !== "ready" && (
-            <Button variant={status === "available" ? "secondary" : "primary"} icon={<RefreshCw size={15} />} onClick={() => void check()} loading={status === "checking"}>
+            <Button variant={status === "available" ? "secondary" : "primary"} className="btn--lg" icon={<RefreshCw size={17} />} onClick={() => void check()} loading={status === "checking"}>
               Buscar actualizaciones
             </Button>
           )}
         </div>
-
-        {notes && (
-          <div>
-            <div className="field__label" style={{ marginBottom: 6 }}>
-              Novedades de la versión {version}
-            </div>
-            <ul className="muted" style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-              {notes.notes.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
+
+      {status === "downloading" && (
+        <div className="progress">
+          <div className="progress__bar" style={{ width: `${Math.round((progress ?? 0.15) * 100)}%` }} />
+        </div>
+      )}
+      {error && <Alert tone="warning">{error}</Alert>}
+      {update?.notes && hasUpdate && (
+        <Alert tone="info" title={`Novedades de la versión ${update.version}`}>
+          <span style={{ whiteSpace: "pre-wrap" }}>{update.notes}</span>
+        </Alert>
+      )}
+
+      {notes && (
+        <details className="update-notes">
+          <summary>Novedades de la versión instalada ({version})</summary>
+          <ul>
+            {notes.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </details>
+      )}
     </Card>
   );
 }

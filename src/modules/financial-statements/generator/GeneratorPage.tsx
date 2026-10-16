@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Eye, FileDown, Lock, Pencil, Plus, Unlock, XCircle } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
-import { Alert, Badge, Button, Card, ConfirmDialog, DateInput, Field, Modal, PageHeader, Select, useToast } from "../../../components/ui";
+import { Alert, Button, Card, ConfirmDialog, DateInput, Field, Modal, PageHeader, Select, useToast } from "../../../components/ui";
 import { fileService } from "../../../services/fileService";
 import { fsService } from "../../../services/fsService";
 import { signerService } from "../../../services/signerService";
@@ -164,6 +164,7 @@ export default function GeneratorPage() {
 
   const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea) : []), [statements, review]);
   const allOk = checks.length > 0 && checks.every((c) => c.ok);
+  const pendingChecks = checks.filter((c) => !c.ok).length;
   const closed = period?.status === "closed";
   const closedSnapshot = closed ? (period?.closedSnapshot as StatementsSnapshot | null) : null;
   const accountant = signers.find((x) => x.id === accountantId) ?? null;
@@ -239,9 +240,11 @@ export default function GeneratorPage() {
   return (
     <>
       <PageHeader eyebrow="Estados Financieros" title="Generador de Estados Financieros" description="Estado de Situación Financiera (saldos a la fecha final) y Estado de Resultados (movimientos del rango) por empresa." />
-      <Card>
-        <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
-          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+      <Card title={<StepTitle n={1}>Configuración del periodo</StepTitle>}>
+        <div className="param-bar fs-period-config">
+          <div className="fs-period-config__company">
+            <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+          </div>
           <Field label="Fecha inicial" required>{(id) => <DateInput id={id} value={start} onChange={setStart} />}</Field>
           <Field label="Fecha final" required error={start && end && start > end ? "Debe ser posterior a la inicial." : null}>
             {(id) => <DateInput id={id} value={end} onChange={setEnd} />}
@@ -261,19 +264,42 @@ export default function GeneratorPage() {
       {key && s && shownRows && review && (
         <>
           <Card
-            title={`Periodo ${formatIsoDate(start)} a ${formatIsoDate(end)} · ${PRESENTATION_LABEL[presentation as Presentation]}`}
-            actions={<Badge tone={closed ? "dark" : period?.status === "ready" || period?.status === "pdf_generated" ? "success" : period?.status === "needs_review" ? "warning" : undefined}>{PERIOD_STATUS_LABEL[period?.status ?? "preparing"]}</Badge>}
+            className="fs-period-status"
+            title={<StepTitle n={2}>Estado del periodo</StepTitle>}
+            description={`${formatIsoDate(start)} a ${formatIsoDate(end)} · Presentación ${PRESENTATION_LABEL[presentation as Presentation]} (interna)`}
+            actions={<span className={`period-pill period-pill--${closed ? "closed" : (period?.status ?? "preparing")}`}>{PERIOD_STATUS_LABEL[period?.status ?? "preparing"]}</span>}
           >
             <div className="stack">
-              {period && period.status !== "preparing" && <Alert tone="info">Este periodo ya había sido preparado. Estado: {PERIOD_STATUS_LABEL[period.status]}.</Alert>}
+              <div className="fs-kpis">
+                <div className="fs-kpi">
+                  <span>Total activo</span>
+                  <strong>{formatStatementPesos(roundThousands(s.esf.assets))}</strong>
+                </div>
+                <div className="fs-kpi">
+                  <span>Pasivo + patrimonio</span>
+                  <strong>{formatStatementPesos(roundThousands(s.esf.liabilitiesAndEquity))}</strong>
+                </div>
+                <div className={`fs-kpi ${isBalanced(s) ? "is-ok" : "is-bad"}`}>
+                  <span>Diferencia</span>
+                  <strong>{isBalanced(s) ? "Cuadra" : formatExactCents(Math.abs(s.esf.differenceCents))}</strong>
+                  {!isBalanced(s) && <em>{s.esf.differenceCents > 0 ? "Activo es mayor" : "Pasivo + Patrimonio es mayor"}</em>}
+                </div>
+                <div className={`fs-kpi ${pendingChecks === 0 ? "is-ok" : "is-bad"}`}>
+                  <span>Verificación</span>
+                  <strong>{pendingChecks === 0 ? "Completa" : `${pendingChecks} pendiente${pendingChecks === 1 ? "" : "s"}`}</strong>
+                  <em>
+                    {checks.length - pendingChecks} de {checks.length} puntos
+                  </em>
+                </div>
+              </div>
               {period?.status === "needs_review" && period.reviewReason && <Alert tone="warning">{period.reviewReason}</Alert>}
               {closed && <Alert tone="info" title="Periodo cerrado / bloqueado">Se muestran los valores aprobados al cerrar. No se pueden enviar movimientos, reemplazarlos ni crear ajustes en este rango sin desbloquearlo.</Alert>}
               {!isBalanced(s) && !closed && (
                 <Alert tone="danger" title={`Diferencia: ${formatExactCents(Math.abs(s.esf.differenceCents))}`}>
-                  {s.esf.differenceCents > 0 ? "Activo es mayor" : "Pasivo + Patrimonio es mayor"}. El estado no puede marcarse «Cuadrado» ni generar PDF.
+                  {s.esf.differenceCents > 0 ? "Activo es mayor" : "Pasivo + Patrimonio es mayor"}. El estado no puede marcarse «Cuadrado», generar PDF ni cerrarse.
                 </Alert>
               )}
-              <div className="row" style={{ flexWrap: "wrap" }}>
+              <div className="fs-period-actions">
                 {!closed && (
                   <Button variant="primary" icon={<CheckCircle2 size={15} />} disabled={!allOk || busy !== null || (hashMatches && (period?.status === "ready" || period?.status === "pdf_generated"))} loading={busy === "ready"} onClick={() => void act("ready", () => fsService.markReady(key, hash!), "Periodo cuadrado / listo para generar.")}>
                     Marcar cuadrado / listo
@@ -294,13 +320,13 @@ export default function GeneratorPage() {
                     Desbloquear
                   </Button>
                 )}
+                {pdfMissing.length > 0 && !closed && <span className="field__hint">Para el PDF: {pdfMissing.join(" · ")}.</span>}
               </div>
-              {pdfMissing.length > 0 && !closed && <span className="field__hint">Para el PDF: {pdfMissing.join(" · ")}.</span>}
             </div>
           </Card>
 
-          <div className="fs-grid">
-            <Card title="Lista de verificación">
+          <div className="fs-grid fs-grid--check">
+            <Card title={<StepTitle n={3}>Verificación</StepTitle>}>
               <ul className="fs-checklist">
                 {checks.map((c) => (
                   <li key={c.id} className={c.ok ? "is-ok" : "is-pending"}>
@@ -313,7 +339,7 @@ export default function GeneratorPage() {
                 ))}
               </ul>
             </Card>
-            <Card title="Firmas del PDF">
+            <Card title={<StepTitle n={4}>Firmas del PDF</StepTitle>}>
               <div className="stack">
                 <div>
                   <div className="field__label">Representante legal</div>
@@ -417,7 +443,10 @@ export default function GeneratorPage() {
             </Alert>
           )}
 
-          <div className="fs-grid">
+          <h3 className="fs-section-title">
+            <StepTitle n={5}>Estados financieros</StepTitle>
+          </h3>
+          <div className="fs-grid fs-grid--statements">
             <Card title="Estado de Situación Financiera" description="Saldos acumulados hasta la fecha final. Clic en una línea para ver su origen.">
               <StatementView title="" rows={shownRows.esf} lines={closed ? new Map() : lines} />
             </Card>
@@ -444,7 +473,7 @@ export default function GeneratorPage() {
           )}
 
           <Card
-            title="Fuentes del periodo y cobertura mensual"
+            title={<StepTitle n={6}>Fuentes del periodo y cobertura mensual</StepTitle>}
             description="✓ con información · — sin información · 1/2 cuentas con extracto · N/A cuenta aún no abierta o ya cerrada. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos."
           >
             <CoverageTable
@@ -460,7 +489,7 @@ export default function GeneratorPage() {
 
           <Card
             flush
-            title="Ajustes"
+            title={<StepTitle n={7}>Ajustes</StepTitle>}
             description="Cambios manuales con trazabilidad (motivo, valor anterior, valor final e historial de ediciones)."
             actions={
               !closed && (
@@ -655,3 +684,13 @@ function Item({ label, value }: { label: string; value: string }) {
   );
 }
 
+
+/** Título de sección numerada del Generador (1 · Configuración, 2 · Estado del periodo…). */
+function StepTitle({ n, children }: { n: number; children: string }) {
+  return (
+    <span className="step-title">
+      <span className="form-section__step">{n}</span>
+      {children}
+    </span>
+  );
+}

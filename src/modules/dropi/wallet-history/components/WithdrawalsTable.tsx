@@ -4,7 +4,8 @@ import { Badge, Button, Card, Input } from "../../../../components/ui";
 import { normalizeKey } from "../../../../utils/text";
 import { SearchBox, SegmentedFilter } from "../../../bank-analysis/shared/components/tableControls";
 import { formatCop } from "../../orders/services/format";
-import { INCIDENT_LABEL, INCIDENTS, manualSplit, METHOD_LABEL } from "../services/analysis";
+import { INCIDENT_LABEL, INCIDENTS, manualSplit, METHOD_DETAIL, METHOD_LABEL } from "../services/analysis";
+import { formatDateTimeForDisplay } from "../../../../utils/dates";
 import type { AnalyzedMovement, Incident, WalletAnalysis } from "../types";
 
 export type WithdrawalFilter = "all" | "validated" | "review" | Incident;
@@ -37,6 +38,17 @@ export function StatusBadges({ movement }: { movement: AnalyzedMovement }) {
       ))}
     </span>
   );
+}
+
+/**
+ * Valor pagado / 0,996 frente al MONTO del archivo: la diferencia es el redondeo de
+ * Dropi (4.000.000 / 0,996 = 4.016.064,26 → MONTO 4.016.064 → $0,26).
+ */
+function reconciliationText(m: AnalyzedMovement): string {
+  if (m.paidCents === null || m.amountCents === null) return "—";
+  const expected = m.paidCents / 0.996;
+  const diff = Math.round((expected - m.amountCents) * 100) / 100 / 100;
+  return `Pagado / 0,996 = ${formatCop(Math.round(expected))} · diferencia ${diff === 0 ? "$0" : `${diff > 0 ? "+" : "−"}$${Math.abs(diff).toFixed(2).replace(".", ",")}`}${m.method === "manual" ? " (valor editado)" : " (redondeo de Dropi)"}`;
 }
 
 /** «4.000.000» / «4000000,50» → centavos (null si no es un número). */
@@ -117,19 +129,20 @@ export function WithdrawalsTable({
     });
 
   return (
-    <Card flush title="Detalle" description="Pulsa una fila para ver ID, hora, tipo, MONTO y descripción. Busca por concepto de retiro, fecha o ID.">
+    <Card flush title="Detalle" description="Pulsa una fila para ver ID, hora, tipo, MONTO original, método y diferencia de conciliación. Busca por concepto de retiro, fecha o ID.">
       <div className="toolbar row--between">
         <SegmentedFilter label="Filtrar retiros" options={options} value={filter} onChange={onFilter} />
         <SearchBox placeholder="Concepto, fecha o ID" value={query} onChange={setQuery} />
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap table-wrap--scroll">
         <table className="table">
           <thead>
             <tr>
               <th aria-label="Ver detalle" style={{ width: 36 }} />
               <th>Fecha</th>
+              <th className="num">Monto original</th>
               <th className="num">Valor pagado</th>
-              <th className="num">4x1000</th>
+              <th className="num">Cargo 4x1000 / GMF</th>
               <th>Concepto retiro</th>
               <th>Estado</th>
             </tr>
@@ -137,7 +150,7 @@ export function WithdrawalsTable({
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                <td colSpan={7} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
                   Ningún movimiento coincide con la búsqueda o el filtro.
                 </td>
               </tr>
@@ -152,6 +165,7 @@ export function WithdrawalsTable({
                       <Chevron size={15} />
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>{m.date || "—"}</td>
+                    <td className="num muted">{m.amountCents === null ? m.amountText || "—" : formatCop(m.amountCents)}</td>
                     <td className="num" title={m.amountCents === null ? undefined : `MONTO (incluye 4x1000): ${formatCop(m.amountCents)}`}>
                       {money(m.paidCents)}
                     </td>
@@ -173,15 +187,22 @@ export function WithdrawalsTable({
                   {expanded && (
                     <tr className="wallet-detail">
                       <td />
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <div className="summary-grid">
                           <Info label="ID" value={m.id || "—"} />
                           <Info label="Fecha y hora" value={[m.date, m.time].filter(Boolean).join(" ") || "—"} />
                           <Info label="Fila en el Excel" value={String(m.rowNumber)} />
                           <Info label="Tipo" value={m.type || "—"} />
                           <Info label="Monto (incluye 4x1000)" value={m.amountCents === null ? m.amountText || "(vacío)" : formatCop(m.amountCents)} />
-                          <Info label="Valor pagado + 4x1000" value={m.paidCents === null ? "—" : `${formatCop(m.paidCents)} + ${formatCop(m.gmfCents!)}`} />
-                          <Info label="Método" value={m.method ? METHOD_LABEL[m.method] : "Sin solución: requiere revisión"} />
+                          <Info label="Valor pagado + cargo" value={m.paidCents === null ? "—" : `${formatCop(m.paidCents)} + ${formatCop(m.gmfCents!)}`} />
+                          <Info label="Método" value={m.method ? `${METHOD_LABEL[m.method]} — ${METHOD_DETAIL[m.method]}` : "Requiere revisión: no se identificó una base cerrada"} />
+                          {m.manualEdit && (
+                            <Info
+                              label="Edición manual"
+                              value={`${formatDateTimeForDisplay(m.manualEdit.editedAt)} · antes ${money(m.manualEdit.previousPaidCents)} + ${money(m.manualEdit.previousGmfCents)} → ahora ${money(m.paidCents)} + ${money(m.gmfCents)}`}
+                            />
+                          )}
+                          <Info label="Diferencia de conciliación" value={reconciliationText(m)} />
                           {m.method === "manual" && <Info label="Valor pagado calculado" value={m.calculatedPaidCents === null ? "Sin solución" : formatCop(m.calculatedPaidCents)} />}
                           <Info label="Descripción encontrada" value={m.description || "(vacía)"} />
                           <Info label="Incidencias" value={m.incidents.length === 0 ? "Ninguna" : m.incidents.map((i) => (i === "invalid_amount" && m.amountProblem ? m.amountProblem : INCIDENT_LABEL[i])).join(" · ")} />

@@ -29,6 +29,8 @@ export const SOURCE_PATH: Record<FsSource, string> = {
 
 const MAX_ROWS = 500;
 
+const STATUS_TONE: Record<MovementStatus, "success" | "warning" | "danger" | "gold" | undefined> = { active: "success", replaced: "warning", adjusted: "gold", ignored: undefined, voided: "danger" };
+
 /**
  * Centro de revisión y trazabilidad de todo lo enviado a Estados Financieros.
  * Cada movimiento se puede editar (fecha, PUC, concepto, valor, descripción o
@@ -114,9 +116,12 @@ export default function MovementsPage() {
       />
       <Card>
         <div className="stack">
-          <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+          {companyId === null && <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />}
           {companyId !== null && (
-            <div className="form-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
+            <div className="filter-grid">
+              <div className="filter-grid__wide">
+                <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} />
+              </div>
               <Field label="Desde">{(id) => <DateInput id={id} value={filters.from} onChange={(v) => set("from")({ target: { value: v } })} />}</Field>
               <Field label="Hasta">{(id) => <DateInput id={id} value={filters.to} onChange={(v) => set("to")({ target: { value: v } })} />}</Field>
               <Field label="Periodo">{(id) => <Input id={id} type="month" value={filters.period} onChange={set("period")} />}</Field>
@@ -174,7 +179,17 @@ export default function MovementsPage() {
               <EmptyState title="Sin movimientos" description="No hay movimientos con estos filtros." />
             ) : (
               <div className="table-wrap table-wrap--scroll" style={{ maxHeight: "62vh" }}>
-                <table className="table">
+                <table className="table table--dense movements-table">
+                  <colgroup>
+                    <col style={{ width: 32 }} />
+                    <col style={{ width: 86 }} />
+                    <col style={{ width: 112 }} />
+                    <col />
+                    <col style={{ width: "22%" }} />
+                    <col style={{ width: 124 }} />
+                    <col style={{ width: 88 }} />
+                    <col style={{ width: 40 }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>
@@ -187,11 +202,11 @@ export default function MovementsPage() {
                       </th>
                       <th>Fecha</th>
                       <th>Origen</th>
-                      <th>Documento</th>
-                      <th>Tercero / descripción</th>
-                      <th>PUC</th>
-                      <th style={{ textAlign: "right" }}>Valor</th>
+                      <th>Tercero · documento</th>
+                      <th>PUC · concepto</th>
+                      <th className="num">Valor</th>
                       <th>Estado</th>
+                      <th />
                     </tr>
                   </thead>
                   <tbody>
@@ -214,26 +229,44 @@ export default function MovementsPage() {
                             />
                           )}
                         </td>
-                        <td>{formatIsoDate(m.accountingDate)}</td>
+                        <td className="nowrap">{formatIsoDate(m.accountingDate)}</td>
                         <td>
-                          {SOURCE_LABEL[m.source]}
-                          <div className="table__secondary">Importación #{m.batchId}</div>
+                          <span className={`source-tag source-tag--${m.source}`} title={SOURCE_LABEL[m.source]}>
+                            {SOURCE_LABEL[m.source]}
+                          </span>
+                          <div className="table__secondary nowrap">Importación #{m.batchId}</div>
                         </td>
-                        <td>{m.documentNumber || "—"}</td>
-                        <td>
-                          <span className="table__primary">{m.supplierName || (m.bank ? `${m.bank} ${m.accountNumber}` : "")}</span>
-                          <div className="table__secondary">{m.description}</div>
+                        <td title={[m.supplierName, m.documentNumber && `Doc. ${m.documentNumber}`, m.description].filter(Boolean).join(" · ")}>
+                          <div className="cell-ellipsis table__primary">{m.supplierName || (m.bank ? `${m.bank} ${m.accountNumber}` : m.description || "—")}</div>
+                          <div className="cell-ellipsis table__secondary">{[m.documentNumber && `Doc. ${m.documentNumber}`, (m.supplierName || m.bank) && m.description].filter(Boolean).join(" · ")}</div>
                         </td>
-                        <td>
-                          <span className="mono">{m.pucCode}</span>
-                          <div className="table__secondary">{m.pucConcept}</div>
+                        <td title={`${m.pucCode} — ${m.pucConcept}`}>
+                          <div className="cell-ellipsis">
+                            <span className="mono puc-code-inline">{m.pucCode}</span> {m.pucConcept}
+                          </div>
                         </td>
-                        <td style={{ textAlign: "right" }} className={m.amountCents < 0 ? "amount--negative" : undefined}>
+                        <td className={`num nowrap ${m.amountCents < 0 ? "amount--negative" : ""}`}>
                           {formatExactCents(m.amountCents)}
-                          {m.dc && <div className="table__secondary">{m.dc === "D" ? "Salida del banco" : "Entrada al banco"}</div>}
+                          {m.dc && <div className="table__secondary">{m.dc === "D" ? "Salida" : "Entrada"}</div>}
                         </td>
                         <td>
-                          <Badge tone={m.status === "active" ? "success" : m.status === "replaced" ? "warning" : undefined}>{MOVEMENT_STATUS_LABEL[m.status]}</Badge>
+                          <Badge tone={STATUS_TONE[m.status]}>{MOVEMENT_STATUS_LABEL[m.status]}</Badge>
+                        </td>
+                        <td className="actions" onClick={(e) => e.stopPropagation()}>
+                          {m.status === "active" && m.source !== "adjustment" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              iconOnly
+                              icon={<Pencil size={14} />}
+                              aria-label={`Editar movimiento ${m.id}`}
+                              title="Editar movimiento"
+                              onClick={() => {
+                                setOpen(m);
+                                setEditing(true);
+                              }}
+                            />
+                          )}
                         </td>
                       </tr>
                     ))}

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
-import { Alert, Button, Card, ConfirmDialog, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
+import { Alert, Button, Card, ConfirmDialog, Field, Input, Loader, Modal, PageHeader, SaveBar, Select, useToast } from "../components/ui";
+import { SearchBox, SegmentedFilter } from "../modules/bank-analysis/shared/components/tableControls";
+import { normalizeKey } from "../utils/text";
 import { useAsync } from "../hooks/useAsync";
 import { withholdingService } from "../services/withholdingService";
 import { RETENTION_TYPE_LABEL, RETENTION_TYPES, type RetentionType, type WithholdingRate } from "../types/models";
@@ -37,6 +39,8 @@ export function WithholdingTablePage() {
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<{ rate: WithholdingRate; usage: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<RetentionType | "all">("all");
+  const [query, setQuery] = useState("");
 
   // Año por defecto: el actual si existe, si no el más reciente.
   useEffect(() => {
@@ -48,7 +52,6 @@ export function WithholdingTablePage() {
   const uvt = uvts.find((u) => u.year === year);
   useEffect(() => setUvtText(uvt ? formatInteger(uvt.valuePesos) : ""), [uvt]);
 
-  const dirty = Object.keys(edits).length > 0;
   const parsedEdits = useMemo(
     () =>
       Object.entries(edits).map(([id, e]) => ({
@@ -127,6 +130,9 @@ export function WithholdingTablePage() {
   }
 
   const sorted = [...rates].sort((a, b) => RETENTION_TYPES.indexOf(a.retentionType) - RETENTION_TYPES.indexOf(b.retentionType) || a.sortOrder - b.sortOrder);
+  const q = normalizeKey(query);
+  const visible = sorted.filter((r) => (typeFilter === "all" || r.retentionType === typeFilter) && (!q || normalizeKey(r.name).includes(q)));
+  const groups = RETENTION_TYPES.map((t) => ({ type: t, rows: visible.filter((r) => r.retentionType === t) })).filter((g) => g.rows.length > 0);
 
   return (
     <>
@@ -144,64 +150,63 @@ export function WithholdingTablePage() {
         <Loader />
       ) : (
         <>
-          <Card title="Valor UVT">
-            <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-              <Field label="Año">
-                {(id) => (
-                  <Select id={id} value={year ?? ""} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 120 }}>
-                    {uvts.map((u) => (
-                      <option key={u.year} value={u.year}>
-                        {u.year}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </Field>
-              <Field label="Valor">
-                {(id) => <Input id={id} value={uvtText} onChange={(e) => setUvtText(e.target.value)} placeholder="52.374" inputMode="numeric" style={{ width: 160 }} disabled={!uvt} />}
-              </Field>
-              <Button icon={<Save size={14} />} onClick={() => year !== null && void saveUvt(year, uvtText)} loading={savingUvt} disabled={!uvt || parseWholePesos(uvtText) === uvt?.valuePesos}>
-                Guardar UVT
-              </Button>
-              <span style={{ flex: 1 }} />
-              <Field label="Agregar año">
-                {(id) => <Input id={id} value={newYear} onChange={(e) => setNewYear(e.target.value)} placeholder={String((uvts[uvts.length - 1]?.year ?? 2026) + 1)} inputMode="numeric" style={{ width: 100 }} />}
-              </Field>
-              <Field label="Valor UVT">
-                {(id) => <Input id={id} value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Pesos" inputMode="numeric" style={{ width: 130 }} />}
-              </Field>
-              <Button
-                icon={<Plus size={14} />}
-                disabled={!/^\d{4}$/.test(newYear) || uvts.some((u) => u.year === Number(newYear)) || parseWholePesos(newValue) === null || savingUvt}
-                title={uvts.some((u) => u.year === Number(newYear)) ? "Ese año ya existe: edítalo arriba." : undefined}
-                onClick={() => void saveUvt(Number(newYear), newValue)}
-              >
-                Agregar
-              </Button>
+          <Card>
+            <div className="param-bar">
+              <div className="param-bar__group">
+                <Field label="UVT del año">
+                  {(id) => (
+                    <Select id={id} value={year ?? ""} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 100 }}>
+                      {uvts.map((u) => (
+                        <option key={u.year} value={u.year}>
+                          {u.year}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+                <Field label="Valor">
+                  {(id) => <Input id={id} value={uvtText} onChange={(e) => setUvtText(e.target.value)} placeholder="52.374" inputMode="numeric" style={{ width: 130 }} disabled={!uvt} />}
+                </Field>
+                <Button icon={<Save size={14} />} onClick={() => year !== null && void saveUvt(year, uvtText)} loading={savingUvt} disabled={!uvt || parseWholePesos(uvtText) === uvt?.valuePesos}>
+                  Guardar
+                </Button>
+              </div>
+              <span className="param-bar__sep" aria-hidden />
+              <div className="param-bar__group">
+                <Field label="Agregar año">
+                  {(id) => <Input id={id} value={newYear} onChange={(e) => setNewYear(e.target.value)} placeholder={String((uvts[uvts.length - 1]?.year ?? 2026) + 1)} inputMode="numeric" style={{ width: 90 }} />}
+                </Field>
+                <Field label="Valor UVT">
+                  {(id) => <Input id={id} value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Pesos" inputMode="numeric" style={{ width: 120 }} />}
+                </Field>
+                <Button
+                  icon={<Plus size={14} />}
+                  disabled={!/^\d{4}$/.test(newYear) || uvts.some((u) => u.year === Number(newYear)) || parseWholePesos(newValue) === null || savingUvt}
+                  title={uvts.some((u) => u.year === Number(newYear)) ? "Ese año ya existe: edítalo a la izquierda." : undefined}
+                  onClick={() => void saveUvt(Number(newYear), newValue)}
+                >
+                  Agregar
+                </Button>
+              </div>
+              {uvts.length > 1 && <span className="muted" style={{ fontSize: "var(--text-sm)", alignSelf: "center" }}>Histórico: {uvts.map((u) => `${u.year} → ${formatCop(u.valuePesos * 100)}`).join(" · ")}</span>}
             </div>
-            {uvts.length > 1 && (
-              <p className="muted" style={{ fontSize: "var(--text-sm)", marginBottom: 0 }}>
-                Histórico: {uvts.map((u) => `${u.year} → ${formatCop(u.valuePesos * 100)}`).join(" · ")}
-              </p>
-            )}
           </Card>
 
-          <Card
-            flush
-            title="Conceptos de retención"
-            description={uvt ? `Base mínima calculada con el UVT ${uvt.year} (${formatCop(uvt.valuePesos * 100)}).` : "Registra el valor UVT para calcular las bases mínimas."}
-            actions={
-              <Button variant="primary" icon={<Save size={14} />} onClick={() => void saveRates()} loading={savingRates} disabled={!dirty}>
-                Guardar cambios
-              </Button>
-            }
-          >
-            <div className="table-wrap">
-              <table className="table">
+          <Card flush title="Conceptos de retención" description={uvt ? `Base mínima = Base UVT × UVT ${uvt.year} (${formatCop(uvt.valuePesos * 100)}).` : "Registra el valor UVT para calcular las bases mínimas."}>
+            <div className="table-toolbar">
+              <SegmentedFilter
+                label="Filtrar por tipo"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={[{ id: "all" as const, label: "Todos" }, ...RETENTION_TYPES.map((t) => ({ id: t, label: RETENTION_TYPE_LABEL[t] }))]}
+              />
+              <SearchBox placeholder="Buscar concepto" value={query} onChange={setQuery} />
+            </div>
+            <div className="table-wrap table-wrap--scroll">
+              <table className="table table--dense">
                 <thead>
                   <tr>
-                    <th>Tipo</th>
-                    <th>Concepto</th>
+                    <th>Concepto / subtipo</th>
                     <th className="num">Base UVT</th>
                     <th className="num">Base mínima pesos</th>
                     <th className="num">Tarifa (%)</th>
@@ -209,30 +214,46 @@ export function WithholdingTablePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((r) => {
-                    const e = edits[r.id];
-                    const base = e ? parseHundredths(e.base) : r.baseUvtCenti;
-                    return (
-                      <tr key={r.id}>
-                        <td style={{ whiteSpace: "nowrap" }}>{RETENTION_TYPE_LABEL[r.retentionType]}</td>
-                        <td className="table__primary">{r.name}</td>
-                        <td className="num" style={{ width: 110 }}>
-                          <Input aria-label={`Base UVT de ${r.name}`} className="input--right" value={e?.base ?? formatUvt(r.baseUvtCenti)} onChange={(ev) => edit(r, { base: ev.target.value })} invalid={e !== undefined && base === null} inputMode="decimal" />
-                        </td>
-                        <td className="num" style={{ whiteSpace: "nowrap" }}>{uvt && base !== null ? formatCop(minBaseCents(base, uvt.valuePesos)) : "—"}</td>
-                        <td className="num" style={{ width: 110 }}>
-                          <Input aria-label={`Tarifa de ${r.name}`} className="input--right" value={e?.rate ?? rateText(r.rateBp)} onChange={(ev) => edit(r, { rate: ev.target.value })} invalid={e !== undefined && (parseHundredths(e.rate) === null || parseHundredths(e.rate)! > 10_000)} inputMode="decimal" />
-                        </td>
-                        <td className="actions">
-                          <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" onClick={() => void askDelete(r)} />
+                  {groups.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                        Ningún concepto coincide con el filtro.
+                      </td>
+                    </tr>
+                  )}
+                  {groups.map((g) => (
+                    <Fragment key={g.type}>
+                      <tr className="table-group">
+                        <td colSpan={5}>
+                          {RETENTION_TYPE_LABEL[g.type]} · {g.rows.length}
                         </td>
                       </tr>
-                    );
-                  })}
+                      {g.rows.map((r) => {
+                        const e = edits[r.id];
+                        const base = e ? parseHundredths(e.base) : r.baseUvtCenti;
+                        return (
+                          <tr key={r.id} className={e ? "is-edited" : undefined}>
+                            <td className="table__primary">{r.name}</td>
+                            <td className="num" style={{ width: 110 }}>
+                              <Input aria-label={`Base UVT de ${r.name}`} className="input--right" value={e?.base ?? formatUvt(r.baseUvtCenti)} onChange={(ev) => edit(r, { base: ev.target.value })} invalid={e !== undefined && base === null} inputMode="decimal" />
+                            </td>
+                            <td className="num" style={{ whiteSpace: "nowrap", width: 160 }}>{uvt && base !== null ? formatCop(minBaseCents(base, uvt.valuePesos)) : "—"}</td>
+                            <td className="num" style={{ width: 110 }}>
+                              <Input aria-label={`Tarifa de ${r.name}`} className="input--right" value={e?.rate ?? rateText(r.rateBp)} onChange={(ev) => edit(r, { rate: ev.target.value })} invalid={e !== undefined && (parseHundredths(e.rate) === null || parseHundredths(e.rate)! > 10_000)} inputMode="decimal" />
+                            </td>
+                            <td className="actions">
+                              <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" title="Eliminar concepto" onClick={() => void askDelete(r)} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
           </Card>
+          <SaveBar count={Object.keys(edits).length} saving={savingRates} disabled={invalid} onSave={() => void saveRates()} onDiscard={() => setEdits({})} />
         </>
       )}
 

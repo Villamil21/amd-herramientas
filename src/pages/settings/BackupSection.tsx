@@ -57,30 +57,26 @@ export function BackupSection() {
   }
 
   return (
-    <Card title="Copia de seguridad" description="Traslada tu información a otro computador o recupérala si es necesario.">
+    <Card title="Copias de seguridad" description="Traslada tu información a otro computador o recupérala si es necesario.">
       <div className="stack">
         {error && <Alert tone="danger">{error}</Alert>}
-        <div className="row row--between">
-          <div>
+        <div className="backup-grid">
+          <div className="backup-tile">
+            <Download size={20} aria-hidden />
             <strong>Exportar datos</strong>
-            <p className="muted" style={{ fontSize: 13 }}>
-              Genera un archivo .json con empresas (incluidos sus logos), conceptos, firmantes (incluidas sus firmas PNG), proveedores, clasificación de estados de Dropi y configuración.
-            </p>
+            <p className="muted">Archivo .json con empresas (y logos), firmas PNG, proveedores, conceptos, tablas, Estados Financieros y configuración.</p>
+            <Button icon={<Download size={15} />} onClick={() => void exportData()} loading={exporting}>
+              Exportar datos
+            </Button>
           </div>
-          <Button icon={<Download size={15} />} onClick={() => void exportData()} loading={exporting}>
-            Exportar datos
-          </Button>
-        </div>
-        <div className="row row--between">
-          <div>
+          <div className="backup-tile">
+            <Upload size={20} aria-hidden />
             <strong>Importar datos</strong>
-            <p className="muted" style={{ fontSize: 13 }}>
-              Restaura un archivo exportado. Reemplaza la información actual después de tu confirmación.
-            </p>
+            <p className="muted">Restaura un archivo exportado. Reemplaza la información actual después de tu confirmación.</p>
+            <Button icon={<Upload size={15} />} onClick={() => void pickBackup()} loading={picking}>
+              Importar datos
+            </Button>
           </div>
-          <Button icon={<Upload size={15} />} onClick={() => void pickBackup()} loading={picking}>
-            Importar datos
-          </Button>
         </div>
         <Alert tone="info">
           Antes de importar y antes de cada actualización que modifique la base de datos, la aplicación guarda una copia automática (se

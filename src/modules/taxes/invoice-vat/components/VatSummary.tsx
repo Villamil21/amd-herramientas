@@ -2,20 +2,39 @@ import { Card } from "../../../../components/ui";
 import { formatCop as formatMoneyCents } from "../parser/amounts";
 import { NOTES_CATEGORY, SUMMARY_CATEGORIES, summaryTotal } from "../services/labels";
 import type { VatSummaryData } from "../types";
+import { pastePesos, tabulate } from "../../../../utils/clipboard";
+import { CopyTableButton } from "../../shared/TaxSection";
 
 const docs = (n: number) => (n === 1 ? "1 documento validado" : `${n} documentos validados`);
 
+/** Texto tabulado de la tabla Factura electrónica (Categoría · Base · IVA), con el total. */
+export function invoicesTable(summary: VatSummaryData): string {
+  const total = summaryTotal(summary.invoices);
+  return tabulate([
+    ["Categoría", "Base", "IVA"],
+    ...SUMMARY_CATEGORIES.map((c) => [c.label, pastePesos(c.value(summary.invoices).baseCents), pastePesos(c.value(summary.invoices).vatCents)]),
+    ["Total", pastePesos(total.baseCents), pastePesos(total.vatCents)],
+  ]);
+}
+
+export function notesTable(summary: VatSummaryData): string {
+  return tabulate([
+    ["Categoría", "Base", "IVA"],
+    [NOTES_CATEGORY, pastePesos(summary.notes.baseCents), pastePesos(summary.notes.vatCents)],
+  ]);
+}
+
 /**
- * Resumen para la declaración: las Facturas electrónicas por renglón y, en su
- * propia sección, las Notas crédito en una sola fila (sin netear entre ellas).
- * Solo suman los documentos validados.
+ * Resumen para declaración: las Facturas electrónicas por renglón y, aparte,
+ * las Notas crédito en una sola fila (sin netear entre ellas). Solo suman los
+ * documentos validados. Se copian y pegan en la declaración («Copiar tabla»).
  */
 export function VatSummary({ summary }: { summary: VatSummaryData }) {
   const { invoices, notes } = summary;
   const total = summaryTotal(invoices);
   return (
-    <>
-      <Card flush title="Factura electrónica" description={docs(invoices.documentCount)}>
+    <div className="tax-declaration-grid">
+      <Card flush title="Factura electrónica" description={docs(invoices.documentCount)} actions={<CopyTableButton text={() => invoicesTable(summary)} />}>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -44,7 +63,7 @@ export function VatSummary({ summary }: { summary: VatSummaryData }) {
           </table>
         </div>
       </Card>
-      <Card flush title="Notas crédito" description={docs(notes.documentCount)}>
+      <Card flush title="Notas crédito" description={docs(notes.documentCount)} actions={<CopyTableButton text={() => notesTable(summary)} />}>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -64,6 +83,6 @@ export function VatSummary({ summary }: { summary: VatSummaryData }) {
           </table>
         </div>
       </Card>
-    </>
+    </div>
   );
 }

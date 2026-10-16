@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Check, HandCoins, Pencil, Save, Trash2, X } from "lucide-react";
-import { Alert, Badge, Button, Field, Input, Modal, Select, useToast } from "../../components/ui";
+import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Alert, Button, Field, FormSection, Input, Modal, Select, useToast } from "../../components/ui";
 import { pucService } from "../../services/pucService";
 import { supplierService } from "../../services/supplierService";
 import { errorMessage } from "../../services/tauri";
 import { withholdingService } from "../../services/withholdingService";
-import { BASE_MODE_LABEL, PERSON_TYPE_LABEL, RETENTION_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier, type VatType, type WithholdingRate } from "../../types/models";
+import { PERSON_TYPE_LABEL, VAT_TYPE_LABEL, type PersonType, type Supplier, type VatType, type WithholdingRate } from "../../types/models";
+import { formatDateForDisplay } from "../../utils/dates";
+import { completeRules, rulesFromSupplier, WithholdingRulesEditor, type RuleDraft } from "./WithholdingRulesEditor";
 
 interface Props {
   open: boolean;
@@ -16,10 +18,8 @@ interface Props {
    * registrado no se crea otro: se usa el existente.
    */
   draft?: { nit: string; businessName: string };
-  /** Subtipos de retención (para mostrar las reglas del proveedor). */
+  /** Subtipos de retención (Tabla de retenciones). */
   rates?: WithholdingRate[];
-  /** Abre PJ / PN y reglas de retención del proveedor. */
-  onEditWithholding?: (supplier: Supplier) => void;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -29,11 +29,41 @@ export function normalizeNit(value: string): string {
   return (value.split("-")[0] ?? "").replace(/\D/g, "");
 }
 
-export function SupplierFormModal({ open, supplier, draft, rates = [], onEditWithholding, onClose, onSaved }: Props) {
+/** Responsabilidades fiscales que la aplicación reconoce en las facturas. */
+export const FISCAL_CODES: { code: string; label: string; ignoresWithholding?: boolean }[] = [
+  { code: "O-13", label: "Gran contribuyente" },
+  { code: "O-15", label: "Autorretenedor", ignoresWithholding: true },
+  { code: "O-23", label: "Agente de retención IVA" },
+  { code: "O-47", label: "Régimen simple", ignoresWithholding: true },
+  { code: "R-99-PN", label: "No aplica / otros" },
+];
+
+/** «O-13;O-15» → ["O-13", "O-15"] (sin distinguir separadores ni mayúsculas). */
+export const regimeCodes = (regime: string) =>
+  regime
+    .toUpperCase()
+    .split(/[;,\s]+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+function toggleCode(regime: string, code: string): string {
+  const codes = regimeCodes(regime);
+  return (codes.includes(code) ? codes.filter((c) => c !== code) : [...codes, code]).join("; ");
+}
+
+/**
+ * Proveedor completo. Nuevo: NIT, razón social y Tipo IVA. Existente:
+ * Identificación, IVA, Clasificación fiscal, Retención e Historial de
+ * decisiones, con un solo «Guardar» (nada se resetea: se guarda lo que cambió).
+ */
+export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, onSaved }: Props) {
   const toast = useToast();
   const [nit, setNit] = useState("");
   const [name, setName] = useState("");
   const [vatType, setVatType] = useState<VatType | "">("");
+  const [personType, setPersonType] = useState<PersonType | "">("");
+  const [regime, setRegime] = useState("");
+  const [rules, setRules] = useState<RuleDraft[]>([]);
   const [errors, setErrors] = useState<{ nit?: string; name?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -43,6 +73,9 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onEditWit
     setNit(supplier?.nit ?? draft?.nit ?? "");
     setName(supplier?.businessName ?? draft?.businessName ?? "");
     setVatType(supplier?.vatType ?? "");
+    setPersonType(supplier?.personType ?? "");
+    setRegime(supplier?.fiscalRegime ?? "");
+    setRules(rulesFromSupplier(supplier, rates));
     setErrors({});
     setError(null);
     // Solo al abrir: después manda lo que escribe el usuario.
@@ -56,16 +89,26 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onEditWit
     if (!name.trim()) errs.name = "La razón social es obligatoria.";
     setErrors(errs);
     if (Object.keys(errs).length) return;
+    const checked = completeRules(rules);
+    if (supplier && checked.error) return setError(checked.error);
 
     setSaving(true);
     setError(null);
     // NIT y razón social bastan: el Tipo IVA puede quedar sin configurar, nunca se inventa.
     const input = { nit: cleanNit, businessName: name.trim(), vatType: vatType || null };
     try {
-      const existing = draft && !supplier ? (await supplierService.list(cleanNit)).find((s) => s.nit === cleanNit) : undefined;
-      if (supplier) await supplierService.update(supplier.id, input);
-      else if (!existing) await supplierService.create(input);
-      toast(supplier ? "Proveedor actualizado." : existing ? `El NIT ${cleanNit} ya estaba registrado: se usa el proveedor existente.` : "Proveedor creado.");
+      if (supplier) {
+        await supplierService.update(supplier.id, input);
+        if (regime.trim() !== (supplier.fiscalRegime ?? "")) await withholdingService.setFiscalRegime(supplier.id, regime.trim());
+        const before = JSON.stringify({ p: supplier.personType ?? null, r: completeRules(rulesFromSupplier(supplier, rates)).rules });
+        const after = JSON.stringify({ p: personType || null, r: checked.rules });
+        if (before !== after) await withholdingService.saveSupplierProfile(supplier.id, { personType: personType || null, rules: checked.rules });
+        toast("Proveedor actualizado.");
+      } else {
+        const existing = draft ? (await supplierService.list(cleanNit)).find((s) => s.nit === cleanNit) : undefined;
+        if (!existing) await supplierService.create(input);
+        toast(existing ? `El NIT ${cleanNit} ya estaba registrado: se usa el proveedor existente.` : "Proveedor creado.");
+      }
       onSaved();
     } catch (e) {
       setError((e as Error).message);
@@ -74,10 +117,13 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onEditWit
     }
   }
 
+  const codes = regimeCodes(regime);
+  const ignored = FISCAL_CODES.filter((c) => c.ignoresWithholding && codes.includes(c.code));
+
   return (
     <Modal
       open={open}
-      size={supplier ? "lg" : undefined}
+      size={supplier ? "xl" : undefined}
       title={supplier ? "Editar proveedor" : "Nuevo proveedor"}
       onClose={onClose}
       locked={saving}
@@ -100,116 +146,118 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onEditWit
         }}
       >
         {error && <Alert tone="danger">{error}</Alert>}
-        <div className="form-grid">
-          <Field label="NIT" required hint="Sin dígito de verificación. Es la clave para reconocer las facturas." error={errors.nit}>
-            {(id) => <Input id={id} value={nit} onChange={(e) => setNit(e.target.value)} invalid={!!errors.nit} placeholder="900319753" inputMode="numeric" autoFocus={!draft} readOnly={!!draft} />}
-          </Field>
-          <Field label="Tipo IVA" hint="Opcional. IVA de compras lo pide cuando lo necesita.">
-            {(id) => (
-              <Select id={id} value={vatType} onChange={(e) => setVatType(e.target.value as VatType | "")}>
-                <option value="">Sin configurar</option>
-                {Object.entries(VAT_TYPE_LABEL).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
+        <div className={supplier ? "supplier-form" : "stack"}>
+          <FormSection step={supplier ? 1 : undefined} title="Identificación" className="span-full">
+            <div className={`form-grid form-grid--compact${supplier ? " form-grid--3" : ""}`}>
+              <Field label="NIT" required hint="Sin dígito de verificación. Reconoce las facturas." error={errors.nit}>
+                {(id) => <Input id={id} value={nit} onChange={(e) => setNit(e.target.value)} invalid={!!errors.nit} placeholder="900319753" inputMode="numeric" autoFocus={!draft && !supplier} readOnly={!!draft} />}
+              </Field>
+              <Field label="Razón social" required error={errors.name}>
+                {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} invalid={!!errors.name} placeholder="PRICESMART COLOMBIA S.A.S." autoFocus={!!draft} />}
+              </Field>
+              <Field label="Tipo IVA" hint="Opcional. IVA de compras lo pide cuando lo necesita.">
+                {(id) => (
+                  <Select id={id} value={vatType} onChange={(e) => setVatType(e.target.value as VatType | "")}>
+                    <option value="">Sin configurar</option>
+                    {Object.entries(VAT_TYPE_LABEL).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            </div>
+          </FormSection>
+
+          {supplier && (
+            <>
+              <FormSection step={2} title="Datos fiscales" className="span-full">
+                <div className="form-grid form-grid--compact">
+                  <Field label="Tipo de persona">
+                    {(id) => (
+                      <Select id={id} value={personType} onChange={(e) => setPersonType(e.target.value as PersonType | "")}>
+                        <option value="">Sin configurar</option>
+                        {(Object.keys(PERSON_TYPE_LABEL) as PersonType[]).map((p) => (
+                          <option key={p} value={p}>
+                            {p} — {PERSON_TYPE_LABEL[p]}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                  <Field label="Régimen / responsabilidades fiscales" hint="Como aparece en la factura. Usa los botones o escribe otros códigos.">
+                    {(id) => <Input id={id} value={regime} onChange={(e) => setRegime(e.target.value)} placeholder="Sin verificar" />}
+                  </Field>
+                </div>
+                <div className="fiscal-chips" role="group" aria-label="Responsabilidades fiscales">
+                  {FISCAL_CODES.map((c) => (
+                    <button key={c.code} type="button" className={`fiscal-chip ${codes.includes(c.code) ? "is-on" : ""}`} aria-pressed={codes.includes(c.code)} onClick={() => setRegime((r) => toggleCode(r, c.code))}>
+                      <strong>{c.code}</strong> {c.label}
+                    </button>
+                  ))}
+                </div>
+                {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención).</Alert>}
+              </FormSection>
+
+              <FormSection step={3} title="Retención" className="span-full" hint="Se reutiliza en cada factura del proveedor en Retención en la fuente compras.">
+                <WithholdingRulesEditor rules={rules} onChange={setRules} rates={rates} />
+              </FormSection>
+
+              <FormSection step={4} title="Códigos PUC utilizados" className="span-full" hint="Solo sugieren la clasificación de compras futuras; ninguna compra se clasifica sin tu confirmación.">
+                <PucCodesSection supplierId={supplier.id} />
+              </FormSection>
+
+              <FormSection step={5} title="Historial de decisiones" className="span-full">
+                <DecisionHistory supplier={supplier} rates={rates} />
+              </FormSection>
+            </>
+          )}
         </div>
-        <Field label="Razón social" required error={errors.name}>
-          {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} invalid={!!errors.name} placeholder="PRICESMART COLOMBIA S.A.S." autoFocus={!!draft} />}
-        </Field>
         <button type="submit" hidden />
       </form>
-      {supplier && open && (
-        <>
-          <FiscalSection supplier={supplier} rates={rates} onEditWithholding={onEditWithholding} onChanged={onSaved} />
-          <PucCodesSection supplierId={supplier.id} />
-        </>
-      )}
     </Modal>
   );
 }
 
-/** Información fiscal que ya usa la aplicación (Retención en la fuente): PJ / PN, régimen y reglas de retención. */
-function FiscalSection({ supplier: s, rates, onEditWithholding, onChanged }: { supplier: Supplier; rates: WithholdingRate[]; onEditWithholding?: (s: Supplier) => void; onChanged: () => void }) {
-  const toast = useToast();
-  const [regime, setRegime] = useState(s.fiscalRegime ?? "");
-  const [saving, setSaving] = useState(false);
+/** Decisiones que la aplicación reutiliza para el proveedor, agrupadas por el módulo que las usa. */
+function DecisionHistory({ supplier: s, rates }: { supplier: Supplier; rates: WithholdingRate[] }) {
   const rules = s.withholdingRules ?? [];
-  async function saveRegime() {
-    setSaving(true);
-    try {
-      await withholdingService.setFiscalRegime(s.id, regime.trim());
-      toast("Régimen guardado.");
-      onChanged();
-    } catch (e) {
-      toast(errorMessage(e), "error");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const [codes, setCodes] = useState<string[] | null>(null);
+  useEffect(() => {
+    void pucService.listSupplierCodes(s.id).then(setCodes, () => setCodes([]));
+  }, [s.id]);
+  const groups: { module: string; items: string[] }[] = [
+    { module: "IVA de compras", items: [s.vatType ? `Tipo IVA «${VAT_TYPE_LABEL[s.vatType]}»: clasifica sus facturas sin volver a preguntar.` : "Tipo IVA sin configurar: se pedirá en la próxima factura."] },
+    {
+      module: "Retención en la fuente compras",
+      items: [
+        s.personType ? `Clasificado como ${PERSON_TYPE_LABEL[s.personType].toLowerCase()} (${s.personType}) en el resumen de la declaración.` : "Sin PJ / PN: se pedirá en la próxima factura.",
+        s.fiscalRegime ? `Régimen «${s.fiscalRegime}» verificado${s.fiscalCheckedAt ? ` el ${formatDateForDisplay(s.fiscalCheckedAt.slice(0, 10))}` : ""}; si una factura trae otro, se pregunta antes de actualizarlo.` : "Régimen aún no verificado en una factura.",
+        rules.length === 0
+          ? "Sin reglas de retención: se preguntan en la próxima factura."
+          : `${rules.length === 1 ? "Regla reutilizada" : "Reglas reutilizadas"}: ${rules
+              .map((r) => `${rates.find((x) => x.id === r.rateId)?.name ?? "subtipo eliminado"}${r.isDefault && rules.length > 1 ? " (predeterminada)" : ""}`)
+              .join(", ")}.`,
+      ],
+    },
+    {
+      module: "Clasificación contable de compras",
+      items: [codes === null ? "Cargando…" : codes.length === 0 ? "Sin códigos PUC sugeridos todavía." : `Sugiere ${codes.length === 1 ? "el código" : "los códigos"} ${codes.join(", ")} (siempre con tu confirmación).`],
+    },
+  ];
   return (
-    <div className="supplier-section">
-      <div className="row row--between">
-        <strong>Información fiscal</strong>
-        {onEditWithholding && (
-          <Button size="sm" icon={<HandCoins size={14} />} onClick={() => onEditWithholding(s)}>
-            Editar PJ / PN y retenciones
-          </Button>
-        )}
-      </div>
-      <div className="summary-grid">
-        <div className="summary-item">
-          <span className="summary-item__label">Persona</span>
-          <span className="summary-item__value">{s.personType ? PERSON_TYPE_LABEL[s.personType] : "Sin configurar"}</span>
+    <div className="decision-groups">
+      {groups.map((g) => (
+        <div key={g.module} className="decision-group">
+          <strong>{g.module}</strong>
+          <ul className="decision-list">
+            {g.items.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
         </div>
-        <div className="summary-item">
-          <span className="summary-item__label">Verificado en factura</span>
-          <span className="summary-item__value">{s.fiscalCheckedAt ? s.fiscalCheckedAt.slice(0, 10).split("-").reverse().join("/") : "—"}</span>
-        </div>
-      </div>
-      <Field label="Régimen / responsabilidades fiscales" hint="Como aparece en la factura (ej. O-13, O-15 autorretenedor, O-47 régimen simple, R-99-PN).">
-        {(id) => (
-          <span className="row" style={{ flexWrap: "nowrap" }}>
-            <Input id={id} value={regime} onChange={(e) => setRegime(e.target.value)} placeholder="Sin verificar" />
-            <Button size="sm" icon={<Save size={14} />} loading={saving} disabled={regime.trim() === (s.fiscalRegime ?? "")} onClick={() => void saveRegime()}>
-              Guardar
-            </Button>
-          </span>
-        )}
-      </Field>
-      <div>
-        <div className="field__label">Retenciones configuradas</div>
-        {rules.length === 0 ? (
-          <span className="muted">Sin configurar</span>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Subtipo</th>
-                <th>Base usada</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map((r) => {
-                const rate = rates.find((x) => x.id === r.rateId);
-                return (
-                  <tr key={r.id}>
-                    <td>{rate ? RETENTION_TYPE_LABEL[rate.retentionType] : "—"}</td>
-                    <td>{rate?.name ?? "Subtipo eliminado"}</td>
-                    <td>{BASE_MODE_LABEL[r.baseMode]}</td>
-                    <td>{r.isDefault && rules.length > 1 && <Badge>Predeterminada</Badge>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+      ))}
     </div>
   );
 }
@@ -250,9 +298,7 @@ function PucCodesSection({ supplierId }: { supplierId: number }) {
   }
 
   return (
-    <div className="supplier-section">
-      <strong>Códigos PUC utilizados</strong>
-      <span className="field__hint">Solo sugieren la clasificación de compras futuras; ninguna compra se clasifica sin tu confirmación.</span>
+    <div className="stack stack--sm">
       {codes === null ? (
         <span className="muted">Cargando…</span>
       ) : codes.length === 0 ? (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Save, Search, Trash2 } from "lucide-react";
-import { Alert, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, useToast } from "../components/ui";
+import { Plus, Search, Trash2 } from "lucide-react";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, SaveBar, useToast } from "../components/ui";
+import { SearchBox, SegmentedFilter } from "../modules/bank-analysis/shared/components/tableControls";
 import { useAsync } from "../hooks/useAsync";
 import { selfWithholdingService } from "../services/selfWithholdingService";
 import type { SelfWithholdingRate } from "../types/models";
@@ -29,19 +30,29 @@ export function SelfWithholdingTablePage({ initialSearch = "" }: { initialSearch
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<SelfWithholdingRate | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rateFilter, setRateFilter] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  /** Tarifas distintas del catálogo, para filtrar por tarifa. */
+  const rateOptions = useMemo(() => [...new Set(rates.map((r) => r.rateBp))].sort((a, b) => a - b), [rates]);
 
   const visible = useMemo(() => {
     const q = normalizeKey(search);
-    if (!q) return rates;
     const digits = /^\d+$/.test(q) ? q : "";
+    const lo = from.trim() ? normalizeCiiu(from.trim()) : "";
+    const hi = to.trim() ? normalizeCiiu(to.trim()) : "";
     return rates.filter(
-      (r) => (digits && (r.normalizedCode.includes(digits) || r.ciiuCode.includes(digits) || normalizeCiiu(digits) === r.normalizedCode)) || normalizeKey(r.economicActivity).includes(q),
+      (r) =>
+        (rateFilter === "all" || String(r.rateBp) === rateFilter) &&
+        (!lo || r.normalizedCode >= lo) &&
+        (!hi || r.normalizedCode <= hi) &&
+        (!q || (digits && (r.normalizedCode.includes(digits) || r.ciiuCode.includes(digits) || normalizeCiiu(digits) === r.normalizedCode)) || normalizeKey(r.economicActivity).includes(q)),
     );
-  }, [rates, search]);
+  }, [rates, search, rateFilter, from, to]);
 
   const parsed = Object.entries(edits).map(([id, text]) => ({ id: Number(id), rateBp: parseHundredths(text) }));
   const invalid = parsed.some((e) => !validRate(e.rateBp));
-  const dirty = parsed.length > 0;
 
   function edit(r: SelfWithholdingRate, text: string) {
     setEdits((prev) => {
@@ -98,68 +109,71 @@ export function SelfWithholdingTablePage({ initialSearch = "" }: { initialSearch
       {data.loading && !data.data ? (
         <Loader />
       ) : (
-        <Card
-          flush
-          title="Códigos CIIU"
-          description={`Fuente inicial: Decreto 572 de 2025 — Art. 1.2.6.8 · ${formatInteger(rates.length)} códigos`}
-          actions={
-            <>
-              <div className="search">
-                <Search size={14} />
-                <Input placeholder="Buscar por código o actividad" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar código CIIU" />
+        <>
+          <Card flush title="Códigos CIIU" description={`Fuente inicial: Decreto 572 de 2025 — Art. 1.2.6.8 · ${formatInteger(visible.length)} de ${formatInteger(rates.length)} códigos`}>
+            <div className="table-toolbar">
+              <SegmentedFilter
+                label="Filtrar por tarifa"
+                value={rateFilter}
+                onChange={setRateFilter}
+                options={[{ id: "all", label: "Todas" }, ...rateOptions.map((bp) => ({ id: String(bp), label: formatRateBp(bp, true) }))]}
+              />
+              <div className="row" style={{ gap: 8 }}>
+                <Input aria-label="Código desde" placeholder="Desde" value={from} onChange={(e) => setFrom(e.target.value)} inputMode="numeric" style={{ width: 84 }} />
+                <Input aria-label="Código hasta" placeholder="Hasta" value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric" style={{ width: 84 }} />
+                <SearchBox placeholder="Código o actividad" value={search} onChange={setSearch} />
               </div>
-              <Button variant="primary" icon={<Save size={14} />} onClick={() => void save()} loading={saving} disabled={!dirty}>
-                Guardar cambios
-              </Button>
-            </>
-          }
-        >
-          {visible.length === 0 ? (
-            <EmptyState icon={<Search size={20} />} title="Sin resultados" description="Ningún código coincide con la búsqueda. Si falta un código, agrégalo con «Nuevo código»." />
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Código CIIU</th>
-                    <th>Actividad económica</th>
-                    <th className="num">Tarifa (%)</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((r) => {
-                    const text = edits[r.id];
-                    return (
-                      <tr key={r.id}>
-                        <td className="table__primary selectable" style={{ whiteSpace: "nowrap" }} title={r.ciiuCode !== r.normalizedCode ? `En la fuente: ${r.ciiuCode}` : undefined}>
-                          {r.normalizedCode}
-                        </td>
-                        <td>
-                          {r.economicActivity || <span className="muted">—</span>}
-                          {r.source && !r.source.includes("Decreto") && <div className="table__secondary">{r.source}</div>}
-                        </td>
-                        <td className="num" style={{ width: 110 }}>
-                          <Input
-                            aria-label={`Tarifa del código ${r.normalizedCode}`}
-                            className="input--right"
-                            value={text ?? rateText(r.rateBp)}
-                            onChange={(e) => edit(r, e.target.value)}
-                            invalid={text !== undefined && !validRate(parseHundredths(text))}
-                            inputMode="decimal"
-                          />
-                        </td>
-                        <td className="actions">
-                          <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label={`Eliminar el código ${r.normalizedCode}`} onClick={() => setDeleting(r)} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
-          )}
-        </Card>
+            {visible.length === 0 ? (
+              <EmptyState icon={<Search size={20} />} title="Sin resultados" description="Ningún código coincide con los filtros. Si falta un código, agrégalo con «Nuevo código»." />
+            ) : (
+              <div className="table-wrap table-wrap--scroll">
+                <table className="table table--dense">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 90 }}>CIIU</th>
+                      <th>Actividad económica</th>
+                      <th className="num" style={{ width: 110 }}>
+                        Tarifa (%)
+                      </th>
+                      <th style={{ width: 44 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((r) => {
+                      const text = edits[r.id];
+                      return (
+                        <tr key={r.id} className={text !== undefined ? "is-edited" : undefined}>
+                          <td className="table__primary selectable mono" title={r.ciiuCode !== r.normalizedCode ? `En la fuente: ${r.ciiuCode}` : undefined}>
+                            {r.normalizedCode}
+                          </td>
+                          <td className="ciiu-activity">
+                            {r.economicActivity || <span className="muted">—</span>}
+                            {r.source && !r.source.includes("Decreto") && <span className="badge badge--gold" style={{ marginLeft: 6 }}>Personalizado</span>}
+                          </td>
+                          <td className="num">
+                            <Input
+                              aria-label={`Tarifa del código ${r.normalizedCode}`}
+                              className="input--right input--sm"
+                              value={text ?? rateText(r.rateBp)}
+                              onChange={(e) => edit(r, e.target.value)}
+                              invalid={text !== undefined && !validRate(parseHundredths(text))}
+                              inputMode="decimal"
+                            />
+                          </td>
+                          <td className="actions">
+                            <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label={`Eliminar el código ${r.normalizedCode}`} title="Eliminar código" onClick={() => setDeleting(r)} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+          <SaveBar count={parsed.length} saving={saving} disabled={invalid} onSave={() => void save()} onDiscard={() => setEdits({})} />
+        </>
       )}
 
       <NewCodeModal

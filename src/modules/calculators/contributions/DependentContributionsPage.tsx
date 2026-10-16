@@ -22,7 +22,7 @@ export default function DependentContributionsPage() {
         eyebrow="Calculadoras"
         title="Calculadora de aportes para Dependientes"
         actions={
-          <Button variant="ghost" icon={<Eraser size={15} />} onClick={clear}>
+          <Button icon={<Eraser size={15} />} onClick={clear}>
             Limpiar
           </Button>
         }

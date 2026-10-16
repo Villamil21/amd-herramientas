@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { GripVertical, Pencil, Plus, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Eye, EyeOff, GripVertical, Pencil, Plus, Search } from "lucide-react";
 import { Alert, Badge, Button, Card, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { ClassifyPucModal, lineLabel } from "../modules/financial-statements/shared/components/ClassifyPucModal";
 import { PucField } from "../modules/financial-statements/shared/components/PucField";
@@ -25,7 +25,10 @@ const ROLE_LABEL: Record<NonNullable<FsLine["role"]>, string> = {
  *
  * El arrastre usa eventos de puntero, no el drag & drop HTML5: en macOS Tauri
  * intercepta el arrastre de la ventana (para soltar archivos) y `drop` nunca
- * llega al webview. Una línea solo se mueve dentro de su sección.
+ * llega al webview. El movimiento se escucha en la ventana (no con captura de
+ * puntero: al reordenar, React mueve el nodo y WebKit soltaría la captura) y el
+ * destino se calcula por la mitad de cada fila. Una línea solo se mueve dentro
+ * de su sección.
  */
 export function FsCatalogPage() {
   const toast = useToast();
@@ -68,32 +71,63 @@ export function FsCatalogPage() {
     void run(() => fsService.reorderLines(key, ids), "Orden guardado.");
   }
 
+  const dragRef = useRef(drag);
+  dragRef.current = drag;
+
   function onGripDown(key: FsSectionKey, id: number, e: PointerEvent<HTMLElement>) {
     if (e.button !== 0) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
     dragStart.current = sectionIds(key);
     setDrag({ section: key, id, ids: dragStart.current });
   }
 
-  function onGripMove(e: PointerEvent<HTMLElement>) {
-    if (!drag) return;
-    // La línea bajo el puntero, solo si es de la misma sección (nunca se cambia de sección).
-    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-line-id]");
-    if (!over || over.dataset.section !== drag.section) return;
-    const target = Number(over.dataset.lineId);
-    if (target === drag.id) return;
-    const next = drag.ids.filter((x) => x !== drag.id);
-    const at = next.indexOf(target) + (drag.ids.indexOf(target) > drag.ids.indexOf(drag.id) ? 1 : 0);
-    next.splice(at, 0, drag.id);
-    setDrag({ ...drag, ids: next });
-  }
-
-  function onGripUp() {
-    if (!drag) return;
-    saveOrder(drag.section, drag.ids, dragStart.current);
-    setDrag(null);
-  }
+  // Mientras se arrastra: posición del puntero → puesto dentro de la sección; al soltar, se guarda.
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: globalThis.PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const rows = [...document.querySelectorAll<HTMLElement>(`[data-section="${d.section}"][data-line-id]`)];
+      const others = rows.filter((r) => Number(r.dataset.lineId) !== d.id);
+      // Puesto = cuántas filas (sin la arrastrada) tienen su mitad por encima del puntero.
+      const at = others.filter((r) => {
+        const box = r.getBoundingClientRect();
+        return box.top + box.height / 2 < e.clientY;
+      }).length;
+      const next = others.map((r) => Number(r.dataset.lineId));
+      next.splice(at, 0, d.id);
+      if (next.join() !== d.ids.join()) setDrag({ ...d, ids: next });
+      // Desplazamiento automático dentro de la columna con scroll propio.
+      const scroller = rows[0]?.closest<HTMLElement>(".fs-catalog__scroll");
+      if (scroller) {
+        const box = scroller.getBoundingClientRect();
+        if (e.clientY < box.top + 40) scroller.scrollTop -= 12;
+        else if (e.clientY > box.bottom - 40) scroller.scrollTop += 12;
+      }
+    };
+    const up = () => {
+      const d = dragRef.current;
+      if (d) saveOrder(d.section, d.ids, dragStart.current);
+      setDrag(null);
+    };
+    const cancel = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setDrag(null);
+    };
+    document.body.classList.add("is-reordering");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("keydown", cancel);
+    return () => {
+      document.body.classList.remove("is-reordering");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("keydown", cancel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   /** Flechas arriba / abajo sobre el asa: mueve la línea un puesto. */
   function onGripKey(key: FsSectionKey, id: number, e: KeyboardEvent<HTMLElement>) {
@@ -113,26 +147,27 @@ export function FsCatalogPage() {
     const lines = drag?.section === key ? drag.ids.map((id) => lineById.get(id)!).filter(Boolean) : sorted;
     return (
       <div key={key} className="fs-catalog__section">
-        <div className="row row--between">
+        <div className="fs-catalog__head">
           <strong>{SECTION_LABEL[key]}</strong>
-          <Select
-            aria-label={`Cuenta representativa de ${SECTION_LABEL[key]}`}
-            value={representative.get(key) ?? ""}
-            onChange={(e) => void run(() => fsService.setRepresentative(key, Number(e.target.value)), "Cuenta representativa actualizada.")}
-            style={{ width: "auto", fontSize: "var(--text-sm)" }}
-            title="Cuenta representativa cuando la sección esté vacía"
-          >
-            {lines
-              .filter((l) => l.isActive)
-              .map((l) => (
-                <option key={l.id} value={l.id}>
-                  Si está vacía: {l.name}
-                </option>
-              ))}
-          </Select>
+          <label className="fs-catalog__rep" title="Línea que se muestra en $0 cuando la sección no tiene valores">
+            <span>Si está vacía</span>
+            <Select
+              aria-label={`Cuenta representativa de ${SECTION_LABEL[key]}`}
+              value={representative.get(key) ?? ""}
+              onChange={(e) => void run(() => fsService.setRepresentative(key, Number(e.target.value)), "Cuenta representativa actualizada.")}
+            >
+              {lines
+                .filter((l) => l.isActive)
+                .map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+            </Select>
+          </label>
         </div>
-        <ul className="fs-catalog__lines">
-          {lines.map((l) => (
+        <ul className={`fs-catalog__lines${drag?.section === key ? " is-target" : ""}`}>
+          {lines.map((l, i) => (
             <li key={l.id} data-line-id={l.id} data-section={key} className={[!l.isActive && "is-inactive", drag?.id === l.id && "is-dragging"].filter(Boolean).join(" ")}>
               <span
                 role="button"
@@ -141,23 +176,31 @@ export function FsCatalogPage() {
                 aria-label={`Mover ${l.name} (flechas arriba / abajo)`}
                 title="Arrastra para ordenar (o usa las flechas)"
                 onPointerDown={(e) => onGripDown(key, l.id, e)}
-                onPointerMove={onGripMove}
-                onPointerUp={onGripUp}
-                onPointerCancel={() => setDrag(null)}
                 onKeyDown={(e) => onGripKey(key, l.id, e)}
               >
-                <GripVertical size={14} aria-hidden />
+                <GripVertical size={15} aria-hidden />
               </span>
-              <span className="fs-catalog__name">{l.name}</span>
-              {l.role && <span className="field__hint">{ROLE_LABEL[l.role]}</span>}
+              <span className="fs-catalog__pos" aria-hidden>
+                {i + 1}
+              </span>
+              <span className="fs-catalog__name" title={l.role ? ROLE_LABEL[l.role] : undefined}>
+                {l.name}
+              </span>
+              {l.role && <span className="fs-catalog__role">Automática</span>}
               {representative.get(key) === l.id && <Badge>Representativa</Badge>}
               {!l.isActive && <Badge tone="warning">Desactivada</Badge>}
               <span className="fs-catalog__actions">
-                <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={13} />} aria-label={`Renombrar ${l.name}`} onClick={() => setRenaming(l)} />
+                <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={13} />} aria-label={`Renombrar ${l.name}`} title="Renombrar" onClick={() => setRenaming(l)} />
                 {!l.role && (
-                  <Button size="sm" variant="ghost" onClick={() => void run(() => fsService.updateLine(l.id, l.name, !l.isActive), l.isActive ? "Línea desactivada." : "Línea activada.")}>
-                    {l.isActive ? "Desactivar" : "Activar"}
-                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    iconOnly
+                    icon={l.isActive ? <EyeOff size={13} /> : <Eye size={13} />}
+                    aria-label={`${l.isActive ? "Desactivar" : "Activar"} ${l.name}`}
+                    title={l.isActive ? "Desactivar" : "Activar"}
+                    onClick={() => void run(() => fsService.updateLine(l.id, l.name, !l.isActive), l.isActive ? "Línea desactivada." : "Línea activada.")}
+                  />
                 )}
               </span>
             </li>
@@ -172,7 +215,7 @@ export function FsCatalogPage() {
       <PageHeader
         eyebrow="Datos"
         title="Catálogo de cuentas de Estados Financieros"
-        description="Define en qué línea del ESF o del EERR aparece cada código PUC. Arrastra las líneas para decidir su orden en el PDF."
+        description="Define en qué línea del ESF o del EERR aparece cada código PUC. Arrastra el asa ⠿ (o usa las flechas) para ordenar las líneas dentro de su sección: el orden se guarda al soltar y se usa en el Generador, la vista previa y el PDF."
         actions={
           <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>
             Nueva línea
@@ -184,8 +227,12 @@ export function FsCatalogPage() {
       ) : (
         <>
           <div className="fs-grid">
-            <Card title="Estado de Situación Financiera">{ESF_SECTIONS.map(section)}</Card>
-            <Card title="Estado de Resultados">{EERR_SECTIONS.map(section)}</Card>
+            <Card title="Estado de Situación Financiera" className="fs-catalog__col">
+              <div className="fs-catalog__scroll">{ESF_SECTIONS.map(section)}</div>
+            </Card>
+            <Card title="Estado de Resultados" className="fs-catalog__col">
+              <div className="fs-catalog__scroll">{EERR_SECTIONS.map(section)}</div>
+            </Card>
           </div>
           <Card
             flush

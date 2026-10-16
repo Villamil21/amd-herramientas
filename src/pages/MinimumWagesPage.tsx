@@ -1,41 +1,64 @@
 import { useState } from "react";
-import { Plus, Save } from "lucide-react";
-import { Alert, Button, Card, Field, Input, Loader, PageHeader, useToast } from "../components/ui";
+import { Check, Pencil, Plus, X } from "lucide-react";
+import { Alert, Button, Card, Input, Loader, PageHeader, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { MoneyInput } from "../modules/calculators/contributions/components/MoneyInput";
 import { minimumWageService } from "../services/minimumWageService";
+import { formatInteger } from "../utils/format";
+
+const pesos = (v: number | null | undefined) => (v ? `$${formatInteger(v)}` : "—");
 
 /**
- * Datos → SMMLV por año: un valor por año, editable y sin años repetidos.
- * Configuración local y manual (nunca se consulta Internet); la usan las
- * Calculadoras y puede reutilizarla cualquier módulo.
+ * Datos → SMMLV por año: tabla histórica compacta (Año · SMMLV · Auxilio de
+ * transporte · Acciones). Un valor por año, editable fila por fila y sin años
+ * repetidos. Configuración local y manual (nunca se consulta Internet); la usan
+ * las Calculadoras y Estados Financieros → Nómina.
  */
 export function MinimumWagesPage() {
   const toast = useToast();
   const data = useAsync(() => minimumWageService.list(), []);
-  const wages = data.data ?? [];
-  const [edits, setEdits] = useState<Record<number, number | null>>({});
-  /** Auxilio de transporte editado por año (null = sin configurar). */
-  const [auxEdits, setAuxEdits] = useState<Record<number, number | null>>({});
-  const [newYear, setNewYear] = useState("");
-  const [newPesos, setNewPesos] = useState<number | null>(null);
+  const wages = [...(data.data ?? [])].sort((a, b) => b.year - a.year);
+  /** Fila en edición: año existente, o "new" para la fila de agregar. */
+  const [editing, setEditing] = useState<number | "new" | null>(null);
+  const [year, setYear] = useState("");
+  const [wage, setWage] = useState<number | null>(null);
+  const [aux, setAux] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const changed = wages.filter((w) => edits[w.year] !== undefined && edits[w.year] !== w.valuePesos);
-  const auxChanged = wages.filter((w) => auxEdits[w.year] !== undefined && auxEdits[w.year] !== w.transportAllowancePesos);
-  const invalid = changed.some((w) => !edits[w.year]);
-  const yearNumber = /^\d{4}$/.test(newYear.trim()) ? Number(newYear.trim()) : null;
-  const duplicate = yearNumber !== null && wages.some((w) => w.year === yearNumber);
+  const yearNumber = /^\d{4}$/.test(year.trim()) ? Number(year.trim()) : null;
+  const duplicate = editing === "new" && yearNumber !== null && wages.some((w) => w.year === yearNumber);
+  const nextYear = String((wages[0]?.year ?? new Date().getFullYear()) + 1);
 
-  async function saveEdits() {
-    if (invalid) return toast("Escribe el SMMLV en pesos, mayor que cero.", "error");
+  function startAdd() {
+    setEditing("new");
+    setYear(nextYear);
+    setWage(null);
+    setAux(null);
+  }
+
+  function startEdit(y: number) {
+    const w = wages.find((x) => x.year === y)!;
+    setEditing(y);
+    setWage(w.valuePesos);
+    setAux(w.transportAllowancePesos ?? null);
+  }
+
+  async function save() {
+    if (editing === null || !wage) return toast("Escribe el SMMLV en pesos, mayor que cero.", "error");
     setSaving(true);
     try {
-      for (const w of changed) await minimumWageService.update(w.year, edits[w.year]!);
-      for (const w of auxChanged) await minimumWageService.setTransportAllowance(w.year, auxEdits[w.year] || null);
-      toast(changed.length + auxChanged.length === 1 ? "Valor guardado." : "Valores guardados.");
-      setEdits({});
-      setAuxEdits({});
+      if (editing === "new") {
+        if (yearNumber === null || duplicate) return;
+        await minimumWageService.create(yearNumber, wage);
+        if (aux) await minimumWageService.setTransportAllowance(yearNumber, aux);
+        toast(`Año ${yearNumber} agregado.`);
+      } else {
+        const w = wages.find((x) => x.year === editing)!;
+        if (wage !== w.valuePesos) await minimumWageService.update(editing, wage);
+        if ((aux || null) !== (w.transportAllowancePesos ?? null)) await minimumWageService.setTransportAllowance(editing, aux || null);
+        toast(`Valores de ${editing} guardados.`);
+      }
+      setEditing(null);
       await data.reload();
     } catch (e) {
       toast((e as Error).message, "error");
@@ -44,92 +67,91 @@ export function MinimumWagesPage() {
     }
   }
 
-  async function add() {
-    if (yearNumber === null || duplicate || !newPesos) return;
-    setSaving(true);
-    try {
-      await minimumWageService.create(yearNumber, newPesos);
-      toast(`SMMLV ${yearNumber} agregado.`);
-      setNewYear("");
-      setNewPesos(null);
-      await data.reload();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const nextYear = String((wages[wages.length - 1]?.year ?? new Date().getFullYear()) + 1);
+  const editActions = (
+    <>
+      <Button size="sm" variant="primary" iconOnly icon={<Check size={14} />} aria-label="Guardar" title="Guardar" loading={saving} disabled={!wage || (editing === "new" && (yearNumber === null || duplicate))} onClick={() => void save()} />
+      <Button size="sm" variant="ghost" iconOnly icon={<X size={14} />} aria-label="Cancelar" title="Cancelar" onClick={() => setEditing(null)} disabled={saving} />
+    </>
+  );
 
   return (
     <>
-      <PageHeader eyebrow="Datos" title="SMMLV por año" />
+      <PageHeader
+        eyebrow="Datos"
+        title="SMMLV por año"
+        description="Valores locales y manuales (no se actualizan desde Internet). Los usan la Calculadora de aportes para Independientes y Estados Financieros → Nómina."
+        actions={
+          <Button variant="primary" icon={<Plus size={15} />} onClick={startAdd} disabled={editing !== null}>
+            Agregar año
+          </Button>
+        }
+      />
       {data.error && <Alert tone="danger">{data.error}</Alert>}
       {data.loading && !data.data ? (
         <Loader />
       ) : (
-        <>
-          <Card title="Agregar año">
-            <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-              <Field label="Año" error={duplicate ? "Ese año ya está registrado: edita su valor abajo." : null}>
-                {(id) => <Input id={id} value={newYear} onChange={(e) => setNewYear(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder={nextYear} inputMode="numeric" style={{ width: 110 }} invalid={duplicate} />}
-              </Field>
-              <Field label="SMMLV">
-                {(id) => <MoneyInput id={id} value={newPesos} onChange={setNewPesos} style={{ width: 180 }} />}
-              </Field>
-              <Button icon={<Plus size={14} />} onClick={() => void add()} disabled={yearNumber === null || duplicate || !newPesos || saving}>
-                Agregar
-              </Button>
-            </div>
-          </Card>
-
-          <Card
-            flush
-            title="Valores registrados"
-            description="Configuración local y manual: no se actualiza desde Internet. La usan la Calculadora de aportes para Independientes y Estados Financieros → Nómina (auxilio de transporte)."
-            actions={
-              <Button variant="primary" icon={<Save size={14} />} onClick={() => void saveEdits()} loading={saving} disabled={changed.length + auxChanged.length === 0}>
-                Guardar cambios
-              </Button>
-            }
-          >
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Año</th>
-                    <th className="num">Valor SMMLV</th>
-                    <th className="num">Auxilio de transporte</th>
+        <Card flush className="narrow-card">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 100 }}>Año</th>
+                  <th className="num">SMMLV</th>
+                  <th className="num">Auxilio transporte</th>
+                  <th style={{ width: 96 }} className="num">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {editing === "new" && (
+                  <tr className="is-edited">
+                    <td>
+                      <Input aria-label="Año" value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" invalid={duplicate} title={duplicate ? "Ese año ya está registrado" : undefined} autoFocus />
+                    </td>
+                    <td className="num">
+                      <MoneyInput aria-label="SMMLV" className="input--right" value={wage} onChange={setWage} />
+                    </td>
+                    <td className="num">
+                      <MoneyInput aria-label="Auxilio de transporte" className="input--right" value={aux} onChange={setAux} />
+                    </td>
+                    <td className="actions">{editActions}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {wages.map((w) => {
-                    const pesos = edits[w.year] === undefined ? w.valuePesos : edits[w.year];
-                    return (
-                      <tr key={w.year}>
-                        <td className="table__primary">{w.year}</td>
-                        <td className="num" style={{ width: 220 }}>
-                          <MoneyInput aria-label={`SMMLV ${w.year}`} className="input--right" value={pesos} onChange={(v) => setEdits((prev) => ({ ...prev, [w.year]: v }))} invalid={!pesos} />
-                        </td>
-                        <td className="num" style={{ width: 220 }}>
-                          <MoneyInput aria-label={`Auxilio de transporte ${w.year}`} className="input--right" value={auxEdits[w.year] === undefined ? w.transportAllowancePesos : auxEdits[w.year]} onChange={(v) => setAuxEdits((prev) => ({ ...prev, [w.year]: v }))} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {wages.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
-                        No hay valores registrados.
+                )}
+                {wages.map((w) =>
+                  editing === w.year ? (
+                    <tr key={w.year} className="is-edited">
+                      <td className="table__primary">{w.year}</td>
+                      <td className="num">
+                        <MoneyInput aria-label={`SMMLV ${w.year}`} className="input--right" value={wage} onChange={setWage} invalid={!wage} autoFocus />
+                      </td>
+                      <td className="num">
+                        <MoneyInput aria-label={`Auxilio de transporte ${w.year}`} className="input--right" value={aux} onChange={setAux} />
+                      </td>
+                      <td className="actions">{editActions}</td>
+                    </tr>
+                  ) : (
+                    <tr key={w.year}>
+                      <td className="table__primary">{w.year}</td>
+                      <td className="num">{pesos(w.valuePesos)}</td>
+                      <td className="num">{w.transportAllowancePesos ? pesos(w.transportAllowancePesos) : <span className="muted">Sin configurar</span>}</td>
+                      <td className="actions">
+                        <Button size="sm" variant="ghost" iconOnly icon={<Pencil size={14} />} aria-label={`Editar ${w.year}`} title="Editar" disabled={editing !== null} onClick={() => startEdit(w.year)} />
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </>
+                  ),
+                )}
+                {wages.length === 0 && editing !== "new" && (
+                  <tr>
+                    <td colSpan={4} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                      No hay valores registrados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
     </>
   );

@@ -78,6 +78,31 @@ describe("4x1000 incluido en el MONTO", () => {
     expect(edited.totals.paidCents + edited.totals.gmfCents).toBe(pesos * 100);
   });
 
+  it("caso obligatorio: MONTO 4.016.064 con pago real 4.000.000 → cargo 16.064, conciliación 0, método «Base identificada»", () => {
+    const a = analyze([{ id: 1, amount: 4016064 }]);
+    expect(a.movements[0]).toMatchObject({ amountCents: 401606400, paidCents: 400000000, gmfCents: 1606400, method: "calculated", incidents: [] });
+    expect(a.totals.paidCents + a.totals.gmfCents - a.totals.amountCents).toBe(0);
+  });
+
+  it("si el archivo trae valor pagado y 4x1000 separados que suman el MONTO, se usan como «Campo directo»", () => {
+    const header = [...HEADER, "VALOR PAGADO", "4X1000"];
+    const s = sheet("H", [], header);
+    s.rows.push([...row({ id: 1, amount: 4016064 }), cell(4000000), cell(16064)]);
+    s.rows.push([...row({ id: 2, amount: 4016064 }), cell(3999000), cell(1)]);
+    const file = read(book(s));
+    const a = analyzeWallet(file.movements, { checkType: true });
+    expect(a.movements[0]).toMatchObject({ paidCents: 400000000, gmfCents: 1606400, method: "direct" });
+    // No suman el MONTO: se ignoran y se usa la base identificada.
+    expect(a.movements[1].method).toBe("calculated");
+  });
+
+  it("la edición manual guarda los valores anteriores y la fecha/hora", () => {
+    const file = read(book(sheet("H", [{ id: 1, amount: 4016064 }])));
+    const edit = { paidCents: 400001000, previousPaidCents: 400000000, previousGmfCents: 1606400, editedAt: "2026-10-15T20:00:00.000Z" };
+    const a = analyzeWallet(file.movements, { checkType: true, manual: new Map([[2, edit]]) });
+    expect(a.movements[0]).toMatchObject({ paidCents: 400001000, gmfCents: 1605400, method: "manual", manualEdit: edit, amountCents: 401606400 });
+  });
+
   it("la edición manual exige valor pagado + 4x1000 = MONTO", () => {
     expect(manualSplit(401606400, 400000000)).toEqual({ paidCents: 400000000, gmfCents: 1606400 });
     expect(manualSplit(401606400, 401606500)).toBe("El valor pagado no puede superar el MONTO.");
@@ -254,7 +279,7 @@ describe("exportación", () => {
     const sheets = buildWalletSheets(analyzeWallet(file.movements, { checkType: true }));
     expect(sheets.map((s) => s.name)).toEqual(["Resumen", "Detalle", "Incidencias"]);
     const [summary] = sheets;
-    expect(summary.columns.map((c) => c.header)).toEqual(["Fecha", "Valor pagado", "4x1000", "Concepto retiro", "Estado"]);
+    expect(summary.columns.map((c) => c.header)).toEqual(["Fecha", "Valor pagado", "Cargo 4x1000 / GMF", "Concepto retiro", "Estado"]);
     expect(summary.rows[0]).toEqual(["31/08/2026", 1160000, 4659, "Pago nomina - Diseñador", "Validado"]);
     expect(summary.rows[1][4]).toBe("Tipo inesperado");
     // El movimiento con otro concepto no llega a ninguna hoja.

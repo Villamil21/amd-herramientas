@@ -11,6 +11,7 @@ import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
 import { INVOICES_ANCHOR, InvoicesTable, type InvoiceFilter } from "./components/InvoicesTable";
 import { InvoiceStats } from "./components/InvoiceStats";
 import { NameMismatchPanel } from "./components/NameMismatchPanel";
+import { TaxSection } from "../shared/TaxSection";
 import { LotStatusIndicator, PendingPanel, pendingItemId } from "./components/PendingPanel";
 import { TitleMappingsModal } from "./components/TitleMappingsModal";
 import { VatSummary } from "./components/VatSummary";
@@ -216,6 +217,7 @@ export default function InvoiceVatPage() {
         }
       />
 
+      <TaxSection letter="B" title="Archivo fuente">
       <Card>
         {!folder ? (
           <div className="row row--between">
@@ -263,11 +265,13 @@ export default function InvoiceVatPage() {
           </div>
         )}
       </Card>
+      </TaxSection>
 
       {processing && <LotStatusIndicator processing />}
 
       {report && (
         <>
+          <TaxSection letter="C" title="Estado y pendientes">
           <LotStatusIndicator actions={actions} />
           <PendingPanel
             actions={actions}
@@ -288,9 +292,18 @@ export default function InvoiceVatPage() {
             />
           )}
 
-          <InvoiceStats stats={report.stats} filter={filter} onFilter={showDocuments} />
+          </TaxSection>
+
+          <TaxSection letter="D" title="Resumen">
+            <InvoiceStats stats={report.stats} filter={filter} onFilter={showDocuments} />
+          </TaxSection>
+
+          <TaxSection letter="E" title="Documentos y productos">
           <InvoicesTable rows={report.rows} attention={attention} filter={filter} onFilterChange={setFilter} onOpen={(r, products = false) => setSelected({ fileName: r.fileName, products })} onAction={runAction} />
 
+          </TaxSection>
+
+          <TaxSection letter="F" title="Resumen para declaración">
           {report.stats.pending > 0 && (
             <Alert tone="warning" title="Resumen parcial: NO está listo para declaración">
               <div className="row row--between" style={{ marginTop: 2 }}>
@@ -304,6 +317,7 @@ export default function InvoiceVatPage() {
             </Alert>
           )}
           <VatSummary summary={report.summary} />
+          </TaxSection>
         </>
       )}
 

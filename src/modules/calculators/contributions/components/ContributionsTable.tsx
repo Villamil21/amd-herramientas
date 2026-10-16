@@ -20,8 +20,8 @@ export function ContributionsTable({ lines, selection, onSelect, result }: Props
       <table className="table calc-table">
         <thead>
           <tr>
-            <th>Concepto</th>
-            <th>Porcentaje</th>
+            <th style={{ width: "34%" }}>Concepto</th>
+            <th style={{ width: "36%" }}>Porcentaje</th>
             <th className="num">Valor calculado</th>
           </tr>
         </thead>

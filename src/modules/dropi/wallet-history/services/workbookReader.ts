@@ -16,6 +16,14 @@ export const REQUIRED = {
 /** ID (trazabilidad y duplicados) y TIPO (validación secundaria). MONTO PREVIO no se lee. */
 const OPTIONAL = { id: "ID", type: "TIPO" } as const;
 
+/**
+ * Campos separados que algunas exportaciones podrían traer: si existen (y suman
+ * el MONTO) se usan directamente («Campo directo»). El historial actual de Dropi
+ * no los trae.
+ */
+const DIRECT_PAID = ["VALOR PAGADO", "VALOR RETIRO", "VALOR NETO"];
+const DIRECT_GMF = ["4X1000", "GMF", "CARGO 4X1000", "VALOR 4X1000"];
+
 /** Encabezados del historial de cartera de Dropi: solo para elegir la hoja más completa. */
 const SIGNATURE = ["ID", "FECHA", "TIPO", "MONTO", "MONTO PREVIO", "ORDEN ID", "NUMERO DE GUIA", "DESCRIPCIÓN", "CUENTA", "CONCEPTO DE RETIRO"];
 
@@ -145,6 +153,11 @@ function extract(workbook: Workbook, sheet: Sheet, h: HeaderMatch, sheetReason: 
     // Vacío también es inválido: moneyCents lo trataría como 0.
     const amountCents = isEmpty(amountCell) ? null : moneyCents(amountCell);
     const conceptCell = at(row, REQUIRED.concept);
+    const firstCol = (names: string[]) => names.map((n) => col(n)).find((c) => c !== undefined);
+    const paidCol = firstCol(DIRECT_PAID);
+    const gmfCol = firstCol(DIRECT_GMF);
+    const directPaid = paidCol !== undefined && !isEmpty(row[paidCol]) ? moneyCents(row[paidCol]) : null;
+    const directGmf = gmfCol !== undefined && !isEmpty(row[gmfCol]) ? moneyCents(row[gmfCol]) : null;
 
     movements.push({
       rowNumber: r + 1,
@@ -158,6 +171,7 @@ function extract(workbook: Workbook, sheet: Sheet, h: HeaderMatch, sheetReason: 
       description: cellText(at(row, REQUIRED.description)),
       // El concepto se conserva tal cual (sin recortar ni cambiar mayúsculas).
       concept: conceptCell?.t === "s" ? conceptCell.v : cellText(conceptCell),
+      ...(directPaid !== null && directGmf !== null ? { direct: { paidCents: directPaid, gmfCents: directGmf } } : {}),
     });
   }
 

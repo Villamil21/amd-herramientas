@@ -136,7 +136,9 @@ export default function IncomeCertificatePage() {
         </Alert>
       )}
 
-      <Card title="Firmante y fondo">
+      <div className="cert-layout">
+      <div className="cert-layout__form">
+      <Card title={<CertStep n={1}>Firmante y plantilla</CertStep>}>
         <div className="stack">
           <Field label="Firmante" required hint={signers.data?.length === 0 ? "No hay firmantes guardados: créalos en Datos → Firmas." : "Nombre, cargo, matrícula y firma se toman de Datos → Firmas."}>
             {(id) => (
@@ -194,7 +196,7 @@ export default function IncomeCertificatePage() {
         </div>
       </Card>
 
-      <Card title="Titular del certificado">
+      <Card title={<CertStep n={2}>Titular</CertStep>}>
         <div className="form-grid">
           <div className="field">
             <span className="field__label">
@@ -250,7 +252,7 @@ export default function IncomeCertificatePage() {
         </div>
       </Card>
 
-      <Card title="Ingresos">
+      <Card title={<CertStep n={3}>Ingresos</CertStep>}>
         <div className="stack">
           <div className="segmented" role="radiogroup" aria-label="Forma de mostrar el valor" style={{ alignSelf: "flex-start" }}>
             <button type="button" role="radio" aria-checked={form.incomeMode === "direct"} className={form.incomeMode === "direct" ? "is-active" : undefined} onClick={() => set("incomeMode", "direct")}>
@@ -302,7 +304,7 @@ export default function IncomeCertificatePage() {
         </div>
       </Card>
 
-      <Card title="Expedición">
+      <Card title={<CertStep n={4}>Expedición</CertStep>}>
         <div className="form-grid">
           <Field label="Ciudad de expedición del certificado" required>
             {(id) => <Input id={id} maxLength={80} value={form.issueCity} onChange={(e) => set("issueCity", e.target.value)} />}
@@ -313,25 +315,29 @@ export default function IncomeCertificatePage() {
         </div>
       </Card>
 
-      <Card>
-        <div className="stack">
-          {touched && !valid && <Alert tone="warning" title="Para generar el certificado falta:" items={errors} />}
-          <div className="row">
-            <Button icon={<Eye size={15} />} disabled={!valid} onClick={() => setShowPreview((v) => !v)}>
-              {showPreview ? "Ocultar vista previa" : "Vista previa"}
-            </Button>
-            <Button variant="primary" icon={<FileDown size={15} />} disabled={!valid} loading={busy} onClick={() => void generate()}>
-              Generar PDF
-            </Button>
-          </div>
-        </div>
-      </Card>
+      </div>
 
-      {showPreview && valid && (
-        <Card title="Vista previa del certificado" description="Es el mismo PDF que se exporta; se actualiza al cambiar los datos.">
-          <PdfPagePreview bytes={previewBytes} background={BACKGROUNDS[doc?.background ?? "personal"].url} />
+      <aside className="cert-layout__preview">
+        <Card title={<CertStep n={5}>Vista previa y PDF</CertStep>} description={valid ? "Es el mismo PDF que se exporta; se actualiza al cambiar los datos." : undefined}>
+          <div className="stack">
+            {!valid && touched && <Alert tone="warning" title="Para generar el certificado falta:" items={errors} />}
+            <div className="row">
+              <Button icon={<Eye size={15} />} disabled={!valid} onClick={() => setShowPreview((v) => !v)}>
+                {showPreview ? "Ocultar vista previa" : "Ver vista previa"}
+              </Button>
+              <Button variant="primary" icon={<FileDown size={15} />} disabled={!valid} loading={busy} onClick={() => void generate()}>
+                Generar PDF
+              </Button>
+            </div>
+            {showPreview && valid ? (
+              <PdfPagePreview bytes={previewBytes} background={BACKGROUNDS[doc?.background ?? "personal"].url} />
+            ) : (
+              <div className="cert-layout__placeholder">{valid ? "Pulsa «Ver vista previa» para ver el certificado." : "La vista previa aparece cuando los datos están completos."}</div>
+            )}
+          </div>
         </Card>
-      )}
+      </aside>
+      </div>
 
       <DocumentTypesModal
         open={typesModal !== null}
@@ -348,5 +354,15 @@ export default function IncomeCertificatePage() {
         }}
       />
     </>
+  );
+}
+
+/** Título numerado de cada bloque del certificado (1 · Firmante y plantilla … 5 · Vista previa). */
+function CertStep({ n, children }: { n: number; children: string }) {
+  return (
+    <span className="step-title">
+      <span className="form-section__step">{n}</span>
+      {children}
+    </span>
   );
 }
