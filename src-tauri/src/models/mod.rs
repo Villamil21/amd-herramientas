@@ -4,6 +4,7 @@ pub mod dropi;
 pub mod fs;
 pub mod identity_document;
 pub mod minimum_wage;
+pub mod normalize;
 pub mod puc;
 pub mod self_withholding;
 pub mod signer;

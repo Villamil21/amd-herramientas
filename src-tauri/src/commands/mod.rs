@@ -4,6 +4,7 @@
 pub mod app;
 pub mod backup;
 pub mod companies;
+pub mod company_documents;
 pub mod concepts;
 pub mod dropi;
 pub mod files;

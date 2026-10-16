@@ -9,7 +9,7 @@ import { fileService } from "../../../services/fileService";
 import { selfWithholdingService } from "../../../services/selfWithholdingService";
 import { errorMessage } from "../../../services/tauri";
 import type { Workbook } from "../../../types/excel";
-import type { Company } from "../../../types/models";
+import type { Company, CompanyInput } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
 import { StatementFileCard } from "../../bank-analysis/shared/components/StatementFileCard";
 import type { ImportState } from "../../bank-analysis/shared/useStatementImport";
@@ -40,7 +40,7 @@ let session: { workbook: Workbook; sheetName?: string; issuerNit?: string } | nu
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace("#", formatInteger(n)));
 const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 0));
-const toInput = ({ id: _id, createdAt: _c, updatedAt: _u, ...input }: Company) => input;
+const toInput = ({ id: _id, createdAt: _c, updatedAt: _u, documents: _d, ...input }: Company): CompanyInput => ({ ...input, newDocuments: [] });
 
 export default function SalesWithholdingPage() {
   const toast = useToast();

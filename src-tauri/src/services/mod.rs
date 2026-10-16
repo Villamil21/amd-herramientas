@@ -1,5 +1,6 @@
 pub mod backup_json;
 pub mod backups;
+pub mod company_documents;
 pub mod excel;
 pub mod logos;
 pub mod paths;

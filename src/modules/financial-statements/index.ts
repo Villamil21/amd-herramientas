@@ -43,7 +43,7 @@ export const financialStatementsModule: ModuleDef = {
         { id: "aportes-en-linea", name: "Aportes en Línea", description: "Planilla de Aportes en Línea.", icon: ClipboardList, logo: "Aportes.png", component: lazy(() => import("./payroll/PayrollPage")) },
         // Sin componente = no disponible (punto gris). La arquitectura queda lista para otros operadores.
         { id: "soi", name: "SOI", description: "", icon: ClipboardList },
-        { id: "mi-planilla", name: "Mi Planilla", description: "", icon: ClipboardList },
+        { id: "mi-planilla", name: "MiPlanilla", description: "Planilla de MiPlanilla (período de pensión).", icon: ClipboardList, logo: "miplanilla.png", component: lazy(() => import("./payroll/MiPlanillaPage")) },
       ],
     },
     {

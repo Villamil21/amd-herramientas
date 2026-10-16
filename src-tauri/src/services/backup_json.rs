@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::{companies, concepts, dropi, identity_documents, minimum_wages, puc, self_withholding, signers, suppliers, vat_titles, withholding};
 use crate::error::{AppError, AppResult};
-use crate::models::company::{Company, CompanyInput};
+use crate::models::company::{Company, CompanyInput, DOCUMENT_KINDS, ROLE_PRINCIPAL};
+use crate::models::normalize;
 use crate::models::concept::{Concept, ConceptInput};
 use crate::models::dropi::{DropiStatusMapping, DropiStatusMappingInput};
 use crate::models::identity_document::{IdentityDocumentType, IdentityDocumentTypeInput};
@@ -30,7 +31,7 @@ use crate::models::withholding::{
     validate_uvt, DocumentTitleMapping, DocumentTitleMappingInput, SupplierWithholdingRuleInput, UvtValue, WithholdingProfileInput,
     WithholdingRate, WithholdingRateInput,
 };
-use crate::services::{logos, signatures};
+use crate::services::{company_documents, logos, signatures};
 use crate::services::time::now_iso;
 use crate::startup::LAST_RUN_VERSION_KEY;
 
@@ -52,6 +53,18 @@ pub struct CompanyBackup {
     #[serde(flatten)]
     pub company: Company,
     pub logo: Option<LogoBlob>,
+    /// PDF del RUT / Cámara de Comercio de cada versión del historial (más antigua primero). Ausente en backups anteriores.
+    #[serde(default)]
+    pub document_files: Vec<DocumentBlob>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentBlob {
+    pub kind: String,
+    pub file_name: String,
+    pub uploaded_at: String,
+    pub data_base64: String,
 }
 
 /// Firmante con su PNG embebido: el backup no depende de rutas de este Mac.
@@ -166,7 +179,7 @@ pub struct BackupSummary {
     pub financial_statements: Option<usize>,
 }
 
-pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
+pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, documents_dir: &Path, app_version: &str) -> AppResult<BackupFile> {
     let mut out = Vec::new();
     for company in companies::list(conn, None)? {
         let logo = match &company.logo_file {
@@ -183,7 +196,16 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, app_ver
             }
             None => None,
         };
-        out.push(CompanyBackup { company, logo });
+        // Una versión cuyo archivo ya no existe no se puede respaldar: se omite sin impedir el respaldo.
+        let document_files = company
+            .documents
+            .iter()
+            .filter_map(|d| {
+                let bytes = company_documents::read(documents_dir, &d.stored_file).ok()?;
+                Some(DocumentBlob { kind: d.kind.clone(), file_name: d.file_name.clone(), uploaded_at: d.uploaded_at.clone(), data_base64: STANDARD.encode(bytes) })
+            })
+            .collect();
+        out.push(CompanyBackup { company, logo, document_files });
     }
 
     let mut settings = BTreeMap::new();
@@ -415,6 +437,13 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
         company_input(&c.company).validated().map_err(|e| {
             AppError::user(format!("Empresa «{}» del backup: {}", c.company.razon_social, e.0))
         })?;
+        for d in &c.document_files {
+            let ok = DOCUMENT_KINDS.contains(&d.kind.as_str())
+                && STANDARD.decode(&d.data_base64).is_ok_and(|b| b.starts_with(b"%PDF-") && b.len() as u64 <= company_documents::MAX_DOCUMENT_BYTES);
+            if !ok {
+                return Err(AppError::user(format!("Empresa «{}» del backup: un documento ({}) está dañado.", c.company.razon_social, d.file_name)));
+            }
+        }
     }
     for c in &file.concepts {
         concept_input(c)
@@ -531,7 +560,20 @@ fn identity_type_input(t: &IdentityDocumentType) -> IdentityDocumentTypeInput {
     IdentityDocumentTypeInput { name: t.name.clone(), is_numeric: t.is_numeric }
 }
 
+/// Datos del backup como entrada validable. Un backup anterior a los vínculos de representación legal no
+/// los trae: se vincula el principal con el socio de igual documento; si no coincide, queda como excepción
+/// explícita (así el respaldo antiguo se restaura sin perder el dato, y el usuario lo ve al editar).
 fn company_input(c: &Company) -> CompanyInput {
+    let mut shareholders = c.shareholders.clone();
+    let mut manual = c.legal_rep_manual;
+    let has_links = shareholders.iter().any(|s| s.legal_role.is_some());
+    if !has_links && !manual && !c.legal_rep_name.trim().is_empty() {
+        let key = normalize::digits(&c.legal_rep_document);
+        match shareholders.iter_mut().find(|s| !key.is_empty() && normalize::digits(&s.identity_document) == key) {
+            Some(s) => s.legal_role = Some(ROLE_PRINCIPAL.into()),
+            None => manual = true,
+        }
+    }
     CompanyInput {
         razon_social: c.razon_social.clone(),
         nit: c.nit.clone(),
@@ -549,7 +591,12 @@ fn company_input(c: &Company) -> CompanyInput {
         ciiu_code: c.ciiu_code.clone(),
         legal_rep_name: c.legal_rep_name.clone(),
         legal_rep_document: c.legal_rep_document.clone(),
-        shareholders: c.shareholders.clone(),
+        legal_rep_alt_name: c.legal_rep_alt_name.clone(),
+        legal_rep_alt_document: c.legal_rep_alt_document.clone(),
+        legal_rep_manual: manual,
+        legal_rep_alt_manual: c.legal_rep_alt_manual,
+        shareholders,
+        new_documents: Vec::new(),
     }
 }
 
@@ -611,16 +658,19 @@ fn write_signatures(signatures_dir: &Path, list: &[SignerBackup]) -> AppResult<V
 }
 
 /// Reemplaza empresas, conceptos, firmantes, proveedores, estados de Dropi, tipos de documento, autorretenciones y configuración en una sola transacción.
-pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, file: &BackupFile) -> AppResult<()> {
+pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, documents_dir: &Path, file: &BackupFile) -> AppResult<()> {
     // 1. Escribir firmas y logos nuevos (si algo falla después, se eliminan).
     let new_signatures = match &file.signers {
         Some(list) => write_signatures(signatures_dir, list)?,
         None => Vec::new(),
     };
     let mut new_logos: Vec<Option<String>> = Vec::new();
+    // Archivos de documentos de empresas escritos para esta restauración, por empresa (mismo orden que sus `document_files`).
+    let new_documents: std::cell::RefCell<Vec<Vec<String>>> = std::cell::RefCell::new(Vec::new());
     let cleanup = |names: &[Option<String>]| {
         names.iter().flatten().for_each(|n| logos::remove(logos_dir, n));
         new_signatures.iter().for_each(|n| signatures::remove(signatures_dir, n));
+        new_documents.borrow().iter().flatten().for_each(|n| company_documents::remove(documents_dir, n));
     };
     for c in &file.companies {
         let name = match &c.logo {
@@ -639,10 +689,30 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
             None => None,
         };
         new_logos.push(name);
+        let mut stored = Vec::new();
+        for d in &c.document_files {
+            let written = STANDARD
+                .decode(&d.data_base64)
+                .map_err(|_| AppError::user("Un documento del backup está dañado."))
+                .and_then(|b| company_documents::import_from_bytes(documents_dir, &b));
+            match written {
+                Ok(n) => stored.push(n),
+                Err(e) => {
+                    new_documents.borrow_mut().push(stored);
+                    cleanup(&new_logos);
+                    return Err(e);
+                }
+            }
+        }
+        new_documents.borrow_mut().push(stored);
     }
 
     let old_logos: Vec<String> = conn
         .prepare("SELECT logo_file FROM companies WHERE logo_file IS NOT NULL")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    let old_documents: Vec<String> = conn
+        .prepare("SELECT stored_file FROM company_documents")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     let old_signatures: Vec<String> = match &file.signers {
@@ -666,7 +736,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
             &format!("DELETE FROM settings WHERE key NOT IN ({placeholders})"),
             rusqlite::params_from_iter(INTERNAL_SETTINGS.iter()),
         )?;
-        for (c, logo) in file.companies.iter().zip(&new_logos) {
+        for ((c, logo), stored_docs) in file.companies.iter().zip(&new_logos).zip(new_documents.borrow().iter()) {
             let v = company_input(&c.company).validated()?;
             companies::insert_full(
                 &tx,
@@ -688,11 +758,21 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
                     ciiu_code: v.ciiu_code,
                     legal_rep_name: v.legal_rep_name,
                     legal_rep_document: v.legal_rep_document,
+                    legal_rep_alt_name: v.legal_rep_alt_name,
+                    legal_rep_alt_document: v.legal_rep_alt_document,
+                    legal_rep_manual: v.legal_rep_manual,
+                    legal_rep_alt_manual: v.legal_rep_alt_manual,
                     shareholders: v.shareholders,
+                    documents: Vec::new(),
                     created_at: c.company.created_at.clone(),
                     updated_at: c.company.updated_at.clone(),
                 },
             )?;
+            for (blob, stored) in c.document_files.iter().zip(stored_docs) {
+                let size = std::fs::metadata(documents_dir.join(stored)).map(|m| m.len() as i64).unwrap_or(1).max(1);
+                let doc = crate::models::company::NewDocument { kind: blob.kind.clone(), file_name: blob.file_name.clone(), stored_file: stored.clone() };
+                crate::database::company_documents::insert(&tx, c.company.id, &doc, size, Some(&blob.uploaded_at))?;
+            }
         }
         for c in &file.concepts {
             let v = concept_input(c).validated()?;
@@ -942,6 +1022,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, f
         Ok(()) => {
             old_logos.iter().for_each(|n| logos::remove(logos_dir, n));
             old_signatures.iter().for_each(|n| signatures::remove(signatures_dir, n));
+            old_documents.iter().for_each(|n| company_documents::remove(documents_dir, n));
             Ok(())
         }
         Err(e) => {
@@ -991,7 +1072,7 @@ mod tests {
             decisions: vec![],
         };
         fs::send_batch(&mut conn, &input).unwrap();
-        let file = build(&conn, &dir, &dir, "9.9.9").unwrap();
+        let file = build(&conn, &dir, &dir, &dir, "9.9.9").unwrap();
         assert_eq!(summary("b.json", &file).financial_statements, Some(1));
         let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
 
@@ -999,7 +1080,7 @@ mod tests {
         let mut other = Connection::open_in_memory().unwrap();
         other.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         run_pending(&mut other).unwrap();
-        restore(&mut other, &dir, &dir, &parsed).unwrap();
+        restore(&mut other, &dir, &dir, &dir, &parsed).unwrap();
         let moves = fs::list_movements(&other, 5).unwrap();
         assert_eq!((moves.len(), moves[0].amount_cents, moves[0].puc_concept.as_str()), (1, -200_000_000, "Caja dueño"));
         assert!(fs::list_mappings(&other).unwrap().iter().any(|m| m.puc_code == "11050501" && m.line_id == Some(1)));
@@ -1007,14 +1088,103 @@ mod tests {
 
         // Un backup anterior (sin Estados Financieros ni esta empresa) no puede dejar movimientos huérfanos.
         let older = BackupFile { financial_statements: None, companies: vec![], ..parsed.clone() };
-        let e = restore(&mut other, &dir, &dir, &older).unwrap_err();
+        let e = restore(&mut other, &dir, &dir, &dir, &older).unwrap_err();
         assert!(e.0.contains("Estados Financieros"), "{}", e.0);
         assert_eq!(fs::list_movements(&other, 5).unwrap().len(), 1, "nada cambió");
         // Sin la sección pero con la empresa: se conserva la información actual.
         let older = BackupFile { financial_statements: None, ..parsed };
-        restore(&mut other, &dir, &dir, &older).unwrap();
+        restore(&mut other, &dir, &dir, &dir, &older).unwrap();
         assert_eq!(fs::list_movements(&other, 5).unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn documents_history_and_legal_reps_survive_backup_and_restore() {
+        use crate::database::company_documents as docs;
+        use crate::models::company::{NewDocument, Shareholder};
+        let dir = std::env::temp_dir().join(format!("amd-json-bk-docs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        let shareholder = |name: &str, doc: &str, pct: f64, role: Option<&str>| Shareholder { id: None, name: name.into(), identity_document: doc.into(), percentage: pct, sort_order: 0, legal_role: role.map(str::to_string) };
+        let input = CompanyInput {
+            razon_social: "Empresa Docs".into(),
+            nit: "900.555.111".into(),
+            direccion: String::new(),
+            ciudad: String::new(),
+            telefono: String::new(),
+            correo: String::new(),
+            info_adicional: String::new(),
+            logo_file: None,
+            dv: "2".into(),
+            subscribed_total_shares: None,
+            subscribed_nominal_value: None,
+            paid_total_shares: None,
+            paid_nominal_value: None,
+            ciiu_code: String::new(),
+            legal_rep_name: String::new(),
+            legal_rep_document: String::new(),
+            legal_rep_alt_name: String::new(),
+            legal_rep_alt_document: String::new(),
+            legal_rep_manual: false,
+            legal_rep_alt_manual: false,
+            shareholders: vec![shareholder("ana gómez", "cc 1.020", 60.0, Some("principal")), shareholder("luis ruiz", "cc 2.030", 40.0, Some("alternate"))],
+            new_documents: vec![],
+        }
+        .validated()
+        .unwrap();
+        let id = companies::insert(&conn, &input).unwrap();
+        // Dos versiones del RUT y una de la Cámara; la anterior sigue disponible.
+        let first = company_documents::import_from_bytes(&dir, b"%PDF-1.4 rut viejo").unwrap();
+        let second = company_documents::import_from_bytes(&dir, b"%PDF-1.4 rut nuevo").unwrap();
+        let camara = company_documents::import_from_bytes(&dir, b"%PDF-1.4 camara").unwrap();
+        for (kind, name, stored, at) in [("rut", "RUT 2025.pdf", &first, "2025-01-01T10:00:00Z"), ("rut", "RUT 2026.pdf", &second, "2026-01-01T10:00:00Z"), ("camara", "Camara.pdf", &camara, "2026-02-01T10:00:00Z")] {
+            docs::insert(&conn, id, &NewDocument { kind: kind.into(), file_name: name.into(), stored_file: stored.clone() }, 10, Some(at)).unwrap();
+        }
+        let listed = companies::get(&conn, id).unwrap();
+        assert_eq!(listed.legal_rep_name, "ANA GÓMEZ");
+        assert_eq!(listed.legal_rep_alt_document, "CC 2030");
+        let current: Vec<_> = listed.documents.iter().filter(|d| d.is_current).map(|d| d.file_name.as_str()).collect();
+        assert_eq!(current, vec!["RUT 2026.pdf", "Camara.pdf"]);
+
+        let backup = build(&conn, &dir, &dir, &dir, "1.0.0").unwrap();
+        assert_eq!(backup.companies[0].document_files.len(), 3);
+        let parsed: BackupFile = serde_json::from_str(&serde_json::to_string(&backup).unwrap()).unwrap();
+
+        let mut other = Connection::open_in_memory().unwrap();
+        other.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut other).unwrap();
+        restore(&mut other, &dir, &dir, &dir, &parsed).unwrap();
+        let restored = companies::get(&other, id).unwrap();
+        assert_eq!(restored.legal_rep_name, "ANA GÓMEZ");
+        assert_eq!(restored.shareholders.iter().filter_map(|s| s.legal_role.clone()).collect::<Vec<_>>(), vec!["principal", "alternate"]);
+        assert_eq!(restored.documents.len(), 3);
+        assert_eq!(restored.documents[0].uploaded_at, "2025-01-01T10:00:00Z");
+        assert_eq!(restored.documents.iter().filter(|d| d.is_current).count(), 2);
+        for d in &restored.documents {
+            assert!(company_documents::read(&dir, &d.stored_file).unwrap().starts_with(b"%PDF-"));
+        }
+
+        // Un backup anterior (sin vínculos ni documentos): el principal se vincula por documento o queda como excepción.
+        let mut legacy = parsed.clone();
+        legacy.companies[0].document_files.clear();
+        legacy.companies[0].company.shareholders.iter_mut().for_each(|s| s.legal_role = None);
+        legacy.companies[0].company.legal_rep_name = "Luis Ruiz".into();
+        legacy.companies[0].company.legal_rep_document = "CC 2.030".into();
+        legacy.companies[0].company.legal_rep_alt_name.clear();
+        legacy.companies[0].company.legal_rep_alt_document.clear();
+        restore(&mut other, &dir, &dir, &dir, &legacy).unwrap();
+        let linked = companies::get(&other, id).unwrap();
+        assert_eq!(linked.legal_rep_name, "LUIS RUIZ");
+        assert!(!linked.legal_rep_manual);
+        legacy.companies[0].company.legal_rep_name = "Persona Externa".into();
+        legacy.companies[0].company.legal_rep_document = "CC 99".into();
+        restore(&mut other, &dir, &dir, &dir, &legacy).unwrap();
+        let manual = companies::get(&other, id).unwrap();
+        assert!(manual.legal_rep_manual);
+        assert_eq!(manual.legal_rep_name, "PERSONA EXTERNA");
+        assert!(manual.documents.is_empty());
     }
 
     #[test]
@@ -1045,7 +1215,12 @@ mod tests {
                 ciiu_code: "0111".into(),
                 legal_rep_name: String::new(),
                 legal_rep_document: String::new(),
+                legal_rep_alt_name: String::new(),
+                legal_rep_alt_document: String::new(),
+                legal_rep_manual: false,
+                legal_rep_alt_manual: false,
                 shareholders: vec![],
+                new_documents: vec![],
             },
         )
         .unwrap();
@@ -1126,7 +1301,7 @@ mod tests {
 
         let passport = identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "Pasaporte".into(), is_numeric: false }).unwrap();
 
-        let backup = build(&conn, &dir, &sig_dir, "1.0.0").unwrap();
+        let backup = build(&conn, &dir, &sig_dir, &dir, "1.0.0").unwrap();
         assert!(!backup.settings.contains_key(LAST_RUN_VERSION_KEY));
         let json = serde_json::to_vec(&backup).unwrap();
         assert!(!String::from_utf8_lossy(&json).contains(&*sig_dir.to_string_lossy()), "sin rutas absolutas");
@@ -1147,7 +1322,7 @@ mod tests {
         let x = self_withholding::list_types(&conn).unwrap().into_iter().find(|t| t.normalized_label == "documento x").unwrap();
         self_withholding::delete_type(&conn, x.id).unwrap();
         identity_documents::insert(&conn, &IdentityDocumentTypeInput { name: "NIT".into(), is_numeric: true }).unwrap();
-        restore(&mut conn, &dir, &sig_dir, &parsed).unwrap();
+        restore(&mut conn, &dir, &sig_dir, &dir, &parsed).unwrap();
         let types: Vec<(i64, String, bool)> = identity_documents::list(&conn).unwrap().into_iter().map(|t| (t.id, t.name, t.is_system)).collect();
         assert_eq!(types.len(), 3, "los tipos de documento se reemplazan por los del backup");
         assert_eq!(types[2], (passport, "Pasaporte".into(), false));
@@ -1172,7 +1347,7 @@ mod tests {
         // Backup de una versión anterior (con proveedores, sin códigos PUC): los códigos actuales siguen en su proveedor.
         puc::record_supplier_code(&conn, supplier_id(&conn, "900319753"), "514010").unwrap();
         let older = BackupFile { supplier_puc_codes: None, ..parsed.clone() };
-        restore(&mut conn, &dir, &sig_dir, &older).unwrap();
+        restore(&mut conn, &dir, &sig_dir, &dir, &older).unwrap();
         let mut kept = puc::list_supplier_codes(&conn, supplier_id(&conn, "900319753")).unwrap();
         kept.sort();
         assert_eq!(kept, ["513595", "514010"]);
@@ -1230,7 +1405,7 @@ mod tests {
         minimum_wages::create(&conn, 2027, 1_900_000, 250_000).unwrap();
         let dir = std::env::temp_dir().join(format!("amd-json-old-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        restore(&mut conn, &dir, &dir, &parsed).unwrap();
+        restore(&mut conn, &dir, &dir, &dir, &parsed).unwrap();
         assert_eq!(suppliers::list(&conn, None).unwrap().len(), 1);
         assert_eq!(dropi::list(&conn).unwrap().len(), 1, "sin estados de Dropi en el backup se conservan los actuales");
         assert_eq!(withholding::list_rates(&conn).unwrap().len(), 15, "sin tabla de retenciones en el backup se conserva la actual");

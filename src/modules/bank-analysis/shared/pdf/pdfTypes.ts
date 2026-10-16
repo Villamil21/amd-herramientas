@@ -9,6 +9,8 @@ export interface PdfTextItem {
   width: number;
   /** Alto aproximado de la letra (tamaño de fuente efectivo). */
   height: number;
+  /** Texto girado 90° (encabezados verticales). Solo existe si se pidió conservarlo; x/width describen su caja en la hoja. */
+  rotated?: boolean;
 }
 
 export interface PdfPageText {

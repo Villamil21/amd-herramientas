@@ -452,6 +452,9 @@ pub struct PayrollRow {
     pub period: String,
     pub payment_date: String,
     pub detail: Value,
+    /// Operador de la planilla del lote («Aportes en Línea», «MiPlanilla»…). Vacío en lotes sin ese dato.
+    pub provider: String,
+    pub batch_file_name: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

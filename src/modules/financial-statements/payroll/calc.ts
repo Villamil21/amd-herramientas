@@ -146,7 +146,10 @@ export interface PlanillaEmployee {
   healthContribution: number;
   riskContribution: number;
   ccfContribution: number;
+  /** Parafiscales (SENA, ICBF, ESAP, MEN) sumados. Mayor que cero bloquea el envío: no tienen tratamiento contable. */
   otherContribution?: number;
+  /** Detalle de los parafiscales por tipo, para decir cuáles son (operadores que los separan). */
+  parafiscales?: Record<string, number>;
 }
 
 export interface EmployeeMonth {
@@ -228,6 +231,37 @@ export function findAbsences(period: string, presentKeys: Set<string>, employees
     if (!out.some((a) => a.employee.id === employee.id)) out.push({ employee, lastSeen: previous });
   }
   return out;
+}
+
+/** Claves (tipo + número) de quienes ya tienen fila de nómina en el periodo, sin importar el lote ni el operador. */
+export function employeeKeysSentInPeriod(period: string, rows: PayrollRow[], employees: Employee[]): Set<string> {
+  const keys = new Set<string>();
+  for (const r of rows) {
+    const e = r.period === period ? employees.find((x) => x.id === r.employeeId) : undefined;
+    if (e) keys.add(employeeKey(e.docType, e.docNumber));
+  }
+  return keys;
+}
+
+export interface OperatorOverlap {
+  employeeId: number;
+  name: string;
+  /** Operador del lote que ya contabilizó a la persona en el periodo. */
+  provider: string;
+  batchId: number;
+  fileName: string;
+}
+
+/**
+ * Empleados que ya fueron enviados para el periodo desde OTRO operador de planilla. Operadores distintos pueden
+ * completar un mismo periodo con empleados distintos, pero una persona nunca se contabiliza dos veces.
+ * (El backend aplica la misma regla; aquí se avisa antes de intentar enviar.)
+ */
+export function findOperatorOverlaps(people: Employee[], rows: PayrollRow[], period: string, provider: string): OperatorOverlap[] {
+  return people.flatMap((person) => {
+    const other = rows.find((r) => r.period === period && r.employeeId === person.id && r.provider !== provider);
+    return other ? [{ employeeId: person.id, name: person.name, provider: other.provider, batchId: other.batchId, fileName: other.batchFileName }] : [];
+  });
 }
 
 /** El año de un periodo con su SMMLV y auxilio de transporte configurados. */

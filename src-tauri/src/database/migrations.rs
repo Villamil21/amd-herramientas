@@ -59,6 +59,12 @@ pub const MIGRATIONS: &[Migration] = &[
         rebuilds_tables: false,
     },
     Migration { version: 20, name: "tax_empty_periods", sql: include_str!("../../migrations/020_tax_empty_periods.sql"), rebuilds_tables: false },
+    Migration {
+        version: 21,
+        name: "company_documents_and_legal_reps",
+        sql: include_str!("../../migrations/021_company_documents_and_legal_reps.sql"),
+        rebuilds_tables: false,
+    },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Employee, PayrollRow } from "../../../types/fs";
-import { areaFor, computeMonth, employeeMovements, findAbsences, parseIdentification, previousPeriod, primaPaymentDate, requiredKeys, suggestedHireDate, type EmployeeMonth } from "./calc";
+import { areaFor, computeMonth, employeeKeysSentInPeriod, employeeMovements, findAbsences, findOperatorOverlaps, parseIdentification, previousPeriod, primaPaymentDate, requiredKeys, suggestedHireDate, type EmployeeMonth } from "./calc";
 
 const SMMLV = 1_750_905;
 const AUX = 249_095;
@@ -97,9 +97,9 @@ describe("empleados", () => {
     const carlos = employee(1, "111");
     const ana = employee(2, "222");
     const rows: PayrollRow[] = [
-      { id: 1, batchId: 1, employeeId: 1, employmentId: 10, period: "2026-01", paymentDate: "2026-02-05", detail: null },
-      { id: 2, batchId: 2, employeeId: 1, employmentId: 10, period: "2026-02", paymentDate: "2026-03-05", detail: null },
-      { id: 3, batchId: 2, employeeId: 2, employmentId: 20, period: "2026-02", paymentDate: "2026-03-05", detail: null },
+      { id: 1, batchId: 1, employeeId: 1, employmentId: 10, period: "2026-01", provider: "Aportes en Línea", batchFileName: "planilla.pdf", paymentDate: "2026-02-05", detail: null },
+      { id: 2, batchId: 2, employeeId: 1, employmentId: 10, period: "2026-02", provider: "Aportes en Línea", batchFileName: "planilla.pdf", paymentDate: "2026-03-05", detail: null },
+      { id: 3, batchId: 2, employeeId: 2, employmentId: 20, period: "2026-02", provider: "Aportes en Línea", batchFileName: "planilla.pdf", paymentDate: "2026-03-05", detail: null },
     ];
     const present = new Set(["CC 222"]);
     expect(findAbsences("2026-03", present, [carlos, ana], rows).map((a) => [a.employee.id, a.lastSeen])).toEqual([[1, "2026-02"]]);
@@ -136,5 +136,37 @@ describe("fecha de ingreso sugerida", () => {
   it("periodo anterior cruza el año", () => {
     expect(previousPeriod("2026-01")).toBe("2025-12");
     expect(previousPeriod("2026-05")).toBe("2026-04");
+  });
+});
+
+describe("dos operadores de planilla en un mismo periodo", () => {
+  const ana = employee(1, "111");
+  const luis = employee(2, "222");
+  const eva = employee(3, "333");
+  const row = (id: number, employeeId: number, provider: string, period = "2026-01"): PayrollRow => ({ id, batchId: id * 10, employeeId, employmentId: employeeId * 10, period, provider, batchFileName: `${provider}.pdf`, paymentDate: "2026-02-05", detail: null });
+  const rows = [row(1, 1, "Aportes en Línea"), row(2, 2, "MiPlanilla"), row(3, 1, "Aportes en Línea", "2026-02")];
+
+  it("los empleados distintos conviven: ninguno se solapa", () => {
+    expect(findOperatorOverlaps([eva], rows, "2026-01", "MiPlanilla")).toEqual([]);
+    // Las filas del propio operador no cuentan: ahí rige el reemplazo normal.
+    expect(findOperatorOverlaps([luis], rows, "2026-01", "MiPlanilla")).toEqual([]);
+  });
+
+  it("una persona ya enviada por el otro operador se detecta con operador y lote", () => {
+    expect(findOperatorOverlaps([ana, eva], rows, "2026-01", "MiPlanilla")).toEqual([{ employeeId: 1, name: "Empleado 1", provider: "Aportes en Línea", batchId: 10, fileName: "Aportes en Línea.pdf" }]);
+    expect(findOperatorOverlaps([luis], rows, "2026-01", "Aportes en Línea")).toEqual([expect.objectContaining({ provider: "MiPlanilla", batchId: 20 })]);
+  });
+
+  it("el solape es por empleado y periodo: otro periodo no cuenta", () => {
+    expect(findOperatorOverlaps([ana], rows, "2026-03", "MiPlanilla")).toEqual([]);
+    expect(findOperatorOverlaps([ana], rows, "2026-02", "MiPlanilla")).toHaveLength(1);
+  });
+
+  it("quien ya se envió en el periodo, por cualquier operador, no es una ausencia de la otra planilla", () => {
+    const sent = employeeKeysSentInPeriod("2026-01", rows, [ana, luis, eva]);
+    expect([...sent].sort()).toEqual(["CC 111", "CC 222"]);
+    // Luis salió en MiPlanilla; desde Aportes en Línea no se le marca como posible retiro.
+    const previous: PayrollRow[] = [{ ...row(9, 2, "Aportes en Línea", "2025-12") }];
+    expect(findAbsences("2026-01", new Set(["CC 111", ...sent]), [ana, luis], [...previous, ...rows])).toEqual([]);
   });
 });

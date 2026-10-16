@@ -9,7 +9,7 @@ import type { PdfDocumentText, PdfPageText, PdfTextItem } from "./pdfTypes";
  *
  * `onPage` avisa cada página leída (para mostrar el avance en PDF largos).
  */
-export async function readDocumentText(doc: PDFDocumentProxy, onPage?: (page: number, total: number) => void): Promise<PdfDocumentText> {
+export async function readDocumentText(doc: PDFDocumentProxy, onPage?: (page: number, total: number) => void, options: { keepRotated?: boolean } = {}): Promise<PdfDocumentText> {
   const pages: PdfPageText[] = [];
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
@@ -19,7 +19,12 @@ export async function readDocumentText(doc: PDFDocumentProxy, onPage?: (page: nu
     for (const raw of content.items) {
       if (!("str" in raw) || !raw.str.trim()) continue;
       const [a, b, c, d, e, f] = raw.transform as number[];
-      // Texto rotado (sellos verticales como "VIGILADO") no forma parte de tablas.
+      // Texto rotado (sellos verticales como "VIGILADO") no forma parte de tablas. Algunos formularios, en cambio,
+      // ponen encabezados de columna girados 90° (p. ej. «Días» en MiPlanilla): solo se conservan si se pide.
+      if (options.keepRotated && Math.abs(a) < 0.01 && Math.abs(d) < 0.01 && b > 0 && c < 0) {
+        items.push({ text: raw.str, x: e + c, y: f, width: Math.abs(c), height: raw.width, rotated: true });
+        continue;
+      }
       if (Math.abs(b) > 0.01 || Math.abs(c) > 0.01 || a <= 0) continue;
       items.push({ text: raw.str, x: e, y: f, width: raw.width, height: raw.height || Math.abs(d) });
     }

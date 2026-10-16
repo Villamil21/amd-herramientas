@@ -3,10 +3,10 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::to_path;
-use crate::database::{companies, Db};
+use crate::database::{companies, company_documents, Db};
 use crate::error::AppResult;
 use crate::models::company::{Company, CompanyInput};
-use crate::services::logos;
+use crate::services::{company_documents as storage, logos};
 use crate::state::AppState;
 
 fn check_logo(state: &AppState, input: &CompanyInput) -> AppResult<()> {
@@ -15,6 +15,27 @@ fn check_logo(state: &AppState, input: &CompanyInput) -> AppResult<()> {
         if !path.exists() {
             return Err(crate::error::AppError::user("No se encontró el logo seleccionado. Vuelve a cargarlo."));
         }
+    }
+    Ok(())
+}
+
+/// Cada versión nueva debe existir ya en el almacenamiento de la app (la cargó `pick_company_document`).
+fn check_new_documents(state: &AppState, input: &CompanyInput) -> AppResult<Vec<u64>> {
+    input
+        .new_documents
+        .iter()
+        .map(|d| {
+            let path = storage::path_for(&state.paths.company_documents_dir, &d.stored_file)?;
+            std::fs::metadata(&path)
+                .map(|m| m.len())
+                .map_err(|_| crate::error::AppError::user(format!("No se encontró el archivo de «{}». Vuelve a cargarlo.", d.file_name)))
+        })
+        .collect()
+}
+
+fn register_documents(c: &rusqlite::Connection, company_id: i64, input: &CompanyInput, sizes: &[u64]) -> AppResult<()> {
+    for (doc, size) in input.new_documents.iter().zip(sizes) {
+        company_documents::insert(c, company_id, doc, *size as i64, None)?;
     }
     Ok(())
 }
@@ -28,8 +49,12 @@ pub fn list_companies(db: State<'_, Db>, search: Option<String>) -> AppResult<Ve
 pub fn create_company(db: State<'_, Db>, state: State<'_, AppState>, input: CompanyInput) -> AppResult<Company> {
     let input = input.validated()?;
     check_logo(&state, &input)?;
+    let sizes = check_new_documents(&state, &input)?;
     db.with(|c| {
-        let id = companies::insert(c, &input)?;
+        let tx = c.transaction()?;
+        let id = companies::insert(&tx, &input)?;
+        register_documents(&tx, id, &input, &sizes)?;
+        tx.commit()?;
         companies::get(c, id)
     })
 }
@@ -38,9 +63,13 @@ pub fn create_company(db: State<'_, Db>, state: State<'_, AppState>, input: Comp
 pub fn update_company(db: State<'_, Db>, state: State<'_, AppState>, id: i64, input: CompanyInput) -> AppResult<Company> {
     let input = input.validated()?;
     check_logo(&state, &input)?;
+    let sizes = check_new_documents(&state, &input)?;
     db.with(|c| {
         let before = companies::get(c, id)?;
-        companies::update(c, id, &input)?;
+        let tx = c.transaction()?;
+        companies::update(&tx, id, &input)?;
+        register_documents(&tx, id, &input, &sizes)?;
+        tx.commit()?;
         if let Some(old) = before.logo_file.filter(|old| Some(old) != input.logo_file.as_ref()) {
             logos::remove(&state.paths.logos_dir, &old);
         }
@@ -53,6 +82,9 @@ pub fn delete_company(db: State<'_, Db>, state: State<'_, AppState>, id: i64) ->
     db.with(|c| {
         let company = companies::get(c, id)?;
         companies::delete(c, id)?;
+        for d in &company.documents {
+            storage::remove(&state.paths.company_documents_dir, &d.stored_file);
+        }
         if let Some(logo) = company.logo_file {
             logos::remove(&state.paths.logos_dir, &logo);
         }

@@ -365,6 +365,9 @@ export interface PayrollRow {
   period: string;
   paymentDate: string;
   detail: Record<string, unknown> | null;
+  /** Operador de la planilla del lote («Aportes en Línea», «MiPlanilla»); vacío en lotes sin ese dato. */
+  provider: string;
+  batchFileName: string;
 }
 
 export type AdjustmentType = "replace" | "delta";

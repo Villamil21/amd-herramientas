@@ -324,6 +324,39 @@ fn validate_batch(conn: &Connection, input: &BatchInput) -> AppResult<()> {
     Ok(())
 }
 
+/// Una misma persona no se contabiliza dos veces en un periodo: si un empleado ya fue enviado para ese periodo
+/// desde OTRO operador de planilla (Aportes en Línea, MiPlanilla…), el envío se rechaza (ni siquiera con «Reemplazar»).
+/// Operadores distintos pueden completar un mismo periodo con empleados distintos. Dentro del mismo operador
+/// rige el flujo normal de duplicados y reemplazo.
+fn ensure_no_employee_overlap_between_operators(conn: &Connection, input: &BatchInput) -> AppResult<()> {
+    if input.source != "payroll" || input.payroll_rows.is_empty() {
+        return Ok(());
+    }
+    let provider = input.metadata.as_ref().and_then(|m| m.get("provider")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.file_name, COALESCE(json_extract(b.metadata, '$.provider'), ''), e.name
+         FROM fs_payroll_rows p
+         JOIN fs_batches b ON b.id = p.batch_id
+         JOIN fs_employees e ON e.id = p.employee_id
+         WHERE p.company_id = ?1 AND p.employee_id = ?2 AND p.period = ?3 AND b.status = 'active'
+           AND COALESCE(json_extract(b.metadata, '$.provider'), '') <> ?4
+         ORDER BY b.id LIMIT 1",
+    )?;
+    for row in &input.payroll_rows {
+        let found = stmt
+            .query_row(params![input.company_id, row.employee_id, row.period, provider], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))
+            .optional()?;
+        if let Some((batch_id, file_name, other, name)) = found {
+            let operator = if other.is_empty() { "otro operador".to_string() } else { other };
+            return Err(AppError::user(format!(
+                "{name} ya fue enviado para {} desde {operator} (lote #{batch_id}, «{file_name}»). Una persona no se contabiliza dos veces en el mismo periodo: quítala de esta planilla o anula ese lote primero.",
+                row.period
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Envía un lote a Estados Financieros (todo o nada). Si el envío o alguno de
 /// sus documentos ya existe y el usuario no eligió «Reemplazar», no guarda
 /// nada y devuelve lo que ya existe.
@@ -342,6 +375,7 @@ pub fn send_batch(conn: &mut Connection, input: &BatchInput) -> AppResult<SendOu
     };
 
     let tx = conn.transaction()?;
+    ensure_no_employee_overlap_between_operators(&tx, input)?;
     // 1. Lo que ya existe: el mismo envío (dedupe_key) o documentos ya enviados.
     let mut previous: BTreeSet<i64> = BTreeSet::new();
     if !input.dedupe_key.is_empty() {
@@ -1281,10 +1315,10 @@ pub fn justify_absence(conn: &Connection, employee_id: i64, period: &str, justif
 pub fn list_payroll_rows(conn: &Connection, company_id: i64) -> AppResult<Vec<PayrollRow>> {
     Ok(conn
         .prepare(
-            "SELECT p.id, p.batch_id, p.employee_id, p.employment_id, p.period, p.payment_date, p.detail
+            "SELECT p.id, p.batch_id, p.employee_id, p.employment_id, p.period, p.payment_date, p.detail, COALESCE(json_extract(b.metadata, '$.provider'), ''), b.file_name
              FROM fs_payroll_rows p JOIN fs_batches b ON b.id = p.batch_id WHERE p.company_id = ?1 AND b.status = 'active' ORDER BY p.period, p.id",
         )?
-        .query_map([company_id], |r| Ok(PayrollRow { id: r.get(0)?, batch_id: r.get(1)?, employee_id: r.get(2)?, employment_id: r.get(3)?, period: r.get(4)?, payment_date: r.get(5)?, detail: json(r.get(6)?) }))?
+        .query_map([company_id], |r| Ok(PayrollRow { id: r.get(0)?, batch_id: r.get(1)?, employee_id: r.get(2)?, employment_id: r.get(3)?, period: r.get(4)?, payment_date: r.get(5)?, detail: json(r.get(6)?), provider: r.get(7)?, batch_file_name: r.get(8)? }))?
         .collect::<Result<_, _>>()?)
 }
 
@@ -1887,6 +1921,56 @@ mod tests {
         justify_absence(&conn, id, "2026-03", "Licencia no remunerada").unwrap();
         assert!(justify_absence(&conn, id, "2026-04", "  ").is_err());
         assert_eq!(list_employees(&conn, a).unwrap()[0].justifications.len(), 1);
+    }
+
+    /// Lote de nómina de un operador con una fila por empleado (employee_id, employment_id).
+    fn operator_batch(company_id: i64, provider: &str, key: &str, period: &str, people: &[(i64, i64)]) -> BatchInput {
+        let mut b = batch(company_id, "payroll", key, vec![]);
+        b.file_name = format!("planilla {provider}.pdf");
+        b.metadata = Some(serde_json::json!({ "provider": provider }));
+        for (employee, employment) in people {
+            b.movements.push(MovementInput { accounting_date: format!("{period}-28"), concept_key: "payroll.salary.expense".into(), puc_code: "510506".into(), amount_cents: 100, employee_id: Some(*employee), employment_id: Some(*employment), document_id: format!("CC {employee}|{period}"), ..Default::default() });
+            b.payroll_rows.push(PayrollRowInput { employee_id: *employee, employment_id: *employment, period: period.into(), payment_date: format!("{period}-28"), detail: None });
+        }
+        b
+    }
+
+    #[test]
+    fn two_payroll_operators_complete_a_period_without_double_counting_an_employee() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let mut people = vec![];
+        for (n, doc) in ["111", "222", "333"].iter().enumerate() {
+            let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: (*doc).into(), name: format!("Persona {n}"), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() }).unwrap();
+            people.push((id, list_employees(&conn, a).unwrap().into_iter().find(|e| e.id == id).unwrap().employments[0].id));
+        }
+        // Aportes en Línea envía a la primera persona y MiPlanilla a la segunda: el periodo se completa con dos lotes.
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "Aportes en Línea", "payroll:2026-01", "2026-01", &people[0..1])).unwrap(), SendOutcome::Sent { .. }));
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:40724055", "2026-01", &people[1..2])).unwrap(), SendOutcome::Sent { .. }));
+        let rows = list_payroll_rows(&conn, a).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.iter().map(|r| r.provider.as_str()).collect::<Vec<_>>(), ["Aportes en Línea", "MiPlanilla"]);
+
+        // La misma persona por otro operador se rechaza con el operador y el lote ya usados, también con «Reemplazar».
+        let mut overlap = operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:99999999", "2026-01", &people[0..1]);
+        let err = send_batch(&mut conn, &overlap).unwrap_err().0;
+        assert!(err.contains("Persona 0") && err.contains("Aportes en Línea") && err.contains("lote #"), "{err}");
+        overlap.replace = true;
+        assert!(send_batch(&mut conn, &overlap).is_err());
+        assert_eq!(list_payroll_rows(&conn, a).unwrap().len(), 2, "no se guardó nada");
+
+        // Mismo operador y misma planilla: el flujo normal de duplicado y reemplazo sigue funcionando.
+        let mut again = operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:40724055", "2026-01", &people[1..2]);
+        assert!(matches!(send_batch(&mut conn, &again).unwrap(), SendOutcome::Duplicate { .. }));
+        again.replace = true;
+        assert!(matches!(send_batch(&mut conn, &again).unwrap(), SendOutcome::Sent { .. }));
+        assert_eq!(list_payroll_rows(&conn, a).unwrap().len(), 2);
+
+        // Un tercer empleado, de otra planilla de MiPlanilla, convive con los anteriores.
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:55555555", "2026-01", &people[2..3])).unwrap(), SendOutcome::Sent { .. }));
+        assert_eq!(list_payroll_rows(&conn, a).unwrap().len(), 3);
+        // Otro periodo del mismo empleado no se confunde con el anterior.
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-02:mi-planilla:1", "2026-02", &people[0..1])).unwrap(), SendOutcome::Sent { .. }));
     }
 
     #[test]

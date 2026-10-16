@@ -4204,7 +4204,7 @@ body.is-reordering * {
 .shareholder-table__head,
 .shareholder-table__row {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) 90px 32px;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) 90px 84px 32px;
   gap: 8px;
   align-items: center;
 }
@@ -5367,4 +5367,100 @@ body.is-reordering * {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
+}
+
+/* Empresas: RUT y Cámara de Comercio (historial de versiones y revisión de lo importado) */
+.company-docs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.company-docs__box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-primary-soft) 45%, transparent);
+  min-width: 0;
+}
+
+.company-docs__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.company-docs__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border);
+}
+
+.company-docs__list li.is-current {
+  border-color: var(--color-primary-border);
+}
+
+.company-docs__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--text-xs);
+}
+
+.company-docs__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-docs__notes {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.import-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.import-rep {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-rep__who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.import-origins {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 760px) {
+  .company-docs {
+    grid-template-columns: 1fr;
+  }
 }

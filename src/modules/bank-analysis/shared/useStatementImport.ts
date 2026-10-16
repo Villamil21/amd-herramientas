@@ -23,6 +23,8 @@ interface Options<A> {
   logTag: string;
   /** Título del diálogo de selección (por defecto «Seleccionar extracto PDF»). */
   pickTitle?: string;
+  /** Conserva el texto girado 90° (encabezados verticales de algunos formularios). */
+  keepRotatedText?: boolean;
 }
 
 /**
@@ -30,7 +32,7 @@ interface Options<A> {
  * las páginas → analizar → exportar. El PDF solo vive en memoria: nada se
  * guarda ni se envía.
  */
-export function useStatementImport<A>({ analyze, exportExcel, fallbackError, logTag, pickTitle }: Options<A>) {
+export function useStatementImport<A>({ analyze, exportExcel, fallbackError, logTag, pickTitle, keepRotatedText }: Options<A>) {
   const toast = useToast();
   const [state, setState] = useState<ImportState<A>>({ status: "idle" });
   const [picking, setPicking] = useState(false);
@@ -49,7 +51,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
       setState({ status: "analyzing", fileName });
       let pageCount: number | undefined;
       try {
-        const text = await extractPdfText(picked.data, (page, total) => setState({ status: "analyzing", fileName, pageCount: total, page }));
+        const text = await extractPdfText(picked.data, (page, total) => setState({ status: "analyzing", fileName, pageCount: total, page }), { keepRotated: keepRotatedText });
         pageCount = text.pageCount;
         setState({ status: "done", fileName, pageCount, analysis: analyze(text) });
       } catch (e) {
@@ -62,7 +64,7 @@ export function useStatementImport<A>({ analyze, exportExcel, fallbackError, log
     } finally {
       setPicking(false);
     }
-  }, [busy, toast, analyze, fallbackError, logTag, pickTitle]);
+  }, [busy, toast, analyze, fallbackError, logTag, pickTitle, keepRotatedText]);
 
   const runExport = useCallback(async () => {
     if (state.status !== "done" || exporting) return;

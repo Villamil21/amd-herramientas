@@ -15,6 +15,7 @@ pub struct AppPaths {
     pub db_file: PathBuf,
     pub logos_dir: PathBuf,
     pub signatures_dir: PathBuf,
+    pub company_documents_dir: PathBuf,
     pub backups_dir: PathBuf,
 }
 
@@ -32,11 +33,13 @@ impl AppPaths {
             db_file: data_dir.join("database.sqlite"),
             logos_dir: data_dir.join("logos"),
             signatures_dir: data_dir.join("signatures"),
+            company_documents_dir: data_dir.join("company_documents"),
             backups_dir: data_dir.join("backups"),
             data_dir,
         };
         std::fs::create_dir_all(&paths.logos_dir)?;
         std::fs::create_dir_all(&paths.signatures_dir)?;
+        std::fs::create_dir_all(&paths.company_documents_dir)?;
         std::fs::create_dir_all(&paths.backups_dir)?;
         Ok(paths)
     }

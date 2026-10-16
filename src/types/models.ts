@@ -18,7 +18,15 @@ export interface Company {
   /** Representante legal (Estados Financieros). El cargo siempre es «Representante Legal». Vacío = sin configurar. */
   legalRepName: string;
   legalRepDocument: string;
+  /** Representante legal suplente (opcional). Nunca reemplaza al principal. */
+  legalRepAltName: string;
+  legalRepAltDocument: string;
+  /** El principal / suplente no está entre los socios y se confirmó como excepción. */
+  legalRepManual: boolean;
+  legalRepAltManual: boolean;
   shareholders: Shareholder[];
+  /** Historial de RUT y Cámara de Comercio (más antiguo primero). */
+  documents: CompanyDocument[];
   createdAt: string;
   updatedAt: string;
 }
@@ -29,6 +37,31 @@ export interface Shareholder {
   identityDocument: string;
   percentage: number;
   sortOrder: number;
+  /** Si este socio es el representante legal principal o suplente. */
+  legalRole?: LegalRole | null;
+}
+
+export type LegalRole = "principal" | "alternate";
+
+export type CompanyDocumentKind = "rut" | "camara";
+
+/** Una versión del RUT o de la Cámara de Comercio guardada en el almacenamiento de la app. */
+export interface CompanyDocument {
+  id: number;
+  kind: CompanyDocumentKind;
+  fileName: string;
+  storedFile: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  /** La versión más reciente de su tipo. */
+  isCurrent: boolean;
+}
+
+/** PDF ya copiado al almacenamiento de la app que se registra como versión al guardar la empresa. */
+export interface NewCompanyDocument {
+  kind: CompanyDocumentKind;
+  fileName: string;
+  storedFile: string;
 }
 
 export interface CertificateSigner {
@@ -60,7 +93,7 @@ export const signerFsRole = (s: Pick<CertificateSigner, "accountantTitle" | "fsE
 
 export const SIGNER_FS_ROLE_LABEL: Record<SignerFsRole, string> = { "Contador Público": "Contador Público", "Contadora Pública": "Contadora Pública", pending: "Pendiente EEFF", excluded: "No usar" };
 
-export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt">;
+export type CompanyInput = Omit<Company, "id" | "createdAt" | "updatedAt" | "documents"> & { newDocuments: NewCompanyDocument[] };
 
 export type TipoRetencion = "RETEFUENTE" | "ICA";
 export type UnidadTarifa = "PORCENTAJE" | "POR_MIL";
