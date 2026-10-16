@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.31.1",
+    "date": "2026-10-16",
+    "notes": [
+      "Estados Financieros: la cobertura de Nómina usa el período de la planilla, no la fecha de pago. Una planilla de febrero pagada en abril cubre solo febrero; los aportes siguen contabilizándose en la fecha de pago."
+    ]
+  },
+  {
     "version": "1.31.0",
     "date": "2026-10-16",
     "notes": [

@@ -33,6 +33,29 @@ describe("cobertura mensual", () => {
     expect(c.rows.find((r) => r.source === "payroll")!.missing).toHaveLength(4);
   });
 
+  it("Nómina: la planilla de febrero pagada en abril cubre solo febrero; el movimiento conserva su fecha contable", () => {
+    const payroll = (id: number, status: BatchSummary["status"] = "active"): BatchSummary => ({ ...batch(id), source: "payroll", periodStart: "2026-02-01", periodEnd: "2026-02-28", status });
+    const pm = (id: number, date: string, batchId: number, status: Movement["status"] = "active") => ({ ...mv(id, date, batchId), source: "payroll", status }) as Movement;
+    const movements = [pm(1, "2026-02-28", 1), pm(2, "2026-04-17", 1), mv(3, "2026-04-10", 9)];
+    const c = coverage("2026-01-01", "2026-04-30", movements, [], [payroll(1), batch(9)]);
+    const row = c.rows.find((r) => r.source === "payroll")!;
+    expect(row.cells["2026-02"].loaded).toBe(true);
+    expect(row.cells["2026-04"].loaded).toBe(false);
+    expect(row.missing).toEqual(["2026-01", "2026-03", "2026-04"]);
+    expect(movements[1].accountingDate).toBe("2026-04-17");
+    // Otra fuente basada en movimientos sigue usando el mes de su fecha contable.
+    expect(c.rows.find((r) => r.source === "purchases")!.cells["2026-04"].loaded).toBe(true);
+    // Un lote reemplazado no marca cobertura activa.
+    const replaced = coverage("2026-01-01", "2026-04-30", [pm(1, "2026-02-28", 1, "replaced"), pm(2, "2026-04-17", 1, "replaced")], [], [payroll(1, "replaced")]).rows.find((r) => r.source === "payroll")!;
+    expect(replaced.cells["2026-02"].loaded).toBe(false);
+    expect(replaced.cells["2026-02"].batches).toHaveLength(1);
+    expect(replaced.empty).toBe(true);
+    // Lotes parciales de dos operadores en el mismo mes: basta uno activo.
+    const two = coverage("2026-02-01", "2026-04-30", [pm(1, "2026-04-17", 1, "replaced"), pm(2, "2026-04-18", 2)], [], [payroll(1, "replaced"), payroll(2)]).rows.find((r) => r.source === "payroll")!;
+    expect(two.cells["2026-02"].loaded).toBe(true);
+    expect(two.cells["2026-04"].loaded).toBe(false);
+  });
+
   it("no supone importación secuencial: muestra exactamente los meses que faltan", () => {
     const movements = [mv(1, "2026-01-15", 1), mv(2, "2026-02-03", 2), mv(3, "2026-04-20", 3), mv(4, "2026-06-30", 4), mv(5, "2026-09-01", 5)];
     const c = coverage("2026-01-01", "2026-08-31", movements, [], [1, 2, 3, 4, 5].map(batch));

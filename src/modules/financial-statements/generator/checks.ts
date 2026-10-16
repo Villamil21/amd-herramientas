@@ -84,7 +84,19 @@ export function coverage(
       const missing = months.filter((m) => !cells[m].loaded);
       return { source, label: SOURCE_LABEL[source], cells, missing, empty: bank.banks.length === 0, bank };
     }
-    for (const m of movements) if (m.source === source && m.accountingDate >= start && m.accountingDate <= end) add(m.accountingDate.slice(0, 7), m.batchId, m.status === "active");
+    for (const m of movements) {
+      if (m.source !== source) continue;
+      const active = m.status === "active";
+      if (source === "payroll") {
+        // Nómina: el mes cubierto es el de la planilla (periodStart–periodEnd), no el de la fecha contable de pago de sus aportes.
+        const b = batchById.get(m.batchId);
+        if (b?.periodStart) {
+          for (const month of monthsBetween(b.periodStart, b.periodEnd ?? b.periodStart)) add(month, m.batchId, active);
+          continue;
+        }
+      }
+      if (m.accountingDate >= start && m.accountingDate <= end) add(m.accountingDate.slice(0, 7), m.batchId, active);
+    }
     // «Registrar periodo sin …»: el mes queda cubierto sin movimientos.
     for (const b of batches) {
       if (b.source !== source || !isEmptyPeriodBatch(b) || !b.periodStart) continue;
