@@ -133,3 +133,32 @@ export function computeNitDv(nit: string): string {
 export function splitMunicipalityCode(code: string): { deptCode: string; muniCode: string } | null {
   return /^\d{5}$/.test(code) ? { deptCode: code.slice(0, 2), muniCode: code.slice(2) } : null;
 }
+
+/** Clave de una denominación de tipo de documento: mayúsculas, sin tildes, signos ni espacios («C.C.» = «CC», «Cédula de ciudadanía» = «CEDULADECIUDADANIA»). */
+export const docTypeKey = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+
+/**
+ * Código Exógena de la denominación que trae una factura: por el propio código («13»), por el nombre oficial del catálogo o por un
+ * alias persistente (Catálogos Exógena → Alias). Solo cuenta si el código existe y está activo; lo que no se reconoce queda sin
+ * resolver (nunca se inventa un tipo de documento).
+ */
+export function resolveDocTypeCode(
+  text: string | undefined,
+  documentTypes: readonly { code: string; description: string; isActive: boolean }[],
+  aliases: readonly { kind: string; aliasKey: string; target: string }[] = [],
+): string | undefined {
+  const key = text ? docTypeKey(text) : "";
+  if (!key) return undefined;
+  const active = documentTypes.filter((d) => d.isActive);
+  const byCode = active.find((d) => docTypeKey(d.code) === key && /^\d+$/.test(text!.trim()));
+  if (byCode) return byCode.code;
+  const byName = active.find((d) => docTypeKey(d.description) === key);
+  if (byName) return byName.code;
+  const alias = aliases.find((a) => a.kind === "document_type" && a.aliasKey === key);
+  return alias && active.some((d) => d.code === alias.target) ? alias.target : undefined;
+}

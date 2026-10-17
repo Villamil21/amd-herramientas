@@ -189,6 +189,10 @@ pub fn save(conn: &mut Connection, input: &TaxReturnInput) -> AppResult<i64> {
     if !input.nit.is_empty() && input.nit != company_digits {
         return Err(AppError::user(format!("La declaración es del NIT {} y no de {company_name} (NIT {company_digits}). No se mezclan declaraciones entre empresas.", input.nit)));
     }
+    // IVA: sin responsabilidad 48 vigente en el periodo no hay declaración que registrar (si el historial no cubre el periodo, se desconoce y no se bloquea).
+    if input.tax_type == "vat" && crate::database::tax_profiles::vat_responsible_in(conn, input.company_id, &input.period_start, &input.period_end)? == Some(false) {
+        return Err(AppError::user("La empresa no era responsable de IVA (responsabilidad 48) en este periodo: no se registra la declaración."));
+    }
     if !input.form_number.is_empty() {
         let existing: Option<(String, i64, Option<i64>, String)> = conn
             .query_row(
@@ -852,4 +856,24 @@ mod tests {
         assert_eq!(list.len(), 4);
     }
 
+
+    #[test]
+    fn vat_return_is_rejected_when_the_company_was_not_responsible_in_that_period() {
+        use crate::database::tax_profiles::{save_vat_entry, CompanyVatEntryInput};
+        let mut conn = db();
+        let a = company(&conn, "901748281");
+        let vat = |period: i64, form: &str| {
+            let (start, end) = period_range("bimonthly", 2026, Some(period)).unwrap();
+            TaxReturnInput { company_id: a, tax_type: "vat".into(), year: 2026, period: Some(period), periodicity: "bimonthly".into(), period_start: start, period_end: end, form_number: form.into(), nit: "901748281".into(), file_name: "IVA.pdf".into(), ..Default::default() }
+        };
+        // Sin historial se desconoce: no se bloquea.
+        save(&mut conn, &vat(1, "300-1")).unwrap();
+        save_vat_entry(&conn, &CompanyVatEntryInput { company_id: a, effective_date: "2024-01-01".into(), responsible: true, source: "rut".into(), note: String::new() }).unwrap();
+        save_vat_entry(&conn, &CompanyVatEntryInput { company_id: a, effective_date: "2026-05-01".into(), responsible: false, source: "manual".into(), note: String::new() }).unwrap();
+        save(&mut conn, &vat(2, "300-2")).unwrap();
+        let err = save(&mut conn, &vat(4, "300-4")).unwrap_err();
+        assert!(err.0.contains("no era responsable de IVA"), "{}", err.0);
+        // Retención en la fuente no depende de la responsabilidad 48.
+        save(&mut conn, &withholding(a, 9, "350-9", 1)).unwrap();
+    }
 }

@@ -197,7 +197,7 @@ pub fn ensure_open(conn: &Connection, company_id: i64, dates: &BTreeSet<String>)
 }
 
 /// Periodos «Cuadrado» o «PDF generado» con alguna fecha dentro de su rango → «Requiere nueva revisión».
-fn invalidate_periods(tx: &Transaction, company_id: i64, dates: &BTreeSet<String>, reason: &str) -> AppResult<i64> {
+fn invalidate_periods(tx: &Connection, company_id: i64, dates: &BTreeSet<String>, reason: &str) -> AppResult<i64> {
     let periods: Vec<(i64, String, String)> = tx
         .prepare("SELECT id, start_date, end_date FROM fs_periods WHERE company_id = ?1 AND status IN ('ready', 'pdf_generated')")?
         .query_map([company_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
@@ -586,6 +586,51 @@ pub fn mark_crypto_batch_outdated(conn: &mut Connection, batch_id: i64, reason: 
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// Prefijo de la clave de envío del módulo «Compras, costos y exógena» (`purchases:AAAA`).
+pub const PURCHASES_BATCH_PREFIX: &str = "purchases:";
+
+/// Retira del cálculo vigente los envíos de la antigua «Clasificación contable de compras».
+///
+/// Causa raíz de su inclusión: el módulo nuevo envía a la misma fuente (`purchases`) que el antiguo y Estados Financieros suma
+/// todo lote activo de una fuente, así que los envíos viejos (clave vacía o por documento) seguían activos junto al lote anual
+/// nuevo y las mismas facturas se contaban dos veces. El módulo nuevo empieza de cero: lo anterior queda «Anulado» y marcado
+/// `legacy` (movimientos y lote se conservan solo para auditoría). Los registros «periodo sin actividad» no son datos de ese
+/// módulo y se respetan. Un periodo cerrado conserva sus valores aprobados; los «Cuadrado» o «PDF generado» que tocaba vuelven
+/// a revisión. Es idempotente: se ejecuta al iniciar y tras restaurar un backup (que podría traer lotes viejos activos).
+pub fn retire_legacy_purchases(conn: &Connection) -> AppResult<i64> {
+    let legacy: Vec<(i64, i64)> = conn
+        .prepare(
+            "SELECT id, company_id FROM fs_batches
+             WHERE source = 'purchases' AND status = 'active' AND dedupe_key NOT LIKE 'purchases:%'
+               AND COALESCE(json_extract(metadata, '$.emptyPeriod'), 0) <> 1",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let now = now_iso();
+    let reason = "Envío de la antigua «Clasificación contable de compras»: el módulo Compras, costos y exógena empieza desde cero y no lo usa en ningún cálculo.";
+    let mut touched: HashMap<i64, BTreeSet<String>> = HashMap::new();
+    for (id, company_id) in &legacy {
+        let dates: Vec<String> = conn
+            .prepare("SELECT DISTINCT accounting_date FROM fs_movements WHERE batch_id = ?1 AND status = 'active'")?
+            .query_map([id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        touched.entry(*company_id).or_default().extend(dates);
+        conn.execute("UPDATE fs_movements SET status = 'voided', updated_at = ?1 WHERE batch_id = ?2 AND status = 'active'", params![now, id])?;
+        conn.execute(
+            "UPDATE fs_batches SET status = 'voided', metadata = json_set(COALESCE(metadata, '{}'), '$.legacy', 1, '$.legacyReason', ?3), updated_at = ?1 WHERE id = ?2",
+            params![now, id, reason],
+        )?;
+        conn.execute(
+            "INSERT INTO fs_decisions (company_id, batch_id, source, document_key, decision, detail, created_at) VALUES (?1, ?2, 'purchases', '', 'legacy_purchases_retired', ?3, ?4)",
+            params![company_id, id, reason, now],
+        )?;
+    }
+    for (company_id, dates) in touched {
+        invalidate_periods(conn, company_id, &dates, "Se retiraron del cálculo los envíos de la antigua Clasificación contable de compras: revisa el periodo.")?;
+    }
+    Ok(legacy.len() as i64)
 }
 
 // ---------------------------------------------------------------------------
@@ -2222,5 +2267,31 @@ mod tests {
         let other = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "999".into(), name: "Luis".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() }).unwrap();
         let dup = EmployeeUpdateInput { employee_id: other, doc_number: "123".into(), area: None, area_from: None, ..edit("2026-08") };
         assert!(update_employee(&mut conn, &dup).unwrap_err().0.contains("CC 123"));
+    }
+
+    #[test]
+    fn retires_legacy_purchases_without_touching_the_new_module_or_empty_periods() {
+        let mut conn = db();
+        let a = company(&conn, "900");
+        // Envío viejo (clave vacía) y viejo por documento.
+        send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-03-10", "513595", 100, "old1")])).unwrap();
+        send_batch(&mut conn, &batch(a, "purchases", "cufe-old", vec![movement("2026-04-10", "513595", 50, "old2")])).unwrap();
+        // Lote del módulo nuevo y registro «Sin compras».
+        send_batch(&mut conn, &batch(a, "purchases", "purchases:2026", vec![movement("2026-03-10", "513595", 100, "new1")])).unwrap();
+        register_empty_period(&mut conn, &empty_input(a, "purchases", &["2026-05"], false)).unwrap();
+        assert_eq!(active(&conn, a).iter().map(|m| m.1).sum::<i64>(), 250);
+
+        assert_eq!(retire_legacy_purchases(&conn).unwrap(), 2);
+        // Solo cuenta el lote nuevo: sin doble conteo.
+        assert_eq!(active(&conn, a), vec![("513595".to_string(), 100)]);
+        let voided: i64 = conn.query_row("SELECT COUNT(*) FROM fs_batches WHERE status = 'voided' AND json_extract(metadata, '$.legacy') = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(voided, 2);
+        // Se conservan para auditoría (movimientos anulados, no borrados).
+        let kept: i64 = conn.query_row("SELECT COUNT(*) FROM fs_movements WHERE status = 'voided'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 2);
+        // El registro «Sin compras» sigue activo y la operación es idempotente.
+        let empty: i64 = conn.query_row("SELECT COUNT(*) FROM fs_batches WHERE dedupe_key = 'empty:2026-05' AND status = 'active'", [], |r| r.get(0)).unwrap();
+        assert_eq!(empty, 1);
+        assert_eq!(retire_legacy_purchases(&conn).unwrap(), 0);
     }
 }

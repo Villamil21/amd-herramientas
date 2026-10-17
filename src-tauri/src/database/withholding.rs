@@ -69,6 +69,7 @@ pub fn update_rates(conn: &mut Connection, items: &[WithholdingRateUpdate]) -> A
 }
 
 pub fn delete_rate(conn: &Connection, id: i64) -> AppResult<()> {
+    conn.execute("DELETE FROM withholding_rate_versions WHERE rate_id = ?1", [id])?;
     conn.execute("DELETE FROM withholding_rates WHERE id = ?1", [id])?;
     Ok(())
 }

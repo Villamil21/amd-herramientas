@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FormatStatusRow } from "../../../types/exogena";
 import { buildExportWorkbook, exportBlockers, rowOf, suggestedExportName } from "./exportWorkbook";
-import { FORMAT_1009_COLUMNS, FORMAT_1010_COLUMNS } from "./formats";
+import { FORMAT_1001_COLUMNS, FORMAT_1009_COLUMNS, FORMAT_1010_COLUMNS } from "./formats";
 import { buildProposals1010 } from "./form1010";
 import { company, shareholder, stored } from "./fixtures";
 
@@ -94,4 +94,16 @@ describe("hojas del Excel", () => {
   });
 
   it("nombre sugerido del archivo", () => expect(suggestedExportName({ razonSocial: "Inversiones D&P Capital S.A.S." }, 2025)).toBe("Exogena_2025_Inversiones_D_P_Capital_S_A_S"));
+
+  it("1001, 1005 y 1006 entran al Excel único con sus columnas; los pendientes y un 1005 sin marcar bloquean", () => {
+    const r1001 = { id: 1, sourceKey: "third:900|5001", origin: "estados_financieros", originRef: "", manualFields: [], data: { concept: "5001", docTypeCode: "31", docNumber: "900111222", dv: "1", businessName: "PROV SAS", deductible: 100000, ivaDeductible: 19000, retPracticed: 4000 } } as never;
+    const book = buildExportWorkbook({ company: { razonSocial: "E", nit: "1", dv: "" }, year: 2025, statuses: { "1001": status("1001", "listo"), "1005": status("1005", "no_aplica"), "1006": status("1006", "no_aplica") }, records: { "1001": [r1001] } });
+    expect(book.sheets.map((s) => s.name)).toEqual(["1001"]);
+    const cols = FORMAT_1001_COLUMNS.map((c) => c.key);
+    expect(book.sheets[0].rows[0][cols.indexOf("deductible")]).toBe(100000);
+    expect(book.sheets[0].rows[0][cols.indexOf("nonDeductible")]).toBeNull();
+
+    const blocked = exportBlockers({ statuses: { "1001": status("1001", "listo"), "1005": status("1005", "en_preparacion") }, problems: { "1001": [problem("Línea sin confirmar")] }, reconciliation1009: null });
+    expect(blocked.map((b) => b.format)).toEqual(["1001", "1005"]);
+  });
 });

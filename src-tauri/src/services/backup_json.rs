@@ -149,6 +149,10 @@ pub struct BackupFile {
     /// `None` en backups anteriores: se conserva la información actual.
     #[serde(default)]
     pub crypto: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
+    /// Compras, costos y exógena (facturas con su clasificación, reglas, historiales de IVA y régimen, concepto 1001 por PUC).
+    /// `None` en backups anteriores: se conserva la información actual.
+    #[serde(default)]
+    pub purchases: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -265,6 +269,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, documen
         financial_statements: Some(dump_financial_statements(conn)?),
         exogena: Some(dump_tables(conn, EXO_TABLES)?),
         crypto: Some(dump_tables(conn, CRYPTO_TABLES)?),
+        purchases: Some(dump_tables(conn, PURCHASE_TABLES)?),
     })
 }
 
@@ -320,10 +325,28 @@ fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
 
 /// Tablas de Información Exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso):
 /// los catálogos con sus ajustes, la auditoría de catálogos y el estado / registros / sincronizaciones por formato.
-const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs"];
+const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs", "exo_year_concepts", "exo_year_concept_audit"];
 
 /// Tablas de Transacciones Cripto en orden de dependencias (se restauran en este orden y se vacían en el inverso).
 const CRYPTO_TABLES: &[&str] = &["crypto_homologations", "crypto_uploads", "crypto_upload_versions", "crypto_rows", "crypto_decisions", "crypto_audit"];
+
+/// Tablas de Compras, costos y exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso).
+const PURCHASE_TABLES: &[&str] = &[
+    "purchase_title_types",
+    "purchase_uploads",
+    "purchase_rules",
+    "purchase_rule_history",
+    "purchase_documents",
+    "purchase_line_class",
+    "purchase_doc_flags",
+    "purchase_audit",
+    "company_vat_history",
+    "supplier_fiscal_history",
+    "puc_concept_1001",
+    "withholding_rate_versions",
+    "exo_aliases",
+    "exo_document_type_aliases",
+];
 
 fn dump_tables(conn: &Connection, tables: &[&str]) -> AppResult<FsDump> {
     use rusqlite::types::Value as Sql;
@@ -356,6 +379,8 @@ fn dump_tables(conn: &Connection, tables: &[&str]) -> AppResult<FsDump> {
 /// validan cada fila.
 fn restore_financial_statements(tx: &Connection, data: &FsDump) -> AppResult<()> {
     restore_tables(tx, FS_TABLES, data, "La información de Estados Financieros del backup está dañada o incompleta.")?;
+    // Un backup anterior puede traer envíos de la antigua clasificación de compras activos: quedan fuera del cálculo.
+    crate::database::fs::retire_legacy_purchases(tx)?;
     // Backup anterior a los pagos parciales: sus fechas de pago pasan a ser un pago por el saldo completo.
     if !data.contains_key("fs_tax_payments") {
         crate::database::tax::convert_legacy_payment_dates(tx)?;
@@ -772,6 +797,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
         // Un backup anterior a Exógena no la trae: se conserva la actual (borrar las empresas la borraría en cascada).
         let kept_exogena = if file.exogena.is_none() { Some(dump_tables(&tx, EXO_TABLES)?) } else { None };
         let kept_crypto = if file.crypto.is_none() { Some(dump_tables(&tx, CRYPTO_TABLES)?) } else { None };
+        let kept_purchases = if file.purchases.is_none() { Some(dump_tables(&tx, PURCHASE_TABLES)?) } else { None };
         tx.execute("DELETE FROM companies", [])?;
         tx.execute("DELETE FROM retention_concepts", [])?;
         let placeholders = INTERNAL_SETTINGS.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -1088,6 +1114,16 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
             }
             restore_tables(&tx, CRYPTO_TABLES, &data, "No se pudo conservar la información de Transacciones Cripto.")?;
         }
+        if let Some(data) = &file.purchases {
+            restore_tables(&tx, PURCHASE_TABLES, data, "La información de Compras del backup está dañada o incompleta.")?;
+        } else if let Some(mut data) = kept_purchases {
+            // El historial de IVA cuelga de la empresa (se borró en cascada): solo vuelve el de las empresas que el backup devuelve.
+            let ids: Vec<i64> = file.companies.iter().map(|c| c.company.id).collect();
+            if let Some(rows) = data.get_mut("company_vat_history") {
+                rows.retain(|r| r.get("company_id").and_then(|v| v.as_i64()).map_or(true, |id| ids.contains(&id)));
+            }
+            restore_tables(&tx, PURCHASE_TABLES, &data, "No se pudo conservar la información de Compras.")?;
+        }
         if let Some(data) = &file.financial_statements {
             restore_financial_statements(&tx, data)?;
         }
@@ -1096,6 +1132,8 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                 "El backup no incluye empresas que tienen información en Estados Financieros. Para no perderla, la restauración se canceló y tus datos no cambiaron.",
             ));
         }
+        // Un backup anterior puede traer «Gastos pagados por anticipado» en siete filas: se unifica en un único concepto.
+        crate::database::tax_profiles::unify_prepaid_concept(&tx)?;
         tx.commit()?;
         Ok(())
     })();
@@ -1627,6 +1665,68 @@ mod tests {
         let older = BackupFile { crypto: None, ..parsed.clone() };
         restore(&mut target, &dir, &dir, &dir, &older).unwrap();
         assert_eq!(crypto::state(&target, 5, 2026).unwrap().rows.len(), 1, "se conserva");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Las facturas de compra con sus clasificaciones, reglas e historiales viajan en el backup; uno anterior no las borra.
+    #[test]
+    fn purchases_survive_backup_and_old_backups_keep_them() {
+        use crate::database::{purchases, tax_profiles};
+        let dir = std::env::temp_dir().join(format!("amd-json-purchases-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'KAES SAS', '901748281', 'x', 'x')", []).unwrap();
+        // Alias propios (tipo de documento y comprobante) y una vigencia de retención viajan en el backup.
+        crate::database::catalog_extras::save_alias(&conn, "document_type", "CEDEXT", "", "Ced. Ext.", "22").unwrap();
+        crate::database::catalog_extras::save_alias(&conn, "title_type", "NC ELECTRONICA", "", "NC Electrónica", "nota credito electronica").unwrap();
+        let rate_id: i64 = conn.query_row("SELECT id FROM withholding_rates LIMIT 1", [], |r| r.get(0)).unwrap();
+        crate::database::catalog_extras::save_rate_version(&conn, rate_id, "2026-06-01", 400, 600, "").unwrap();
+        let file = purchases::PurchaseDocFileInput {
+            file_name: "a.pdf".into(),
+            buyer_nit: "901748281".into(),
+            buyer_name: "KAES SAS".into(),
+            year: Some(2026),
+            issue_date: Some("2026-05-10".into()),
+            issuer_nit: "900319753".into(),
+            issuer_name: "PRICESMART".into(),
+            number_key: "COFE1".into(),
+            total_cents: Some(100),
+            title_key: "factura electronica de venta".into(),
+            cufe: None,
+            fingerprint: "fp".into(),
+            data: serde_json::json!({"lines": [{}]}),
+        };
+        let up = purchases::save_upload(&mut conn, &purchases::SavePurchaseUploadInput { folder_name: "Mayo".into(), buyer_nit: "901748281".into(), files: vec![file], summary: serde_json::json!({}) }).unwrap();
+        purchases::save_line_classes(&mut conn, &[purchases::LineClassInput { document_id: up.documents[0].id, line_index: 0, puc_code: "613505".into(), concept_1001: "5004".into(), retention: serde_json::json!([]), save_rule: true, supplier_nit: "900319753".into(), product_key: "p".into(), product_label: "P".into() }]).unwrap();
+        tax_profiles::save_vat_entry(&conn, &tax_profiles::CompanyVatEntryInput { company_id: 5, effective_date: "2024-08-05".into(), responsible: true, source: "rut".into(), note: String::new() }).unwrap();
+        tax_profiles::set_puc_concept(&conn, "613505", Some("5004")).unwrap();
+
+        let backup = build(&conn, &dir, &dir, &dir, "1.41.0").unwrap();
+        let parsed = parse(&serde_json::to_vec(&backup).unwrap()).unwrap();
+        assert!(parsed.purchases.as_ref().unwrap().contains_key("purchase_documents"));
+
+        let mut target = Connection::open_in_memory().unwrap();
+        target.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut target).unwrap();
+        restore(&mut target, &dir, &dir, &dir, &parsed).unwrap();
+        let state = purchases::state(&target, "901748281", Some(2026)).unwrap();
+        assert_eq!((state.documents.len(), state.line_classes.len()), (1, 1));
+        assert_eq!(purchases::list_rules(&target).unwrap().len(), 1);
+        let aliases = crate::database::catalog_extras::list_aliases(&target, None).unwrap();
+        assert!(aliases.iter().any(|a| a.kind == "document_type" && a.alias_key == "CEDEXT" && a.target == "22"), "alias de tipo de documento");
+        assert!(aliases.iter().any(|a| a.kind == "title_type" && a.alias_key == "NC ELECTRONICA"), "alias de comprobante");
+        assert_eq!(crate::database::catalog_extras::list_rate_versions(&target).unwrap().len(), 1);
+        assert_eq!(tax_profiles::list_vat_history(&target, Some(5)).unwrap().len(), 1);
+        assert_eq!(tax_profiles::list_puc_concepts(&target).unwrap().len(), 1);
+        assert_eq!(tax_profiles::list_year_concepts(&target, "1001", Some(2026)).unwrap().len(), 18, "el catálogo por año viaja con Exógena");
+
+        let older = BackupFile { purchases: None, ..parsed.clone() };
+        restore(&mut target, &dir, &dir, &dir, &older).unwrap();
+        assert_eq!(purchases::state(&target, "901748281", None).unwrap().documents.len(), 1, "se conserva");
+        assert_eq!(tax_profiles::list_vat_history(&target, None).unwrap().len(), 1, "el historial de IVA de la empresa devuelta se conserva");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

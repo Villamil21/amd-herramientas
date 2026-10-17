@@ -1,6 +1,10 @@
 import { History, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
+import { Concepts1001Panel } from "./exogenaCatalogs/Concepts1001Panel";
+import { AliasesPanel } from "./exogenaCatalogs/AliasesPanel";
+import { RulesPanel } from "./exogenaCatalogs/RulesPanel";
+import { TitleTypesPanel } from "./exogenaCatalogs/TitleTypesPanel";
 import { useCatalogs } from "../modules/exogena/hooks";
 import { exogenaService } from "../services/exogenaService";
 import { errorMessage } from "../services/tauri";
@@ -14,6 +18,16 @@ const TABS: { key: CatalogKey; label: string; codeHint: string; codeWidth: numbe
   { key: "departments", label: "Departamentos", codeHint: "2 dígitos, ej. 76", codeWidth: 2 },
   { key: "municipalities", label: "Municipios", codeHint: "3 dígitos dentro del departamento, ej. 001", codeWidth: 3 },
 ];
+
+/** Pestañas de Compras, costos y exógena: no son catálogos DIAN y tienen su propio panel. */
+type ExtraKey = "concepts_1001" | "title_types" | "aliases" | "purchase_rules";
+const EXTRA_TABS: { key: ExtraKey; label: string }[] = [
+  { key: "concepts_1001", label: "Conceptos 1001" },
+  { key: "title_types", label: "Tipos de comprobante" },
+  { key: "aliases", label: "Alias" },
+  { key: "purchase_rules", label: "Reglas de compras" },
+];
+const isExtra = (k: string): k is ExtraKey => EXTRA_TABS.some((t) => t.key === k);
 
 interface Row {
   code: string;
@@ -32,7 +46,9 @@ const ACTION_LABEL: Record<CatalogAuditEntry["action"], string> = { add: "Agreg�
 export function ExogenaCatalogsPage() {
   const toast = useToast();
   const { catalogs, reload } = useCatalogs();
-  const [tab, setTab] = useState<CatalogKey>("document_types");
+  const [selectedTab, setTab] = useState<CatalogKey | ExtraKey>("document_types");
+  const extra = isExtra(selectedTab) ? selectedTab : null;
+  const tab: CatalogKey = isExtra(selectedTab) ? "document_types" : selectedTab;
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [editing, setEditing] = useState<{ row: Row | null } | null>(null);
@@ -94,31 +110,40 @@ export function ExogenaCatalogsPage() {
         title="Catálogos Exógena"
         description={`Tipos de documento, países, departamentos y municipios que usan los terceros, los socios y los formatos de Información Exógena.${catalogs ? ` Versión ${catalogs.version} · ${catalogs.source}.` : ""}`}
         actions={
-          <>
-            <Button icon={<History size={15} />} onClick={() => setShowAudit((v) => !v)}>
-              {showAudit ? "Ocultar historial" : "Historial de ajustes"}
-            </Button>
-            <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing({ row: null })}>
-              Agregar entrada
-            </Button>
-          </>
+          extra ? undefined : (
+            <>
+              <Button icon={<History size={15} />} onClick={() => setShowAudit((v) => !v)}>
+                {showAudit ? "Ocultar historial" : "Historial de ajustes"}
+              </Button>
+              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing({ row: null })}>
+                Agregar entrada
+              </Button>
+            </>
+          )
         }
       />
-      {!catalogs ? (
+      <div className="segmented" role="tablist" aria-label="Catálogo" style={{ marginBottom: 12 }}>
+        {[...TABS, ...EXTRA_TABS].map((t) => (
+          <button key={t.key} role="tab" aria-selected={selectedTab === t.key} className={selectedTab === t.key ? "is-active" : ""} onClick={() => { setTab(t.key); setSearch(""); setDeptFilter(""); }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {extra === "concepts_1001" ? (
+        <Concepts1001Panel />
+      ) : extra === "title_types" ? (
+        <TitleTypesPanel />
+      ) : extra === "aliases" ? (
+        <AliasesPanel />
+      ) : extra === "purchase_rules" ? (
+        <RulesPanel />
+      ) : !catalogs ? (
         <Loader />
       ) : (
         <>
           <Card
             flush
-            title={
-              <div className="segmented" role="tablist" aria-label="Catálogo">
-                {TABS.map((t) => (
-                  <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "is-active" : ""} onClick={() => { setTab(t.key); setSearch(""); setDeptFilter(""); }}>
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            }
+            title={current.label}
             actions={
               <>
                 {tab === "municipalities" && (

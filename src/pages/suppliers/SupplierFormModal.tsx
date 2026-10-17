@@ -11,6 +11,7 @@ import { withholdingService } from "../../services/withholdingService";
 import { PERSON_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier, type SupplierTaxInput, type VatType, type WithholdingRate } from "../../types/models";
 import { formatDateForDisplay } from "../../utils/dates";
 import { formatDateTimeForDisplay } from "../../utils/dates";
+import { SupplierRegimeHistory } from "./SupplierRegimeHistory";
 import { completeRules, rulesFromSupplier, WithholdingRulesEditor, type RuleDraft } from "./WithholdingRulesEditor";
 
 interface Props {
@@ -244,10 +245,11 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
                     </button>
                   ))}
                 </div>
-                {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención).</Alert>}
+                {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención automática. Si una factura suya trae retención, Compras, costos y exógena lo alerta y tú decides si se conserva.</Alert>}
+                <SupplierRegimeHistory supplierNit={supplier.nit} currentRegime={regime} />
               </FormSection>
 
-              <FormSection step={4} title="Retención" className="span-full" hint="Se reutiliza en cada factura del proveedor en Retención en la fuente compras.">
+              <FormSection step={4} title="Retención" className="span-full" hint="Se reutiliza en cada factura del proveedor (Retención en la fuente compras y Compras, costos y exógena). La retención que trae la factura es la practicada; si no la trae y la Tabla de retenciones la exige, es asumida.">
                 <WithholdingRulesEditor rules={rules} onChange={setRules} rates={rates} />
               </FormSection>
 
@@ -327,7 +329,7 @@ function DecisionHistory({ supplier: s, rates }: { supplier: Supplier; rates: Wi
       ],
     },
     {
-      module: "Clasificación contable de compras",
+      module: "Compras, costos y exógena",
       items: [codes === null ? "Cargando…" : codes.length === 0 ? "Sin códigos PUC sugeridos todavía." : `Sugiere ${codes.length === 1 ? "el código" : "los códigos"} ${codes.join(", ")} (siempre con tu confirmación).`],
     },
   ];

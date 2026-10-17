@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, ListTree, Pencil, Plus, Trash2, X } from "lucide-react";
-import { Alert, Badge, Button, Card, ConfirmDialog, Loader, Modal, PageHeader, useToast } from "../components/ui";
+import { Alert, Badge, Button, Card, ConfirmDialog, Field, Loader, Modal, PageHeader, Select, useToast } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { pucService } from "../services/pucService";
+import { purchasesService } from "../services/purchasesService";
 import { errorMessage } from "../services/tauri";
 import type { PucCode, PucUsage } from "../types/models";
 import { formatInteger } from "../utils/format";
@@ -29,6 +30,8 @@ export function PucTablePage() {
   const toast = useToast();
   const data = useFsData();
   const usage = useAsync(() => pucService.listUsage(), []);
+  const concepts1001 = useAsync(() => purchasesService.pucConcepts1001(), []);
+  const conceptMap = useMemo(() => new Map((concepts1001.data ?? []).map((c) => [c.pucCode, c.conceptCode])), [concepts1001.data]);
   const [creating, setCreating] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
@@ -54,7 +57,7 @@ export function PucTablePage() {
   const uses = (code: string) => usageMap.get(code) ?? 0;
 
   async function reload() {
-    await Promise.all([data.reloadCodes(), data.reloadMappings(), usage.reload()]);
+    await Promise.all([data.reloadCodes(), data.reloadMappings(), usage.reload(), concepts1001.reload()]);
   }
 
   async function run(action: () => Promise<unknown>, message: string) {
@@ -74,6 +77,7 @@ export function PucTablePage() {
   const admin: PucCatalogAdmin = {
     usage: usageMap,
     classification,
+    concept1001: conceptMap,
     onEdit: (code) => setDialog({ kind: "edit", code }),
     onClassify: (code) => setDialog({ kind: "classify", code }),
     onDelete: (code) => setDialog({ kind: uses(code) > 0 ? "references" : "delete", code }),
@@ -171,6 +175,8 @@ export function PucTablePage() {
       <AccountSheet
         code={dialog?.kind === "sheet" ? selected_(dialog.code) : null}
         classification={dialog ? classification.get(dialog.code) : undefined}
+        concept1001={dialog ? conceptMap.get(dialog.code) ?? "" : ""}
+        onConcept1001Saved={concepts1001.reload}
         onClose={() => setDialog(null)}
         onAction={(kind) => dialog && (kind === "reactivate" ? void run(() => pucService.setActive(dialog.code, true), `Cuenta ${dialog.code} reactivada.`) : setDialog({ kind, code: dialog.code }))}
       />
@@ -207,7 +213,7 @@ type SheetAction = "edit" | "classify" | "deactivate" | "reactivate" | "delete";
  * referencias y las acciones disponibles. «Eliminar» solo aparece si la cuenta
  * se puede eliminar; si no, se explica el motivo y se ofrece Desactivar.
  */
-function AccountSheet({ code, classification, onClose, onAction }: { code: PucCode | null; classification?: { label: string; excluded: boolean }; onClose: () => void; onAction: (kind: SheetAction) => void }) {
+function AccountSheet({ code, classification, concept1001, onConcept1001Saved, onClose, onAction }: { code: PucCode | null; classification?: { label: string; excluded: boolean }; concept1001: string; onConcept1001Saved: () => unknown; onClose: () => void; onAction: (kind: SheetAction) => void }) {
   const { usage, error } = useCodeUsage(code);
   const used = (usage?.total ?? 0) > 0;
   const inactive = code?.active === false;
@@ -260,6 +266,7 @@ function AccountSheet({ code, classification, onClose, onAction }: { code: PucCo
               </span>
             </div>
           </dl>
+          {assignable && <Concept1001Editor code={code.code} value={concept1001} onSaved={onConcept1001Saved} />}
           <div className="stack stack--sm">
             <strong>Referencias</strong>
             {error && <Alert tone="danger">{error}</Alert>}
@@ -372,5 +379,44 @@ function DeactivateDialog({ code, busy, onConfirm, onCancel }: { code: PucCode |
       onConfirm={() => code && onConfirm(code.code)}
       onCancel={onCancel}
     />
+  );
+}
+
+/**
+ * Concepto 1001 sugerido de la cuenta. Es solo una sugerencia: en Compras, costos y exógena toda propuesta queda «Por confirmar».
+ * Se ofrece el catálogo 1001 del año actual (si no hay, se explica dónde crearlo).
+ */
+function Concept1001Editor({ code, value, onSaved }: { code: string; value: string; onSaved: () => unknown }) {
+  const toast = useToast();
+  const year = new Date().getFullYear();
+  const concepts = useAsync(() => purchasesService.yearConcepts("1001", year), [year]);
+  const [saving, setSaving] = useState(false);
+  const active = (concepts.data ?? []).filter((c) => c.isActive);
+  const save = async (conceptCode: string) => {
+    setSaving(true);
+    try {
+      await purchasesService.setPucConcept1001(code, conceptCode || null);
+      await onSaved();
+      toast(conceptCode ? "Concepto 1001 sugerido guardado." : "Sugerencia eliminada.");
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Field label="Concepto 1001 sugerido" hint={active.length ? `Catálogo 1001 de ${year}. Solo sugiere; cada línea de compra se confirma.` : `No hay conceptos 1001 activos para ${year}: créalos en Datos → Catálogos Exógena.`}>
+      {(id) => (
+        <Select id={id} value={value} disabled={saving || concepts.loading} onChange={(e) => void save(e.target.value)}>
+          <option value="">Sin sugerencia</option>
+          {value && !active.some((c) => c.code === value) && <option value={value}>{value} (fuera del catálogo {year})</option>}
+          {active.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.code} — {c.description}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
   );
 }

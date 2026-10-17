@@ -2,6 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { Alert, Badge, Button, DateInput, Field, Input, Select, Textarea } from "../../components/ui";
 import type { VatPeriodicity } from "../../modules/financial-statements/tax-obligations/types";
 import { originMark } from "./OriginMark";
+import { VatHistorySection } from "./VatHistorySection";
 import { composeEntityNarrative, REGISTRAL_LABEL, type RegistralField } from "./import/registral";
 import type { TabProps } from "./tabs";
 
@@ -16,7 +17,7 @@ const DOC_TYPES = ["Documento privado", "Escritura pública", "Acta", "Certifica
  * Fiscal y registral: CIIU (único lugar donde se edita), periodicidad de IVA y datos registrales que alimentan las Notas
  * Financieras. Un dato que la Cámara no permitió confirmar queda marcado «Revisar» hasta que el usuario lo edita o lo confirma.
  */
-export function FiscalTab({ values, setValues, errors, imports, vatPeriodicity, setVatPeriodicity }: Props) {
+export function FiscalTab({ values, setValues, errors, imports, company, vatPeriodicity, setVatPeriodicity }: Props) {
   const flagged = (f: RegistralField) => values.registralReview.includes(f);
   const reviewMark = (f: RegistralField) => (flagged(f) ? <span className="review-mark"><Badge tone="warning">Revisar</Badge></span> : undefined);
   const mark = (f: RegistralField) => originMark(f, values, imports);
@@ -62,6 +63,8 @@ export function FiscalTab({ values, setValues, errors, imports, vatPeriodicity, 
             </Field>
           </div>
         </section>
+
+        <VatHistorySection companyId={company?.id ?? null} rut={imports.rut} />
 
         <section className="stack stack--sm">
           <strong className="form-section__subtitle">Registro mercantil</strong>

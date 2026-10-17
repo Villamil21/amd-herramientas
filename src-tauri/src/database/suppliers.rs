@@ -210,6 +210,11 @@ pub fn insert_with_profile(conn: &mut Connection, s: &SupplierInput, profile: &W
 /// Guarda el régimen / responsabilidad fiscal verificado en una factura.
 pub fn set_fiscal_regime(conn: &Connection, id: i64, fiscal_regime: &str) -> AppResult<()> {
     let now = now_iso();
+    // Un cambio real de régimen queda en el historial con fecha efectiva (cada factura usa el vigente en su fecha).
+    let before: Option<(String, Option<String>)> = conn.query_row("SELECT nit, fiscal_regime FROM suppliers WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    if let Some((nit, previous)) = &before {
+        crate::database::tax_profiles::record_regime_change(conn, nit, previous.as_deref(), fiscal_regime)?;
+    }
     let n = conn.execute(
         "UPDATE suppliers SET fiscal_regime = ?1, fiscal_checked_at = ?2, updated_at = ?2 WHERE id = ?3",
         params![fiscal_regime, now, id],

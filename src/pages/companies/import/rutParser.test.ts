@@ -5,7 +5,7 @@ import { at, docFromItems } from "./testDocs";
 /** Dígitos de casillas, uno por caja, cada 11 puntos. */
 const boxes = (digits: string, x: number, y: number) => [...digits].map((d, i) => at(d, x + i * 11, y));
 
-function page1(overrides: { razon?: string; correo?: string; ciiu?: string } = {}) {
+function page1(overrides: { razon?: string; correo?: string; ciiu?: string; responsibilities?: string[] | null; date?: string } = {}) {
   return [
     at("4. Número de formulario", 328, 704),
     at("5. Número de Identificación Tributaria (NIT)", 28, 616),
@@ -41,6 +41,17 @@ function page1(overrides: { razon?: string; correo?: string; ciiu?: string } = {
     at("47. Fecha inicio actividad", 83, 340),
     ...boxes(overrides.ciiu ?? "1399", 33, 330),
     ...boxes("20140605", 79, 330),
+    ...(overrides.responsibilities === null
+      ? []
+      : [
+          at("Responsabilidades, Calidades y Atributos", 28, 300),
+          at("53. Código", 37, 290),
+          ...(overrides.responsibilities ?? ["05- Impto. renta y compl. régimen ordinario", "48- Impuesto sobre las ventas - IVA"]).map((t, i) => at(t, 37, 278 - i * 10)),
+          at("Usuarios aduaneros", 28, 230),
+          at("54. Código", 37, 220),
+          at("61. Fecha", 400, 290),
+          ...boxes(overrides.date ?? "20190315", 400, 280),
+        ]),
   ];
 }
 
@@ -65,6 +76,31 @@ const repBlock = (top: number, role: string, doc: string, names: [string, string
   at("109. DV", 190, top - 72),
   at("108. Número de Identificación Tributaria (NIT)", 39, top - 72),
 ];
+
+describe("RUT: responsabilidades (IVA)", () => {
+  it("detecta la responsabilidad 48 y la fecha de la casilla 61", () => {
+    const data = parseRut(docFromItems(page1()));
+    expect(data.responsibilities).toEqual(["05", "48"]);
+    expect(data.vatResponsible).toBe(true);
+    expect(data.responsibilityDate).toBe("2019-03-15");
+  });
+
+  it("sin la 48 no es responsable de IVA", () => {
+    const data = parseRut(docFromItems(page1({ responsibilities: ["05- Impto. renta y compl. régimen ordinario"] })));
+    expect(data.vatResponsible).toBe(false);
+  });
+
+  it("si la sección no se encuentra no supone nada y avisa", () => {
+    const data = parseRut(docFromItems(page1({ responsibilities: null })));
+    expect(data.vatResponsible).toBeUndefined();
+    expect(data.responsibilityDate).toBeUndefined();
+    expect(data.responsibilitiesRead).toBe(false);
+  });
+
+  it("descarta una fecha imposible", () => {
+    expect(parseRut(docFromItems(page1({ date: "20191345" }))).responsibilityDate).toBeUndefined();
+  });
+});
 
 describe("RUT: lectura por posición del formulario", () => {
   it("extrae NIT, DV, razón social, CIIU, ciudad, dirección, correo y teléfono", () => {

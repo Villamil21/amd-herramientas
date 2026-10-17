@@ -1,4 +1,4 @@
-import { ArrowRight, Bitcoin, FileSpreadsheet, Landmark, ShieldCheck, Users, HandCoins } from "lucide-react";
+import { ArrowRight, Bitcoin, FileSpreadsheet, Landmark, Receipt, ReceiptText, ShieldCheck, ShoppingBag, Users, HandCoins } from "lucide-react";
 import type { ReactNode } from "react";
 import { navigate, paths } from "../../../app/router";
 import { Badge, Card, EmptyState, PageHeader } from "../../../components/ui";
@@ -74,7 +74,10 @@ export default function ExogenaHome() {
         <FormatCard title="1008 · Saldo de cuentas por cobrar al 31 de diciembre" description="CxC a socios (capital suscrito − pagado) repartida por participación, con conceptos propios del formato." icon={<HandCoins size={18} />} onOpen={() => open("1008")} footer={records("1008")} />
         <FormatCard title="1007 · Ingresos recibidos" description="Ventas por cliente (concepto 4001), desde Transacciones Cripto." icon={<Bitcoin size={18} />} onOpen={() => open("1007")} footer={records("1007")} />
         <FormatCard title="1647 · Ingresos recibidos para terceros" description="Compras por tercero asignadas a un pagador de Ventas (concepto 4070), desde Transacciones Cripto." icon={<Bitcoin size={18} />} onOpen={() => open("1647")} footer={records("1647")} />
-        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1007, 1008, 1009, 1010 y 1647" : "Selecciona una empresa"}</span>} />
+        <FormatCard title="1001 · Pagos o abonos en cuenta y retenciones practicadas" description="Pagos por tercero y concepto con IVA mayor valor del costo y retenciones, desde Compras, costos y exógena." icon={<ShoppingBag size={18} />} onOpen={() => open("1001")} footer={records("1001")} />
+        <FormatCard title="1005 · Impuesto a las ventas descontable" description="IVA descontable por tercero. Solo aplica a empresas responsables de IVA." icon={<Receipt size={18} />} onOpen={() => open("1005")} footer={records("1005")} />
+        <FormatCard title="1006 · Impuesto a las ventas generado e impuesto al consumo" description="IVA recuperado en devoluciones de compras por tercero. Solo aplica a empresas responsables de IVA." icon={<ReceiptText size={18} />} onOpen={() => open("1006")} footer={records("1006")} />
+        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1001, 1005, 1006, 1007, 1008, 1009, 1010 y 1647" : "Selecciona una empresa"}</span>} />
       </div>
       <Card title="Formatos previstos para fases posteriores" description="Están registrados para agregarlos sin cambiar la infraestructura, pero todavía no tienen pantalla.">
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>

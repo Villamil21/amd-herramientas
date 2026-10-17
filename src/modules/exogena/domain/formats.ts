@@ -1,5 +1,5 @@
 /**
- * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008 y, desde Transacciones Cripto, 1007 y 1647; el resto queda
+ * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008, 1007 y 1647 (Transacciones Cripto) y 1001, 1005 y 1006 (Compras, costos y exógena); el resto queda
  * registrado (con su código y nombre confirmados) para agregarlo después sin cambiar la infraestructura: una pantalla
  * "no disponible" nunca se presenta como terminada.
  *
@@ -124,12 +124,67 @@ export const FORMAT_1647_COLUMNS: FormatColumn[] = [
   { key: "recipientBusinessName", header: "Razón social de quien recibió el ingreso", kind: "text" },
 ];
 
+/** 1001 · Pagos o abonos en cuenta y retenciones practicadas (se arma desde Estados Financieros → Compras, costos y exógena; una fila por tercero y concepto). */
+export const FORMAT_1001_COLUMNS: FormatColumn[] = [
+  { key: "concept", header: "Concepto", kind: "text" },
+  { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
+  { key: "docNumber", header: "Número de identificación", kind: "text" },
+  { key: "dv", header: "DV", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido del tercero", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido del tercero", kind: "text" },
+  { key: "firstName", header: "Primer nombre del tercero", kind: "text" },
+  { key: "otherNames", header: "Otros nombres del tercero", kind: "text" },
+  { key: "businessName", header: "Razón social del tercero", kind: "text" },
+  { key: "address", header: "Dirección", kind: "text" },
+  { key: "deptCode", header: "Código dpto.", kind: "text" },
+  { key: "muniCode", header: "Código mcp", kind: "text" },
+  { key: "countryCode", header: "País de residencia o domicilio", kind: "text" },
+  { key: "deductible", header: "Pago o abono en cuenta deducible", kind: "integer" },
+  { key: "nonDeductible", header: "Pago o abono en cuenta no deducible", kind: "integer" },
+  { key: "ivaDeductible", header: "IVA mayor valor del costo o gasto deducible", kind: "integer" },
+  { key: "ivaNonDeductible", header: "IVA mayor valor del costo o gasto no deducible", kind: "integer" },
+  { key: "retPracticed", header: "Retención en la fuente practicada en renta", kind: "integer" },
+  { key: "retAssumed", header: "Retención en la fuente asumida en renta", kind: "integer" },
+  { key: "retIvaResponsible", header: "Retención en la fuente practicada IVA a responsables del IVA", kind: "integer" },
+  { key: "retIvaNonResident", header: "Retención en la fuente practicada IVA a no residentes o no domiciliados", kind: "integer" },
+];
+
+/** 1005 · Impuesto a las ventas descontable (por tercero, sin conceptos; solo empresas responsables de IVA). */
+export const FORMAT_1005_COLUMNS: FormatColumn[] = [
+  { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
+  { key: "docNumber", header: "Número de identificación del informado", kind: "text" },
+  { key: "dv", header: "DV", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido del informado", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido del informado", kind: "text" },
+  { key: "firstName", header: "Primer nombre del informado", kind: "text" },
+  { key: "otherNames", header: "Otros nombres del informado", kind: "text" },
+  { key: "businessName", header: "Razón social del informado", kind: "text" },
+  { key: "discountable", header: "Impuesto descontable", kind: "integer" },
+  { key: "salesReturns", header: "IVA resultante por devoluciones en ventas anuladas, rescindidas o resueltas", kind: "integer" },
+  { key: "costIva", header: "IVA tratado como mayor valor del costo o gasto", kind: "integer" },
+];
+
+/** 1006 · Impuesto a las ventas generado e impuesto al consumo (por ahora solo devoluciones de compras; solo empresas responsables de IVA). */
+export const FORMAT_1006_COLUMNS: FormatColumn[] = [
+  { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
+  { key: "docNumber", header: "Número de identificación del informado", kind: "text" },
+  { key: "dv", header: "DV", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido del informado", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido del informado", kind: "text" },
+  { key: "firstName", header: "Primer nombre del informado", kind: "text" },
+  { key: "otherNames", header: "Otros nombres del informado", kind: "text" },
+  { key: "businessName", header: "Razón social del informado", kind: "text" },
+  { key: "generated", header: "Impuesto generado", kind: "integer" },
+  { key: "purchaseReturns", header: "IVA recuperado en devoluciones en compras anuladas, rescindidas o resueltas", kind: "integer" },
+  { key: "consumption", header: "Impuesto al consumo", kind: "integer" },
+];
+
 export const FORMATS: FormatDef[] = [
-  { code: "1001", name: "Pagos o abonos en cuenta y retenciones practicadas", sheetTitle: "Pagos o abonos en cuenta y retenciones practicadas", implemented: false },
+  { code: "1001", name: "Pagos o abonos en cuenta y retenciones practicadas", sheetTitle: "Pagos o abonos en cuenta y retenciones practicadas", implemented: true, columns: FORMAT_1001_COLUMNS },
   { code: "1003", name: "Retenciones en la fuente que le practicaron", sheetTitle: "Retenciones en la fuente que le practicaron", implemented: false },
   { code: "1004", name: "Descuentos tributarios solicitados", sheetTitle: "Descuentos tributarios solicitados", implemented: false },
-  { code: "1005", name: "Impuesto a las ventas por pagar (descontable)", sheetTitle: "Impuesto a las ventas por pagar (descontable)", implemented: false },
-  { code: "1006", name: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", sheetTitle: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", implemented: false },
+  { code: "1005", name: "Impuesto a las ventas por pagar (descontable)", sheetTitle: "Impuesto a las ventas por pagar (descontable)", implemented: true, columns: FORMAT_1005_COLUMNS },
+  { code: "1006", name: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", sheetTitle: "Impuesto a las ventas por pagar (generado) e impuesto al consumo", implemented: true, columns: FORMAT_1006_COLUMNS },
   { code: "1007", name: "Ingresos recibidos", sheetTitle: "Ingresos recibidos", implemented: true, columns: FORMAT_1007_COLUMNS },
   { code: "1008", name: "Saldo de cuentas por cobrar al 31 de diciembre", sheetTitle: "Saldo de cuentas por cobrar al 31 de diciembre", implemented: true, columns: FORMAT_1008_COLUMNS },
   { code: "1009", name: "Saldos de cuentas por pagar al 31 de diciembre", sheetTitle: "Saldo de cuentas por pagar al 31 de diciembre", implemented: true, columns: FORMAT_1009_COLUMNS },

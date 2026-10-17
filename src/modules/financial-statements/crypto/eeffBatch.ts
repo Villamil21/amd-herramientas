@@ -1,4 +1,5 @@
 import type { BatchInput, BatchSummary } from "../../../types/fs";
+import { isLegacyPurchasesBatch } from "../purchases/eeff";
 import type { CryptoModel } from "./domain/model";
 import { blocking } from "./domain/problems";
 
@@ -58,10 +59,13 @@ export const isStaleBatch = (b: Pick<BatchSummary, "metadata">) => Boolean((b.me
 /** Activo pero marcado desactualizado: no se pudo reemplazar (p. ej. periodo cerrado). Solo auditoría: no alimenta el cálculo. */
 export const isOutdatedBatch = (b: Pick<BatchSummary, "status" | "metadata">) => b.status === "active" && Boolean((b.metadata as { outdated?: unknown } | null)?.outdated);
 
-/** Movimientos que alimentan el cálculo vigente: se excluyen los de lotes de Cripto desactualizados (se conservan solo para auditoría). */
+/**
+ * Movimientos que alimentan el cálculo vigente: se excluyen los de lotes de Cripto desactualizados y los de la antigua
+ * clasificación de compras (se conservan solo para auditoría).
+ */
 export function liveMovements<M extends { batchId: number }>(movements: readonly M[], batches: readonly BatchSummary[]): M[] {
-  const outdated = new Set(batches.filter((b) => b.source === "crypto_ops" && isOutdatedBatch(b)).map((b) => b.id));
-  return outdated.size ? movements.filter((m) => !outdated.has(m.batchId)) : [...movements];
+  const excluded = new Set(batches.filter((b) => (b.source === "crypto_ops" && isOutdatedBatch(b)) || isLegacyPurchasesBatch(b)).map((b) => b.id));
+  return excluded.size ? movements.filter((m) => !excluded.has(m.batchId)) : [...movements];
 }
 
 /**

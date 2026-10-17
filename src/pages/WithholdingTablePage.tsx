@@ -5,6 +5,8 @@ import { SearchBox, SegmentedFilter } from "../modules/bank-analysis/shared/comp
 import { normalizeKey } from "../utils/text";
 import { useAsync } from "../hooks/useAsync";
 import { withholdingService } from "../services/withholdingService";
+import { catalogExtrasService } from "../services/purchasesService";
+import { RateVersionsModal } from "./withholdingTable/RateVersionsModal";
 import { RETENTION_TYPE_LABEL, RETENTION_TYPES, type RetentionType, type WithholdingRate } from "../types/models";
 import { formatInteger } from "../utils/format";
 import { formatCop } from "../modules/taxes/invoice-vat/parser/amounts";
@@ -27,8 +29,9 @@ function parseWholePesos(text: string): number | null {
  */
 export function WithholdingTablePage() {
   const toast = useToast();
-  const data = useAsync(() => Promise.all([withholdingService.listRates(), withholdingService.listUvt()]), []);
-  const [rates, uvts] = data.data ?? [[], []];
+  const data = useAsync(() => Promise.all([withholdingService.listRates(), withholdingService.listUvt(), catalogExtrasService.rateVersions()]), []);
+  const [rates, uvts, versions] = data.data ?? [[], [], []];
+  const [versioning, setVersioning] = useState<WithholdingRate | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const [uvtText, setUvtText] = useState("");
   const [newYear, setNewYear] = useState("");
@@ -210,13 +213,14 @@ export function WithholdingTablePage() {
                     <th className="num">Base UVT</th>
                     <th className="num">Base mínima pesos</th>
                     <th className="num">Tarifa (%)</th>
+                    <th>Vigencias</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
                   {groups.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
+                      <td colSpan={6} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>
                         Ningún concepto coincide con el filtro.
                       </td>
                     </tr>
@@ -224,7 +228,7 @@ export function WithholdingTablePage() {
                   {groups.map((g) => (
                     <Fragment key={g.type}>
                       <tr className="table-group">
-                        <td colSpan={5}>
+                        <td colSpan={6}>
                           {RETENTION_TYPE_LABEL[g.type]} · {g.rows.length}
                         </td>
                       </tr>
@@ -240,6 +244,11 @@ export function WithholdingTablePage() {
                             <td className="num" style={{ whiteSpace: "nowrap", width: 160 }}>{uvt && base !== null ? formatCop(minBaseCents(base, uvt.valuePesos)) : "—"}</td>
                             <td className="num" style={{ width: 110 }}>
                               <Input aria-label={`Tarifa de ${r.name}`} className="input--right" value={e?.rate ?? rateText(r.rateBp)} onChange={(ev) => edit(r, { rate: ev.target.value })} invalid={e !== undefined && (parseHundredths(e.rate) === null || parseHundredths(e.rate)! > 10_000)} inputMode="decimal" />
+                            </td>
+                            <td>
+                              <Button size="sm" onClick={() => setVersioning(r)}>
+                                {versions.filter((v) => v.rateId === r.id).length || "Sin"} {versions.filter((v) => v.rateId === r.id).length === 1 ? "vigencia" : "vigencias"}
+                              </Button>
                             </td>
                             <td className="actions">
                               <Button variant="ghost" size="sm" iconOnly icon={<Trash2 size={14} />} aria-label="Eliminar" title="Eliminar concepto" onClick={() => void askDelete(r)} />
@@ -257,6 +266,7 @@ export function WithholdingTablePage() {
         </>
       )}
 
+      <RateVersionsModal rate={versioning} versions={versions} uvts={uvts} onClose={() => setVersioning(null)} onChanged={() => data.reload()} />
       <NewRateModal
         open={adding}
         onClose={() => setAdding(false)}

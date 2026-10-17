@@ -1,4 +1,5 @@
 import type { ExoCatalogs } from "../../../types/exogena";
+import type { ExoAlias } from "../../../types/purchases";
 import { COLOMBIA } from "./thirdParty";
 
 /** Clave para comparar nombres de lugares: sin tildes, mayúsculas y sin puntuación («Bogotá, D.C.» = «BOGOTA D C»). */
@@ -46,15 +47,18 @@ export interface ResolvedPlace {
  * Códigos Exógena de un lugar escrito con nombres (por ejemplo, en una factura). Lo que no se puede resolver con certeza queda
  * vacío y se explica: nunca se adivina un municipio.
  */
-export function resolveTerritoryByName(catalogs: ExoCatalogs, place: NamedPlace): ResolvedPlace {
+export function resolveTerritoryByName(catalogs: ExoCatalogs, place: NamedPlace, aliases: readonly ExoAlias[] = []): ResolvedPlace {
   const warnings: string[] = [];
-  const country = place.country ? countryByName(catalogs, place.country) : undefined;
+  /** Alias persistente (Catálogos Exógena → Alias): solo si el código al que apunta existe en el catálogo. */
+  const aliasOf = (kind: ExoAlias["kind"], name: string, parent = "") => aliases.find((a) => a.kind === kind && a.aliasKey === placeKey(name) && a.parent === parent)?.target;
+  const country = place.country ? countryByName(catalogs, place.country) ?? catalogs.countries.find((c) => c.code === aliasOf("country", place.country!)) : undefined;
   if (place.country && !country) warnings.push(`El país «${place.country}» no está en el catálogo de Exógena.`);
   if (country && country.code !== COLOMBIA) return { countryCode: country.code, deptCode: "", muniCode: "", warnings };
   // Sin país impreso pero con departamento / ciudad colombianos se asume Colombia solo si se resuelven en el catálogo.
-  const dept = place.department ? departmentByName(catalogs, place.department) : undefined;
+  const dept = place.department ? departmentByName(catalogs, place.department) ?? catalogs.departments.find((d) => d.code === aliasOf("department", place.department!)) : undefined;
   if (place.department && !dept) warnings.push(`El departamento «${place.department}» no está en el catálogo de Exógena.`);
-  const muni = place.city ? municipalityByName(catalogs, place.city, dept?.code) : undefined;
+  const muniAlias = place.city ? aliasOf("municipality", place.city, dept?.code ?? "") ?? (dept ? aliasOf("municipality", place.city) : undefined) : undefined;
+  const muni = place.city ? municipalityByName(catalogs, place.city, dept?.code) ?? catalogs.municipalities.find((m) => m.code === muniAlias && (!dept || m.deptCode === dept.code)) : undefined;
   if (place.city && !muni) warnings.push(`El municipio «${place.city}» no se pudo identificar${dept ? ` en ${dept.name}` : ""}.`);
   const deptCode = dept?.code ?? muni?.deptCode ?? "";
   return { countryCode: country?.code ?? (deptCode ? COLOMBIA : ""), deptCode, muniCode: deptCode && muni && muni.deptCode === deptCode ? muni.code : "", warnings };

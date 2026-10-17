@@ -17,6 +17,7 @@ import { use1008 } from "../use1008";
 import { use1009 } from "../use1009";
 import { use1010 } from "../use1010";
 import { useCryptoFormat } from "../useCryptoFormat";
+import { usePurchasesExo } from "../usePurchasesFormat";
 
 const MODULE_ID = "informacion-exogena";
 
@@ -32,25 +33,26 @@ export default function ControlPage() {
   const c8 = use1008(selection.companyId, selection.year);
   const c7 = useCryptoFormat(selection.companyId, selection.year, "1007");
   const c47 = useCryptoFormat(selection.companyId, selection.year, "1647");
+  const px = usePurchasesExo(selection.companyId, selection.year);
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
   const company = b.company ?? a.company;
-  const ready = !!company && !!a.model && !!b.model && !!c8.model && c7.ready && c47.ready;
+  const ready = !!company && !!a.model && !!b.model && !!c8.model && c7.ready && c47.ready && px.ready;
 
-  const statuses = useMemo<Record<string, FormatStatusRow>>(() => ({ "1010": a.format.status, "1009": b.format.status, "1008": c8.format.status, "1007": c7.format.status, "1647": c47.format.status }), [a.format.status, b.format.status, c8.format.status, c7.format.status, c47.format.status]);
+  const statuses = useMemo<Record<string, FormatStatusRow>>(() => ({ "1010": a.format.status, "1009": b.format.status, "1008": c8.format.status, "1007": c7.format.status, "1647": c47.format.status, "1001": px.formats["1001"].status, "1005": px.formats["1005"].status, "1006": px.formats["1006"].status }), [a.format.status, b.format.status, c8.format.status, c7.format.status, c47.format.status, px.formats]);
   const blockers = useMemo(
     () =>
       ready
-        ? exportBlockers({ statuses, problems: { "1010": a.model!.problems, "1009": b.model!.problems, "1008": c8.model!.problems, "1007": c7.computed!.problems, "1647": c47.computed!.problems }, reconciliation1009: b.model!.reconciliation })
+        ? exportBlockers({ statuses, problems: { "1010": a.model!.problems, "1009": b.model!.problems, "1008": c8.model!.problems, "1007": c7.computed!.problems, "1647": c47.computed!.problems, "1001": px.computed!["1001"].problems, "1005": px.computed!["1005"].problems, "1006": px.computed!["1006"].problems }, reconciliation1009: b.model!.reconciliation })
         : [],
-    [ready, statuses, a.model, b.model, c8.model, c7.computed, c47.computed],
+    [ready, statuses, a.model, b.model, c8.model, c7.computed, c47.computed, px.computed],
   );
 
   async function exportAll() {
-    if (!company || !a.format.records || !b.format.records || !c8.format.records || !c7.format.records || !c47.format.records) return;
+    if (!company || !a.format.records || !b.format.records || !c8.format.records || !c7.format.records || !c47.format.records || !px.formats["1001"].records || !px.formats["1005"].records || !px.formats["1006"].records) return;
     setExporting(true);
     try {
-      const workbook = buildExportWorkbook({ company, year: selection.year, statuses, records: { "1010": a.format.records, "1009": b.format.records, "1008": c8.format.records, "1007": c7.format.records, "1647": c47.format.records } });
+      const workbook = buildExportWorkbook({ company, year: selection.year, statuses, records: { "1010": a.format.records, "1009": b.format.records, "1008": c8.format.records, "1007": c7.format.records, "1647": c47.format.records, "1001": px.formats["1001"].records, "1005": px.formats["1005"].records, "1006": px.formats["1006"].records } });
       const path = await exogenaService.saveWorkbook(company.id, workbook, suggestedExportName(company, selection.year));
       if (path) {
         setExported(path);
@@ -71,6 +73,14 @@ export default function ControlPage() {
     if (code === "1008") {
       const r8 = c8.model!.reconciliation;
       return r8.difference === 0 && (c8.model!.deudores?.differenceCents ?? 0) === 0 && blocking(c8.model!.problems).length === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{r8.difference !== 0 ? `Diferencia ${formatMoneyCents(r8.difference * 100)}` : (c8.model!.deudores?.differenceCents ?? 0) !== 0 ? `Diferencia con Deudores ${formatMoneyCents(c8.model!.deudores!.differenceCents)}` : `${blocking(c8.model!.problems).length} pendientes`}</Badge>;
+    }
+    if (code === "1001" || code === "1005" || code === "1006") {
+      const st = px.computed![code];
+      if (st.notApplicableReason) return <Badge>No aplica</Badge>;
+      const n = blocking(st.problems).length;
+      const iva = px.model!.reconciliation;
+      if (n === 0 && iva.applicable && iva.differenceCents !== 0) return <Badge tone="danger">IVA: diferencia {formatMoneyCents(iva.differenceCents)}</Badge>;
+      return n === 0 ? <Badge tone="success">Sin pendientes</Badge> : <Badge tone="danger">{n} pendientes</Badge>;
     }
     const own = code === "1007" ? c7.computed!.problems : code === "1647" ? c47.computed!.problems : a.model!.problems;
     const stoppers = blocking(own);

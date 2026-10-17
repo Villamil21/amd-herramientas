@@ -23,6 +23,7 @@ import { parseTaxReturn, TAX_FORM_LABEL, TaxReturnError } from "./parser/taxRetu
 import { fiscalResult, periodName, pucLabel, taxEffects, type TaxStatus } from "./services/effects";
 import { incomeComposition } from "./services/incomeComposition";
 import { taxPucItems } from "./services/pucItems";
+import { purchasesService } from "../../../services/purchasesService";
 import { buildDraft, type ImportDraft } from "./services/importDraft";
 import { taxService } from "./services/taxService";
 import { returnView, versionsOf } from "./services/view";
@@ -233,7 +234,8 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
         [list, periodicity] = await Promise.all([taxService.list(match.id), taxService.settings(match.id).then((s) => s.vatPeriodicity)]);
         setCompanyId(match.id);
       }
-      setDraft(buildDraft(parsed, picked.fileName, data.companies ?? [], list, periodicity));
+      const vatHistory = parsed.taxType === "vat" ? await purchasesService.companyVatHistory((match ?? company)?.id ?? null) : [];
+      setDraft(buildDraft(parsed, picked.fileName, data.companies ?? [], list, periodicity, vatHistory));
     } catch (e) {
       setError(errorMessage(e));
     } finally {

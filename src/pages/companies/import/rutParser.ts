@@ -24,6 +24,14 @@ export interface RutData {
   /** Persona natural: el nombre sale de los campos de nombres y apellidos. */
   isNaturalPerson: boolean;
   representatives: RutPerson[];
+  /** Códigos de «Responsabilidades, Calidades y Atributos» (casilla 53), p. ej. «05», «48». Vacío si no se pudo leer la sección. */
+  responsibilities?: string[];
+  /** Se leyó la sección de responsabilidades (si no, no se sabe si es responsable de IVA: nunca se supone). */
+  responsibilitiesRead?: boolean;
+  /** Responsabilidad 48 (Impuesto sobre las ventas - IVA); undefined = la sección no se pudo leer. */
+  vatResponsible?: boolean;
+  /** AAAA-MM-DD de la casilla 61 (fecha desde la que rige), si el formulario la trae. */
+  responsibilityDate?: string;
   notes: string[];
 }
 
@@ -134,6 +142,33 @@ function readRepresentatives(pages: PdfPageText[]): RutPerson[] {
   return out;
 }
 
+/**
+ * Responsabilidades del RUT: líneas «NN - descripción» entre el rótulo de la sección y la siguiente (usuarios/obligados
+ * aduaneros o casilla 54). Se leen por posición vertical en cada página; sin el rótulo de la sección no se supone nada.
+ */
+export function readResponsibilities(pages: PdfPageText[]): { codes: string[]; read: boolean } {
+  const codes = new Set<string>();
+  let read = false;
+  for (const page of pages) {
+    const heading = page.items.find((i) => /Responsabilidades,?\s*Calidades\s*y\s*Atributos/i.test(i.text) || /^53\.\s*C[óo]digo/i.test(i.text));
+    if (!heading) continue;
+    read = true;
+    const end = page.items.filter((i) => i.y < heading.y - 3 && /Usuarios aduaneros|Obligados aduaneros|^54\.\s*C[óo]digo|^55\.|Exportadores/i.test(i.text)).sort((a, b) => b.y - a.y)[0];
+    const lower = end ? end.y : -Infinity;
+    const rows = page.items.filter((i) => i.y < heading.y - 1 && i.y > lower + 1);
+    for (const item of rows) for (const m of item.text.matchAll(/(?:^|\s)(\d{1,2})\s*[-–]\s*[A-Za-zÁ-úÑñ]/g)) codes.add(m[1].padStart(2, "0"));
+  }
+  return { codes: [...codes].sort(), read };
+}
+
+/** Casilla 61 en formato AAAAMMDD (dígitos sueltos o juntos). */
+function readResponsibilityDate(items: PdfTextItem[]): string | undefined {
+  const raw = readField(items, /^61\.\s*Fecha/i, { mode: "digits", maxDrop: 20 });
+  const m = raw && /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || Number(m[3]) < 1 || Number(m[3]) > 31) return undefined;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
 export function parseRut(doc: PdfDocumentText): RutData {
   const notes: string[] = [];
   const first = doc.pages[0]?.items ?? [];
@@ -175,6 +210,8 @@ export function parseRut(doc: PdfDocumentText): RutData {
   if (ciiu && !cleanCiiu) notes.push("El código CIIU del RUT no tiene el formato esperado de 4 dígitos.");
   if (!cleanCiiu && !ciiu) notes.push("No se pudo leer el código CIIU de la actividad principal.");
 
+  const { codes: responsibilities, read: responsibilitiesRead } = readResponsibilities(doc.pages);
+
   return {
     nit,
     dv,
@@ -187,6 +224,10 @@ export function parseRut(doc: PdfDocumentText): RutData {
     telefono: telefono && /^\d{7,12}$/.test(telefono) ? telefono : undefined,
     isNaturalPerson,
     representatives: readRepresentatives(doc.pages),
+    responsibilities,
+    responsibilitiesRead,
+    vatResponsible: responsibilitiesRead ? responsibilities.includes("48") : undefined,
+    responsibilityDate: responsibilitiesRead ? readResponsibilityDate(first) : undefined,
     notes,
   };
 }

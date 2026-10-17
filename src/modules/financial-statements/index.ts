@@ -33,10 +33,10 @@ export const financialStatementsModule: ModuleDef = {
     {
       // El id se conserva (rutas y accesos guardados); el nombre visible cambió.
       id: "codigos-puc-por-factura",
-      name: "Clasificación contable de compras",
-      description: "Asigna códigos PUC a las facturas de compra de una carpeta y envíalas a Estados Financieros.",
+      name: "Compras, costos y exógena",
+      description: "Importa facturas y notas crédito electrónicas, clasifica cada línea y prepara Estados Financieros y los formatos 1001, 1005 y 1006.",
       icon: ListTree,
-      component: lazy(() => import("./puc-codes/PucCodesPage")),
+      component: lazy(() => import("./purchases/PurchasesPage")),
     },
     {
       // Extractos bancarios se movió aquí: los mismos lectores de cada banco, con la capa contable.

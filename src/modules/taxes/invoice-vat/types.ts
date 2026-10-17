@@ -75,6 +75,8 @@ export interface ParsedInvoice {
   /** «Subtotal» y «Total Bruto Factura» de Datos Totales, si se encontraron. */
   subtotalCents?: number;
   grossTotalCents?: number;
+  /** «Total neto factura» de Datos Totales, si se encontró. */
+  netTotalCents?: number;
   /** IVA total del documento (Datos Totales o, en su defecto, el texto del código QR). */
   invoiceVatCents?: number;
 }

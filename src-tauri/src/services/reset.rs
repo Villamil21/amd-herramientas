@@ -208,6 +208,16 @@ mod tests {
         conn.execute("INSERT INTO settings (key, value) VALUES ('algo', 'x')", []).unwrap();
         conn.execute("INSERT INTO retention_concepts (nombre, tipo_retencion, unidad_tarifa, created_at, updated_at) VALUES ('C', 'RETEFUENTE', 'PORCENTAJE', 'x', 'x')", []).unwrap();
         conn.execute("UPDATE fs_sections SET representative_line_id = 6 WHERE section = 'liability_current'", []).unwrap();
+        // Compras, costos y exógena: facturas, reglas, historiales y ajustes al catálogo 1001 por año.
+        conn.execute("INSERT INTO purchase_uploads (id, folder_name, buyer_nit, file_count, imported_at) VALUES (1, 'Mayo', '900', 1, 'x')", []).unwrap();
+        conn.execute("INSERT INTO purchase_documents (id, upload_id, file_name, buyer_nit, fingerprint, data, imported_at) VALUES (1, 1, 'a.pdf', '900', 'fp', '{}', 'x')", []).unwrap();
+        conn.execute("INSERT INTO purchase_line_class (document_id, line_index, puc_code, confirmed_at) VALUES (1, 0, '613505', 'x')", []).unwrap();
+        conn.execute("INSERT INTO purchase_rules (supplier_nit, product_key, created_at, updated_at) VALUES ('800', 'p', 'x', 'x')", []).unwrap();
+        conn.execute("INSERT INTO purchase_title_types (title_key, display_title, kind, updated_at) VALUES ('propio', 'Propio', 'purchase', 'x')", []).unwrap();
+        conn.execute("INSERT INTO company_vat_history (company_id, effective_date, responsible, created_at) VALUES (1, '2024-01-01', 1, 'x')", []).unwrap();
+        conn.execute("INSERT INTO supplier_fiscal_history (supplier_nit, effective_date, regime, created_at) VALUES ('800197268', '2026-01-01', 'O-15', 'x')", []).unwrap();
+        conn.execute("INSERT INTO puc_concept_1001 (puc_code, concept_code, updated_at) VALUES ('613505', '5004', 'x')", []).unwrap();
+        conn.execute("UPDATE exo_year_concepts SET description = 'Cambiado' WHERE format_code = '1001' AND year = 2026 AND code = '5002'", []).unwrap();
     }
 
     #[test]
@@ -245,6 +255,13 @@ mod tests {
         assert_eq!(conn.query_row("SELECT name FROM exo_departments WHERE code = '76'", [], |r| r.get::<_, String>(0)).unwrap(), "Valle del Cauca");
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM exo_municipalities WHERE name = 'Propio'"), 0);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM exo_municipalities"), 1122);
+        // Compras: lo del usuario desaparece; el catálogo 1001 y los encabezados de sistema vuelven a la línea base.
+        for table in ["purchase_uploads", "purchase_documents", "purchase_line_class", "purchase_rules", "company_vat_history", "supplier_fiscal_history", "puc_concept_1001"] {
+            assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM {table}")), 0, "{table}");
+        }
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM purchase_title_types"), 2);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM exo_year_concepts WHERE format_code = '1001'"), 36);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM exo_year_concepts WHERE description = 'Cambiado'"), 0);
         // 4. Las migraciones aplicadas y la versión de arranque se conservan; las llaves foráneas siguen activas y sanas.
         let migrations_after: Vec<(i64, String)> = conn.prepare("SELECT version, name FROM schema_migrations ORDER BY version").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
         assert_eq!(migrations_after, migrations_before);

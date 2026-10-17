@@ -13,11 +13,14 @@ pub mod identity_documents;
 pub mod migrations;
 pub mod minimum_wages;
 pub mod puc;
+pub mod catalog_extras;
+pub mod purchases;
 pub mod self_withholding;
 pub mod shareholder_documents;
 pub mod signers;
 pub mod suppliers;
 pub mod tax;
+pub mod tax_profiles;
 pub mod vat_titles;
 pub mod withholding;
 

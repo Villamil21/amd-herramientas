@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { Bitcoin, FileSpreadsheet, HandCoins, Landmark, ShieldCheck, Users } from "lucide-react";
+import { Bitcoin, FileSpreadsheet, HandCoins, Landmark, Receipt, ReceiptText, ShieldCheck, ShoppingBag, Users } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 
 /**
@@ -21,6 +21,9 @@ export const exogenaModule: ModuleDef = {
     { id: "1008", name: "1008 · Saldo de cuentas por cobrar al 31 de diciembre", description: "CxC a socios (suscrito − pagado) por tercero, desde Empresas.", icon: HandCoins, priority: 2, component: lazy(() => import("./pages/Format1008Page")) },
     { id: "1007", name: "1007 · Ingresos recibidos", description: "Ventas por cliente, desde Transacciones Cripto.", icon: Bitcoin, priority: 3, component: lazy(() => import("./pages/Format1007Page")) },
     { id: "1647", name: "1647 · Ingresos recibidos para terceros", description: "Compras por tercero asignadas a un pagador, desde Transacciones Cripto.", icon: Bitcoin, priority: 4, component: lazy(() => import("./pages/Format1647Page")) },
-    { id: "control", name: "Control y exportación", description: "Auditoría de los formatos y exportación a Excel.", icon: ShieldCheck, priority: 5, component: lazy(() => import("./pages/ControlPage")) },
+    { id: "1001", name: "1001 · Pagos o abonos en cuenta y retenciones practicadas", description: "Compras por tercero y concepto, con IVA y retenciones, desde Compras, costos y exógena.", icon: ShoppingBag, priority: 5, component: lazy(() => import("./pages/Format1001Page")) },
+    { id: "1005", name: "1005 · Impuesto a las ventas descontable", description: "IVA descontable por tercero, desde Compras, costos y exógena.", icon: Receipt, priority: 6, component: lazy(() => import("./pages/Format1005Page")) },
+    { id: "1006", name: "1006 · Impuesto a las ventas generado e impuesto al consumo", description: "IVA recuperado en devoluciones de compras, desde Compras, costos y exógena.", icon: ReceiptText, priority: 7, component: lazy(() => import("./pages/Format1006Page")) },
+    { id: "control", name: "Control y exportación", description: "Auditoría de los formatos y exportación a Excel.", icon: ShieldCheck, priority: 8, component: lazy(() => import("./pages/ControlPage")) },
   ],
 };

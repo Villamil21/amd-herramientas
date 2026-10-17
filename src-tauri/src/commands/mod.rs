@@ -15,6 +15,8 @@ pub mod identity_documents;
 pub mod invoices;
 pub mod minimum_wages;
 pub mod puc;
+pub mod catalog_extras;
+pub mod purchases;
 pub mod reset;
 pub mod self_withholding;
 pub mod statements;

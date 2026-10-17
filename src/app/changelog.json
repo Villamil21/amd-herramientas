@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.38.0",
+    "date": "2026-10-17",
+    "notes": [
+      "Nuevo módulo «Compras, costos y exógena» (reemplaza la clasificación contable de compras): importa carpetas de facturas PDF por NIT comprador y año, clasifica cada línea por cuenta PUC y concepto 1001, controla duplicados y notas crédito, y alimenta Estados Financieros y los formatos Exógena 1001, 1005 y 1006 con un estado visual unificado por destino.",
+      "Los lotes del módulo anterior quedan fuera del cálculo vigente (solo auditoría) para evitar dobles conteos; el módulo nuevo inicia desde cero.",
+      "La Tabla de retenciones ahora tiene vigencia por fecha (porcentaje, cuantía mínima y UVT): Compras y Retefuente usan la tarifa vigente en la fecha de cada factura, sin recalcular facturas históricas.",
+      "Alias persistentes en Catálogos Exógena (tipos de comprobante, tipos de documento, municipios, departamentos y países), guardados en la base y en la copia de seguridad.",
+      "El tipo de documento del tercero se conserva (CC, CE, PPT, etc.) y llega igual a 1001, 1005 y 1006; el NIT solo se usa para personas jurídicas o cuando la ficha lo indica.",
+      "Si la empresa no es responsable de IVA, el IVA se suma al costo, gasto o activo y se reporta como IVA no deducible en 1001. «5029 a 5035» es un único concepto configurable.",
+      "Empresas guarda el historial de IVA y RUT 48; Proveedores, el historial de régimen; la Tabla PUC incluye el concepto 1001."
+    ]
+  },
+  {
     "version": "1.37.0",
     "date": "2026-10-17",
     "notes": [

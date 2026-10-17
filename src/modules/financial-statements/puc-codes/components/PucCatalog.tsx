@@ -16,6 +16,8 @@ export interface PucCatalogAdmin {
   usage: Map<string, number>;
   /** Código → «Disponible», «No afecta EEFF»… (solo los clasificados). */
   classification: Map<string, { label: string; excluded: boolean }>;
+  /** Código PUC → concepto 1001 sugerido (Compras, costos y exógena). Sin esto no se muestra la columna. */
+  concept1001?: Map<string, string>;
   onEdit: (code: string) => void;
   onClassify: (code: string) => void;
   onToggleActive: (code: string) => void;
@@ -47,7 +49,7 @@ const assignable = (row: { code: string; custom?: boolean }) => Boolean(row.cust
 
 function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean; admin?: PucCatalogAdmin }) {
   const missing = row.concept === undefined;
-  const columns = admin ? 6 : 2;
+  const columns = admin ? (admin.concept1001 ? 7 : 6) : 2;
   if (row.level === "class" || row.level === "group") {
     // Clase y grupo son títulos: organizan la tabla y no se pueden asignar. El código queda en el tooltip.
     return (
@@ -105,6 +107,7 @@ function CatalogRow({ row, excluded, admin }: { row: PucRow; excluded?: boolean;
               <span className="muted">Sin clasificar · sin uso</span>
             )}
           </td>
+          {admin.concept1001 && <td className="puc-row__concept1001">{canAssign ? admin.concept1001.get(row.code) ?? <span className="muted">—</span> : null}</td>}
           <td className="puc-row__usage">
             {missing ? null : uses > 0 ? (
               <button type="button" className="link-button" onClick={() => admin.onReferences(row.code)} title="Ver referencias">
@@ -238,6 +241,7 @@ export function PucCatalog({ index, maxHeight, excluded, admin }: { index: PucIn
                 {admin && (
                   <>
                     <th style={{ width: "24%" }}>Clasificación EEFF</th>
+                    {admin.concept1001 && <th style={{ width: 90 }} title="Concepto sugerido del formato 1001">Concepto 1001</th>}
                     <th className="num" style={{ width: 64 }} title="Movimientos y referencias">
                       Uso
                     </th>

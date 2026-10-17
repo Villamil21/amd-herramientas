@@ -1,8 +1,10 @@
 import type { Company } from "../../../../types/models";
 import { findCompanyByNit, namesMatch, normalizeNit } from "../../shared/companyMatch";
+import type { CompanyVatEntry } from "../../../../types/purchases";
 import type { ParsedTaxReturn } from "../parser/taxReturnParser";
 import type { TaxPeriodicity, TaxReturn, TaxReturnInput, VatPeriodicity } from "../types";
 import { periodRange } from "./effects";
+import { VAT_NOT_RESPONSIBLE_MESSAGE, vatResponsibleIn } from "./vatGuard";
 
 /**
  * Una declaración leída, lista para revisar antes de guardarla: empresa por
@@ -25,9 +27,11 @@ export interface ImportDraft {
   correctsExisting: boolean;
   /** El mismo formulario ya fue importado. */
   duplicate: TaxReturn | null;
+  /** IVA: el historial de la empresa dice que no era responsable en el periodo (no se importa). */
+  vatNotResponsible: boolean;
 }
 
-export function buildDraft(parsed: ParsedTaxReturn, fileName: string, companies: Company[], returns: TaxReturn[], vatPeriodicity: VatPeriodicity | null): ImportDraft {
+export function buildDraft(parsed: ParsedTaxReturn, fileName: string, companies: Company[], returns: TaxReturn[], vatPeriodicity: VatPeriodicity | null, vatHistory: readonly CompanyVatEntry[] = []): ImportDraft {
   const company = findCompanyByNit(companies, parsed.nit) ?? null;
   const periodicity: TaxPeriodicity | null = parsed.taxType === "withholding" ? "monthly" : parsed.taxType === "income" ? "annual" : (parsed.periodicity ?? vatPeriodicity);
   const draft: ImportDraft = {
@@ -41,7 +45,12 @@ export function buildDraft(parsed: ParsedTaxReturn, fileName: string, companies:
     existing: null,
     correctsExisting: false,
     duplicate: (parsed.formNumber && returns.find((r) => r.formNumber === parsed.formNumber)) || null,
+    vatNotResponsible: false,
   };
+  if (parsed.taxType === "vat" && periodicity && parsed.year !== null && parsed.period !== null) {
+    const range = periodRange(periodicity, parsed.year, parsed.period);
+    draft.vatNotResponsible = vatResponsibleIn(vatHistory, range.start, range.end) === false;
+  }
   return withExisting(draft, returns);
 }
 
@@ -59,6 +68,7 @@ export function draftBlockers(d: ImportDraft, confirmedName: boolean, confirmedC
   if (!d.company) out.push(`No hay una empresa con NIT ${normalizeNit(d.parsed.nit) || "(sin leer)"}. Créala en Datos → Empresas.`);
   if (d.duplicate) out.push(`El formulario ${d.parsed.formNumber} ya fue importado.`);
   if (d.nameMismatch && !confirmedName) out.push("Confirma que la declaración es de esta empresa.");
+  if (d.vatNotResponsible) out.push(VAT_NOT_RESPONSIBLE_MESSAGE);
   if (d.year === null) out.push("Falta el año gravable.");
   if (d.parsed.taxType !== "income" && d.parsed.period === null) out.push("No se pudo leer el periodo.");
   if (!d.periodicity) out.push("Configura la periodicidad de IVA de la empresa.");

@@ -27,11 +27,15 @@ import type {
   WithholdingReport,
 } from "../types";
 import { EXCLUDED_CODES, excludedCode, fiscalCodes, regimeKey, regimeValue } from "./fiscal";
+import type { RateVersion } from "../../../../types/purchases";
+import { rateAt } from "./rateVersions";
 import { formatRateBp, impliedRateBp, minBaseCents, periodLabel, retentionCents, roundToThousands, sameRetention } from "./money";
 
 export interface AnalysisContext {
   suppliers: Supplier[];
   rates: WithholdingRate[];
+  /** Vigencias por fecha de la Tabla de retenciones: cada documento usa lo vigente en su fecha de expedición. */
+  rateVersions?: readonly RateVersion[];
   uvts: UvtValue[];
   titles: DocumentTitleMapping[];
   /** Periodo elegido por el usuario cuando hay empate (AAAA-MM). */
@@ -137,7 +141,7 @@ function evaluate(row: DocRow, doc: ParsedDocument, supplier: Supplier | undefin
   }
   if (rules.length > 1) return evaluateRules(row, doc, rules, decision, ctx, rates);
   const chosen = rules[0];
-  const rate = rates.get(chosen.rateId)!;
+  const rate = rateAt(rates.get(chosen.rateId)!, ctx.rateVersions ?? [], doc.issueDate);
   row.rule = { rateId: rate.id, retentionType: rate.retentionType, subtypeName: rate.name, baseMode: chosen.baseMode };
 
   const year = Number(doc.issueDate!.slice(0, 4));
@@ -241,7 +245,7 @@ function evaluateRules(row: DocRow, doc: ParsedDocument, rules: SupplierWithhold
   // Sin decisión del usuario manda la predeterminada: ella aplica y las demás no.
   const hasDefault = rules.some((r) => r.isDefault);
   const lines = rules.map((r): RuleLine => {
-    const rate = rates.get(r.rateId)!;
+    const rate = rateAt(rates.get(r.rateId)!, ctx.rateVersions ?? [], doc.issueDate);
     const d = decision.rules?.[r.rateId] ?? {};
     const applies = d.applies ?? (hasDefault ? r.isDefault : undefined);
     const min = minBaseCents(rate.baseUvtCenti, uvt.valuePesos);

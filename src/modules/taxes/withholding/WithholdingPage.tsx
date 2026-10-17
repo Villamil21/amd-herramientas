@@ -1,3 +1,5 @@
+import { catalogExtrasService } from "../../../services/purchasesService";
+import type { RateVersion } from "../../../types/purchases";
 import { IssuerReviewPanel } from "../../exogena/components/IssuerReviewPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileSpreadsheet, FolderOpen, FolderSearch, Play, Tags } from "lucide-react";
@@ -42,6 +44,7 @@ export default function WithholdingPage() {
   const [picking, setPicking] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [rates, setRates] = useState<WithholdingRate[]>([]);
+  const [rateVersions, setRateVersions] = useState<RateVersion[]>([]);
   const [uvts, setUvts] = useState<UvtValue[]>([]);
   const [titles, setTitles] = useState<DocumentTitleMapping[]>([]);
   const [periodChoice, setPeriodChoice] = useState<string | undefined>();
@@ -65,8 +68,9 @@ export default function WithholdingPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [s, r, u, t] = await Promise.all([supplierService.list(), withholdingService.listRates(), withholdingService.listUvt(), withholdingService.listTitles()]);
+      const [s, r, u, t, v] = await Promise.all([supplierService.list(), withholdingService.listRates(), withholdingService.listUvt(), withholdingService.listTitles(), catalogExtrasService.rateVersions()]);
       setSuppliers(s);
+      setRateVersions(v);
       setRates(r);
       setUvts(u);
       setTitles(t);
@@ -122,8 +126,8 @@ export default function WithholdingPage() {
   }
 
   const report = useMemo(
-    () => (phase.status === "done" ? buildWithholdingReport(phase.results, { suppliers, rates, uvts, titles, periodChoice, decisions, dismissedFiscal }) : null),
-    [phase, suppliers, rates, uvts, titles, periodChoice, decisions, dismissedFiscal],
+    () => (phase.status === "done" ? buildWithholdingReport(phase.results, { suppliers, rates, rateVersions, uvts, titles, periodChoice, decisions, dismissedFiscal }) : null),
+    [phase, suppliers, rates, rateVersions, uvts, titles, periodChoice, decisions, dismissedFiscal],
   );
   const selectedRow = report?.rows.find((r) => r.fileName === selected) ?? null;
   const actions = useMemo(() => (report ? buildPendingActions(report, resolvedConflicts) : []), [report, resolvedConflicts]);

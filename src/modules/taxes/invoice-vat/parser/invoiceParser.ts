@@ -330,6 +330,8 @@ interface Totals {
   subtotalCents?: number;
   grossTotalCents?: number;
   vatCents?: number;
+  /** «Total neto factura»: lo que se paga (base + impuestos), usado para identificar versiones de un mismo documento. */
+  netTotalCents?: number;
 }
 
 /**
@@ -351,7 +353,7 @@ function readTotals(pages: PageRows[], fromPage: number, isHeading: (r: TextRow)
       .sort((a, b) => a - b);
     if (starts.length === 0) return {};
 
-    const found: Record<keyof Totals, number | undefined> = { subtotalCents: undefined, grossTotalCents: undefined, vatCents: undefined };
+    const found: Record<keyof Totals, number | undefined> = { subtotalCents: undefined, grossTotalCents: undefined, vatCents: undefined, netTotalCents: undefined };
     for (const row of region) {
       starts.forEach((x0, k) => {
         const x1 = starts[k + 1];
@@ -360,7 +362,8 @@ function readTotals(pages: PageRows[], fromPage: number, isHeading: (r: TextRow)
         const value = money.length ? parseCopAmount(money[money.length - 1].text) : null;
         if (value === null) return;
         const label = normalizeKey(joinWords(seg.filter((w) => !isMoney(w) && w.text !== "$")));
-        const field: keyof Totals | undefined = label === "subtotal" ? "subtotalCents" : label.startsWith("total bruto") ? "grossTotalCents" : label === "iva" ? "vatCents" : undefined;
+        const field: keyof Totals | undefined =
+          label === "subtotal" ? "subtotalCents" : label.startsWith("total bruto") ? "grossTotalCents" : label === "iva" ? "vatCents" : label.startsWith("total neto factura") ? "netTotalCents" : undefined;
         if (field) found[field] = value; // las cajas se recorren de izquierda a derecha: gana la derecha
       });
     }
@@ -423,6 +426,7 @@ export function parseInvoice(doc: PdfDocumentText): ParsedInvoice {
     products: table.products,
     subtotalCents: totals.subtotalCents,
     grossTotalCents: totals.grossTotalCents,
+    netTotalCents: totals.netTotalCents,
     invoiceVatCents: totals.vatCents ?? (qrVat !== undefined ? (parseDotDecimal(qrVat) ?? undefined) : undefined),
   };
 }

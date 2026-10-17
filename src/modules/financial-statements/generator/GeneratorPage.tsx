@@ -33,6 +33,7 @@ import { taxPucItems } from "../tax-obligations/services/pucItems";
 import { ExcessReviewModal } from "../tax-obligations/ExcessReviewModal";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
+import { PurchasesFsStrip } from "../purchases/ui/PurchasesFsStrip";
 import { cryptoOutsideRange, liveMovements, staleCryptoYears } from "../crypto/eeffBatch";
 import { useCryptoData } from "../crypto/useCryptoData";
 import { useEeffAutoSync } from "../crypto/useEeffAutoSync";
@@ -538,6 +539,7 @@ export default function GeneratorPage() {
               </div>
             </Card>
           )}
+          {company && <PurchasesFsStrip nit={company.nit} start={start} end={end} onSynced={() => void loadLedger()} />}
           {pendingBankBalances(s).length > 0 && !closed && (
             <Alert
               tone="danger"
