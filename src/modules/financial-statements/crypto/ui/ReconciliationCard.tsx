@@ -1,8 +1,12 @@
 import { Badge, Card } from "../../../../components/ui";
+import { formatDateForDisplay } from "../../../../utils/dates";
 import { formatInteger } from "../../../../utils/format";
 import type { EeffSyncState } from "../eeffBatch";
 import { formatExactCents } from "../../shared/money";
 import type { CryptoModel } from "../domain/model";
+
+export const effectiveText = (model: CryptoModel) =>
+  model.eeff.effectiveFromCoverage ? `Efecto contable fechado al ${formatDateForDisplay(model.eeff.effectiveDate)}, según la última cobertura aceptada.` : `Efecto contable fechado al ${formatDateForDisplay(model.eeff.effectiveDate)}, la fecha de corte.`;
 
 const money = (c: number | null) => (c === null ? "—" : formatExactCents(c));
 const diff = (c: number | null) => (c === null ? <Badge tone="warning">Pendiente</Badge> : c === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">{formatExactCents(c)}</Badge>);
@@ -96,7 +100,7 @@ export function ReconciliationCard({ model, sync }: { model: CryptoModel; sync: 
         </table>
       </div>
       <p className="muted" style={{ padding: "8px 12px" }}>
-        Efecto en Estados Financieros: <strong>{SYNC_LABEL[sync]}</strong>.
+        Efecto en Estados Financieros: <strong>{SYNC_LABEL[sync]}</strong>. {effectiveText(model)}
       </p>
       <div className="table-wrap">
         <table className="table table--dense">

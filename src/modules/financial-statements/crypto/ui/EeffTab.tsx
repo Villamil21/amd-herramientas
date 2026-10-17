@@ -1,3 +1,4 @@
+import { effectiveText } from "./ReconciliationCard";
 import { useMemo } from "react";
 import { Alert, Badge, Card } from "../../../../components/ui";
 import { formatExactCents, periodLabel } from "../../shared/money";
@@ -40,6 +41,7 @@ export function EeffTab({ model, companyId, onSent, onPuc, sync }: Props) {
         replaceLabel="Reemplazar con el cálculo actual"
         onSent={onSent}
       />
+      {model.eeff.ownIncomeCents !== null && <Alert tone="info">{effectiveText(model)} Entra en cualquier Generador cuyo rango incluya esa fecha.</Alert>}
       {sync.state === "in_sync" && <Alert tone="success">Estados Financieros está al día con este cálculo. Los cambios de cargas, decisiones, corte, presentación o cuentas PUC lo actualizan automáticamente.</Alert>}
       {sync.state === "update" && <Alert tone="info">{sync.updating ? "Actualizando Estados Financieros…" : "Estados Financieros se actualizará con el cálculo vigente."}</Alert>}
       {(sync.state === "stale" || sync.state === "retire") && (

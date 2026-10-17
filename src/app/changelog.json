@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.36.1",
+    "date": "2026-10-17",
+    "notes": [
+      "Transacciones Cripto: el efecto contable ahora se fecha en el menor entre el corte elegido y el último día del último mes con compras aceptadas que cubren el cálculo, así entra en Estados Financieros tanto de enero–mayo como de enero–diciembre sin adelantar ingresos a un período sin información. La pantalla lo indica («Efecto contable fechado al 31/05/2026, según la última cobertura aceptada») y el lote ya enviado se reemplaza solo.",
+      "Si las Ventas no traen fecha y el corte cae dentro de la cobertura del archivo, el cálculo queda bloqueado y se explica cómo ajustar la cobertura; el motivo ya no se repite.",
+      "El Generador avisa y bloquea marcar listo, generar el PDF y cerrar cuando el efecto de Transacciones Cripto queda fuera de su rango de fechas, en lugar de mostrar Ventas y Costo de ventas en cero sin explicación."
+    ]
+  },
+  {
     "version": "1.36.0",
     "date": "2026-10-17",
     "notes": [

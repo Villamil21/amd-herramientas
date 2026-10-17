@@ -5,8 +5,8 @@ import { blocking } from "./domain/problems";
 export const eeffDedupeKey = (year: number) => `crypto:${year}`;
 
 /** Huella del contenido que se envía: si coincide con la del lote vigente, Estados Financieros ya está al día. */
-export function eeffFingerprint(input: Pick<BatchInput, "periodEnd" | "movements">): string {
-  return JSON.stringify([input.periodEnd, input.movements.map((m) => [m.conceptKey, m.pucCode, m.amountCents, m.accountingDate])]);
+export function eeffFingerprint(input: Pick<BatchInput, "periodEnd" | "movements">, cutoff = ""): string {
+  return JSON.stringify([input.periodEnd, cutoff, input.movements.map((m) => [m.conceptKey, m.pucCode, m.amountCents, m.accountingDate])]);
 }
 
 /**
@@ -16,10 +16,11 @@ export function eeffFingerprint(input: Pick<BatchInput, "periodEnd" | "movements
 export function buildEeffBatch(companyId: number, model: CryptoModel): BatchInput | null {
   if (blocking(model.problems.eeff).length) return null;
   const { year, settings } = model;
+  const effectiveDate = model.eeff.effectiveDate;
   const movements = model.components
     .filter((c) => c.cents !== null && c.cents !== 0)
     .map((c) => ({
-      accountingDate: settings.cutoff,
+      accountingDate: effectiveDate,
       conceptKey: `crypto.${c.key}`,
       documentId: `crypto:${year}:${c.key}`,
       documentNumber: String(year),
@@ -34,13 +35,13 @@ export function buildEeffBatch(companyId: number, model: CryptoModel): BatchInpu
     companyId,
     source: "crypto_ops",
     fileName: `Transacciones Cripto ${year}`,
-    periodLabel: `Transacciones Cripto · ${year} · corte ${settings.cutoff}`,
+    periodLabel: `Transacciones Cripto · ${year} · fechado al ${effectiveDate}`,
     periodStart: `${year}-01-01`,
-    periodEnd: settings.cutoff,
+    periodEnd: effectiveDate,
     dedupeKey: eeffDedupeKey(year),
     movements,
   };
-  return { ...input, metadata: { year, cutoff: settings.cutoff, presentation: settings.presentation, files: model.counts.files, fingerprint: eeffFingerprint(input) } };
+  return { ...input, metadata: { year, cutoff: settings.cutoff, effectiveDate, presentation: settings.presentation, files: model.counts.files, fingerprint: eeffFingerprint(input, settings.cutoff) } };
 }
 
 export type EeffSyncState = "none" | "in_sync" | "update" | "retire" | "stale";
@@ -64,7 +65,7 @@ export function eeffSyncState(latest: CryptoBatchLike | undefined, built: BatchI
   if (latest.status === "voided") return built ? "update" : "stale";
   if (!built) return "retire";
   const sent = (latest.metadata as { fingerprint?: string } | null)?.fingerprint;
-  return sent === eeffFingerprint(built) ? "in_sync" : "update";
+  return sent === eeffFingerprint(built, String((built.metadata as { cutoff?: unknown } | null)?.cutoff ?? "")) ? "in_sync" : "update";
 }
 
 /** Años con el efecto retirado por desactualizado y no recalculado desde entonces: bloquean generar, cerrar y exportar. */
@@ -74,6 +75,30 @@ export function staleCryptoYears(batches: readonly BatchSummary[]): { year: numb
   for (const year of years) {
     const latest = latestEeffBatch(batches, year);
     if (latest?.status === "voided") out.push({ year, reason: String((latest.metadata as { staleReason?: unknown } | null)?.staleReason ?? "") });
+  }
+  return out.sort((a, b) => a.year - b.year);
+}
+
+export interface CryptoOutsideRange {
+  year: number;
+  /** Fecha contable con la que el lote fechó sus movimientos. */
+  cutoff: string;
+}
+
+/**
+ * Lotes vigentes cuyo corte cae fuera del rango del Generador. El Generador solo cuenta movimientos fechados dentro de su rango:
+ * un lote fechado al 2026-05-31 no llega a un Generador que termina el 2026-04-30, y sin este aviso Ventas y Costo de ventas
+ * quedarían en cero con el lote «al día».
+ */
+export function cryptoOutsideRange(batches: readonly BatchSummary[], start: string, end: string): CryptoOutsideRange[] {
+  const out: CryptoOutsideRange[] = [];
+  for (const b of batches) {
+    if (b.source !== "crypto_ops" || b.status !== "active" || !b.dedupeKey.startsWith("crypto:")) continue;
+    const year = Number(b.dedupeKey.slice(7));
+    if (year < Number(start.slice(0, 4)) || year > Number(end.slice(0, 4))) continue;
+    const meta = b.metadata as { effectiveDate?: unknown; cutoff?: unknown } | null;
+    const cutoff = String(meta?.effectiveDate ?? meta?.cutoff ?? b.periodEnd ?? "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cutoff) && (cutoff < start || cutoff > end)) out.push({ year, cutoff });
   }
   return out.sort((a, b) => a.year - b.year);
 }

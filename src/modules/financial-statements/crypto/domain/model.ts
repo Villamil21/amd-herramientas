@@ -181,7 +181,8 @@ export function buildModel(input: ModelInput): CryptoModel {
   if (accepted.length === 0) eeffProblems.push({ level: "blocking", kind: "coverage", message: "No hay operaciones aceptadas para calcular." });
   if (settings.cutoff.slice(0, 4) !== String(year)) eeffProblems.push({ level: "blocking", kind: "cutoff", message: `La fecha de corte debe estar dentro de ${year}.` });
   for (const reason of eeff.blockedSales) eeffProblems.push({ level: "blocking", kind: "coverage", message: reason });
-  for (const c of components) if (c.issue) eeffProblems.push({ level: "blocking", kind: c.cents === null ? "coverage" : "puc", message: `${c.label}: ${c.issue}`, payload: { pucKey: c.pucKey } });
+  // El motivo de un valor que depende de Ventas sin fecha ya está listado arriba (blockedSales): no se repite por componente.
+  for (const c of components) if (c.issue && !(c.cents === null && c.blocked)) eeffProblems.push({ level: "blocking", kind: c.cents === null ? "coverage" : "puc", message: `${c.label}: ${c.issue}`, payload: { pucKey: c.pucKey } });
   const withPending = matrix.filter((m) => m.pending.length && m.month <= settings.cutoff.slice(0, 7)).map((m) => m.month);
   if (withPending.length) eeffProblems.push({ level: "warning", kind: "coverage", message: `${withPending.length === 1 ? "El mes" : "Los meses"} ${withPending.join(", ")} ${withPending.length === 1 ? "tiene" : "tienen"} filas pendientes por resolver y no se marca${withPending.length === 1 ? "" : "n"} como cubierto${withPending.length === 1 ? "" : "s"} hasta aceptarlas o excluirlas.` });
   const lacking = yearMonths(year).filter((m) => m <= settings.cutoff.slice(0, 7) && missing.includes(m) && !withPending.includes(m));

@@ -52,7 +52,7 @@ export function salesScope(coverage: UploadCoverage, cutoff: string): SalesScope
   if (!coverage.first || !coverage.last) return { status: "blocked", reason: "La carga no tiene meses de cobertura (sus compras no traen fecha válida): ajusta su período." };
   if (lastDayOfMonth(coverage.last) <= cutoff) return { status: "included" };
   if (`${coverage.first}-01` > cutoff) return { status: "excluded", reason: `La carga cubre ${monthName(coverage.first)}–${monthName(coverage.last)}, posterior al corte.` };
-  return { status: "blocked", reason: `El corte ${cutoff} cae dentro del período de la carga (${coverage.first} a ${coverage.last}) y sus ventas no traen fecha: ajusta el período de cobertura o usa un corte compatible.` };
+  return { status: "blocked", reason: `El corte ${cutoff} cae dentro del período de la carga (${coverage.first} a ${coverage.last}) y sus ventas no traen fecha: ajusta el período de cobertura (pestaña Operaciones → Cobertura) o usa un corte compatible.` };
 }
 
 export function uploadsSales(operations: readonly Operation[], coverages: readonly UploadCoverage[], cutoff: string): UploadSales[] {
@@ -120,6 +120,10 @@ export function referenceValue(year: number, cutoff: string, purchases: readonly
 
 export interface CryptoEeff {
   cutoff: string;
+  /** Fecha contable de los movimientos: el menor entre el corte y el último día del último mes con compras aceptadas que cubren el cálculo. */
+  effectiveDate: string;
+  /** El corte elegido es posterior a la última cobertura aceptada, así que la fecha se adelantó a esa cobertura. */
+  effectiveFromCoverage: boolean;
   purchasesCents: number;
   salesCents: number | null;
   uploadSales: UploadSales[];
@@ -129,6 +133,18 @@ export interface CryptoEeff {
   reference: ReferenceValue;
 }
 
+/**
+ * Fecha efectiva del efecto contable: nunca adelanta ingresos a un período sin información. Con compras aceptadas de enero a
+ * mayo y corte 31/12, se fecha el 31/05: entra en EEFF enero–mayo y también en enero–diciembre.
+ */
+export function effectiveDateOf(cutoff: string, coverages: readonly UploadCoverage[]): { date: string; fromCoverage: boolean } {
+  const cutoffMonth = cutoff.slice(0, 7);
+  const last = coverages.flatMap((c) => c.months).filter((m) => m <= cutoffMonth).sort().pop();
+  if (!last) return { date: cutoff, fromCoverage: false };
+  const end = lastDayOfMonth(last);
+  return end < cutoff ? { date: end, fromCoverage: true } : { date: cutoff, fromCoverage: false };
+}
+
 export function computeEeff(args: { year: number; cutoff: string; operations: readonly Operation[]; coverages: readonly UploadCoverage[] }): CryptoEeff {
   const { year, cutoff, operations, coverages } = args;
   const purchases = operations.filter((o) => o.kind === "purchase");
@@ -136,7 +152,8 @@ export function computeEeff(args: { year: number; cutoff: string; operations: re
   const uploadSales = uploadsSales(operations, coverages, cutoff);
   const blockedSales = uploadSales.filter((u) => u.scope.status === "blocked").map((u) => `${u.fileName}: ${(u.scope as { reason: string }).reason}`);
   const salesCents = blockedSales.length ? null : uploadSales.filter((u) => u.scope.status === "included").reduce((s, u) => s + u.salesCents, 0);
-  return { cutoff, purchasesCents, salesCents, uploadSales, ownIncomeCents: salesCents === null ? null : salesCents - purchasesCents, blockedSales, reference: referenceValue(year, cutoff, purchases) };
+  const effective = effectiveDateOf(cutoff, coverages);
+  return { cutoff, effectiveDate: effective.date, effectiveFromCoverage: effective.fromCoverage, purchasesCents, salesCents, uploadSales, ownIncomeCents: salesCents === null ? null : salesCents - purchasesCents, blockedSales, reference: referenceValue(year, cutoff, purchases) };
 }
 
 export interface EeffComponent {

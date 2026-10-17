@@ -19,7 +19,9 @@ describe("efecto de Transacciones Cripto en Estados Financieros", () => {
   it("arma un lote anual con llave por año y un movimiento por componente con valor", () => {
     expect(base.dedupeKey).toBe("crypto:2026");
     expect(base.source).toBe("crypto_ops");
-    expect(base.periodEnd).toBe("2026-12-31");
+    // Compras aceptadas hasta marzo y corte 31/12: el efecto se fecha el 31/03, no se adelanta a un período sin información.
+    expect(base.periodEnd).toBe("2026-03-31");
+    expect(base.metadata).toMatchObject({ cutoff: "2026-12-31", effectiveDate: "2026-03-31" });
     expect(base.movements.length).toBeGreaterThan(0);
   });
 
@@ -28,10 +30,15 @@ describe("efecto de Transacciones Cripto en Estados Financieros", () => {
     expect(eeffSyncState(batchOf(base), base)).toBe("in_sync");
   });
 
+  it("un lote enviado antes de esta regla (fechado al corte) se reemplaza solo", () => {
+    const legacy = mk({ metadata: { year: 2026, cutoff: "2026-12-31", presentation: "otc", files: 1, fingerprint: JSON.stringify(["2026-12-31", base.movements.map((m) => [m.conceptKey, m.pucCode, m.amountCents, "2026-12-31"])]) }, periodEnd: "2026-12-31" });
+    expect(eeffSyncState(legacy, base)).toBe("update");
+  });
+
   it("cambiar la fecha de corte pide actualizar el lote ya enviado", () => {
     const moved = buildEeffBatch(1, model({ uploads, rows: rows(), decisions: [decision("setting", "cutoff", "2026-06-30")] }))!;
-    expect(moved.periodEnd).toBe("2026-06-30");
-    expect(moved.movements.every((m) => m.accountingDate === "2026-06-30")).toBe(true);
+    expect(moved.metadata).toMatchObject({ cutoff: "2026-06-30", effectiveDate: "2026-03-31" });
+    expect(moved.movements.every((m) => m.accountingDate === "2026-03-31")).toBe(true);
     expect(eeffSyncState(batchOf(base), moved)).toBe("update");
   });
 

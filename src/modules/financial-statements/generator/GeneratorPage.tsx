@@ -33,7 +33,7 @@ import { taxPucItems } from "../tax-obligations/services/pucItems";
 import { ExcessReviewModal } from "../tax-obligations/ExcessReviewModal";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
-import { staleCryptoYears } from "../crypto/eeffBatch";
+import { cryptoOutsideRange, staleCryptoYears } from "../crypto/eeffBatch";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
@@ -199,7 +199,8 @@ export default function GeneratorPage() {
   }, [ledger, start, end, rangeOk]);
 
   const cryptoStale = useMemo(() => (ledger && rangeOk ? staleCryptoYears(ledger.batches).filter((c) => c.year >= Number(start.slice(0, 4)) && c.year <= Number(end.slice(0, 4))) : []), [ledger, rangeOk, start, end]);
-  const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea, cryptoStale) : []), [statements, review, cryptoStale]);
+  const cryptoOutside = useMemo(() => (ledger && rangeOk ? cryptoOutsideRange(ledger.batches, start, end) : []), [ledger, rangeOk, start, end]);
+  const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea, cryptoStale, cryptoOutside, { start, end }) : []), [statements, review, cryptoStale, cryptoOutside, start, end]);
   const allOk = checks.length > 0 && checks.every((c) => c.ok);
   const pendingChecks = checks.filter((c) => !c.ok).length;
   const closed = period?.status === "closed";
