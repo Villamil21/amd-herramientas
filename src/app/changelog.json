@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.38.1",
+    "date": "2026-10-17",
+    "notes": [
+      "Compras: si el IVA y su porcentaje vienen vacíos en la factura, se interpretan como IVA 0 y tarifa 0 %; la línea queda disponible para clasificar. Un valor presente pero inválido o incompleto sigue pidiendo revisión.",
+      "Compras: las descripciones de producto partidas en varias líneas por la plantilla de la factura se leen completas, sin mezclar texto con otras columnas.",
+      "Compras: la clasificación de una línea se hace en un panel aparte. Muestra primero el PUC y el concepto 1001 sugeridos; las retenciones sugeridas o ya asignadas aparecen como etiquetas removibles con base, cuantía mínima, porcentaje y vigencia aplicables y valor calculado, y otras se añaden con un selector buscable («Añadir otra retención»). Acción principal «Confirmar clasificación»."
+    ]
+  },
+  {
     "version": "1.38.0",
     "date": "2026-10-17",
     "notes": [

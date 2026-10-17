@@ -25,8 +25,11 @@ interface Column {
   words: Word[];
 }
 
-/** Importe o tarifa: siempre es una celda propia aunque quede pegada a otra. */
-const isNumberCell = (w: Word) => w.text !== "$" && (isCopAmount(w.text) || parseRate(w.text) !== null);
+/**
+ * Importe o tarifa: siempre es una celda propia aunque quede pegada a otra. Un entero sin decimales ni «%» («2025» dentro de
+ * «Diciembre 2025 (ya abonado)») es parte del texto cuando queda pegado a él: partirlo mandaba el resto de la descripción a otra columna.
+ */
+const isNumberCell = (w: Word) => w.text !== "$" && (isCopAmount(w.text) || parseRate(w.text) !== null) && !/^\d+$/.test(w.text);
 const isDecimalAmount = (w: Word) => /,\d{2}$/.test(w.text) && isCopAmount(w.text);
 
 /** Agrupa palabras contiguas (separadas por un espacio normal) en frases. */

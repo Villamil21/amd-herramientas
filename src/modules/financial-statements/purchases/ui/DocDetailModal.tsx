@@ -4,13 +4,11 @@ import { Alert, Button, ConfirmDialog, Modal, useToast } from "../../../../compo
 import { purchasesService } from "../../../../services/purchasesService";
 import { errorMessage } from "../../../../services/tauri";
 import { formatMoneyCents } from "../../../../utils/format";
-import { ConceptCombobox } from "../../../exogena/components/ConceptCombobox";
-import { PucCodePicker } from "../../puc-codes/components/PucCodePicker";
 import { leafConcept } from "../../puc-codes/services/pucCatalog";
 import { PROPOSAL_SOURCE_LABEL, productKey } from "../domain/classify";
-import { ratesAt } from "../domain/rateVersions";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
+import { LineClassifyModal } from "./LineClassifyModal";
 import { StatusChip } from "./StatusStrip";
 
 interface Props {
@@ -20,8 +18,6 @@ interface Props {
   focusLine?: number | null;
   onClose: () => void;
 }
-
-const pct = (bp: number) => `${(bp / 100).toFixed(2).replace(".", ",")} %`;
 
 /**
  * Detalle de una factura: encabezado, decisiones sobre el documento y clasificación línea por línea (PUC, concepto 1001 y
@@ -89,7 +85,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
       title={`${parsed.title} ${parsed.number ?? ""}`.trim()}
       description={`${doc.issuerName} · NIT ${doc.issuerNit} · ${doc.issueDate ?? "sin fecha"} · ${view.kind === "return" ? "Devolución (resta)" : view.kind === "purchase" ? "Compra" : "Encabezado sin clasificar"} · ${doc.fileName}`}
       onClose={onClose}
-      locked={busy}
+      locked={busy || editing !== null}
       footer={<Button onClick={onClose}>Cerrar</Button>}
     >
       <div className="stack">
@@ -221,8 +217,8 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
           {l.confirmed && l.class && <div className="field__hint">{l.class.scope === "rule" ? "Regla del producto" : "Solo esta factura"}</div>}
         </td>
         <td>
-          <Button size="sm" onClick={() => onEdit(!editing)} disabled={Boolean(l.line.issue)}>
-            {editing ? "Cerrar" : l.confirmed ? "Cambiar" : "Clasificar"}
+          <Button size="sm" onClick={() => onEdit(true)} disabled={Boolean(l.line.issue)}>
+            {l.confirmed ? "Cambiar" : "Clasificar"}
           </Button>
         </td>
       </tr>
@@ -234,127 +230,7 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
           </td>
         </tr>
       )}
-      {editing && (
-        <tr>
-          <td />
-          <td colSpan={8}>
-            <LineEditor data={data} view={view} l={l} run={run} busy={busy} onDone={() => onEdit(false)} />
-          </td>
-        </tr>
-      )}
+      {editing && <LineClassifyModal data={data} view={view} l={l} run={run} busy={busy} onClose={() => onEdit(false)} />}
     </>
-  );
-}
-
-function LineEditor({ data, view, l, run, busy, onDone }: { data: PurchasesData; view: DocView; l: LineView; run: (a: () => Promise<void>, ok?: string) => Promise<void>; busy: boolean; onDone: () => void }) {
-  const initial = l.confirmed ? { puc: l.pucCode, concept: l.concept1001, retention: l.retention.map((r) => r.rateId) } : { puc: l.proposal.pucCode, concept: l.proposal.concept1001, retention: l.proposal.retention.map((r) => r.rateId) };
-  const [puc, setPuc] = useState(initial.puc);
-  const [concept, setConcept] = useState(initial.concept);
-  const [retention, setRetention] = useState<number[]>(initial.retention);
-  const [scope, setScope] = useState<"rule" | "invoice">(l.class?.scope ?? "rule");
-  const [pickingPuc, setPickingPuc] = useState(!puc);
-  const year = view.doc.issueDate ? Number(view.doc.issueDate.slice(0, 4)) : null;
-  const concepts = data.concepts1001.map((c) => ({ code: c.code, description: c.description, isActive: c.isActive }));
-
-  const pucConceptSuggestion = puc ? data.concepts1001.find((c) => c.code === (data.pucConceptMap.get(puc) ?? "")) : undefined;
-
-  const save = () =>
-    run(async () => {
-      await purchasesService.saveLineClasses([
-        {
-          documentId: view.doc.id,
-          lineIndex: l.line.index,
-          pucCode: puc,
-          concept1001: concept,
-          retention: retention.map((rateId) => ({ rateId })),
-          saveRule: scope === "rule",
-          supplierNit: view.doc.issuerNit,
-          productKey: productKey(l.line),
-          productLabel: lineLabel(l.line),
-        },
-      ]);
-      onDone();
-    }, scope === "rule" ? "Línea confirmada y regla del producto guardada." : "Línea confirmada solo para esta factura (la regla del producto no cambió).");
-
-  const remove = () => run(() => purchasesService.deleteLineClass(view.doc.id, l.line.index).then(onDone), "Se quitó la clasificación de la línea.");
-
-  return (
-    <div className="stack" style={{ padding: "var(--space-3)", background: "var(--color-surface-alt)", borderRadius: 10 }}>
-      <div>
-        <strong>Código PUC</strong>
-        {pickingPuc ? (
-          <PucCodePicker
-            index={data.fs.index}
-            autoFocus
-            confirmLabel="Usar este código"
-            onConfirm={(code) => {
-              setPuc(code);
-              setPickingPuc(false);
-              const suggested = data.pucConceptMap.get(code);
-              if (suggested && !concept) setConcept(suggested);
-            }}
-            onCancel={puc ? () => setPickingPuc(false) : undefined}
-          />
-        ) : (
-          <div className="row" style={{ gap: 8 }}>
-            <span>
-              {puc} — {leafConcept(data.fs.index, puc) ?? ""}
-            </span>
-            <Button size="sm" onClick={() => setPickingPuc(true)}>
-              Cambiar
-            </Button>
-          </div>
-        )}
-        {pucConceptSuggestion && !concept && <div className="field__hint">Concepto 1001 sugerido por la cuenta: {pucConceptSuggestion.code}</div>}
-      </div>
-      <div>
-        <strong>Concepto 1001{year ? ` (${year})` : ""}</strong>
-        <ConceptCombobox
-          value={concept}
-          concepts={concepts}
-          onChange={(code) => setConcept(code)}
-          onCreate={async (code, description) => {
-            if (year === null) throw new Error("La factura no tiene fecha: no hay un año para el concepto.");
-            await purchasesService.saveYearConcept({ formatCode: "1001", year, code, description, validFrom: `${year}-01-01`, validTo: "", isActive: true });
-            await data.reloadConcepts();
-            setConcept(code);
-          }}
-        />
-      </div>
-      <div>
-        <strong>Conceptos de retención</strong>
-        <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-          {data.rates.length === 0 && <span className="field__hint">No hay conceptos en la Tabla de retenciones.</span>}
-          {ratesAt(data.rates, data.rateVersions, view.doc.issueDate).map((r) => (
-            <label key={r.id} className="row" style={{ gap: 6 }}>
-              <input type="checkbox" checked={retention.includes(r.id)} onChange={(e) => setRetention((cur) => (e.target.checked ? [...cur, r.id] : cur.filter((x) => x !== r.id)))} />
-              {r.name} ({pct(r.rateBp)})
-            </label>
-          ))}
-        </div>
-        {view.retention.mismatch && <div className="field__hint">La factura informa {formatMoneyCents(view.retention.practicedCents)}; con estos conceptos la tabla da {formatMoneyCents(view.retention.expectedCents)}.</div>}
-      </div>
-      <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
-        <label className="row" style={{ gap: 6 }}>
-          <input type="radio" checked={scope === "rule"} onChange={() => setScope("rule")} />
-          Guardar como regla de este producto para este proveedor
-        </label>
-        <label className="row" style={{ gap: 6 }}>
-          <input type="radio" checked={scope === "invoice"} onChange={() => setScope("invoice")} />
-          Cambiar solo esta factura (no toca la regla)
-        </label>
-      </div>
-      <div className="row" style={{ gap: 8 }}>
-        <Button variant="primary" icon={<Check size={14} />} loading={busy} disabled={!puc || !concept} onClick={() => void save()}>
-          Confirmar línea
-        </Button>
-        {l.confirmed && (
-          <Button icon={<RotateCcw size={14} />} loading={busy} onClick={() => void remove()}>
-            Quitar clasificación
-          </Button>
-        )}
-        <Button onClick={onDone}>Cancelar</Button>
-      </div>
-    </div>
   );
 }

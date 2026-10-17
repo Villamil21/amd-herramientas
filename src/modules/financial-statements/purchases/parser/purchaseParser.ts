@@ -62,6 +62,13 @@ export function readIssuerDocType(pages: PageRows[]): string | undefined {
   return undefined;
 }
 
+/**
+ * IVA y % vacíos a la vez = IVA cero (la plantilla no imprime nada cuando no hay impuesto). Un valor presente pero ilegible o
+ * contradictorio no cae aquí: sigue como incidencia para que se revise.
+ */
+export const isEmptyVat = (p: { emptyTax?: boolean; rateBp?: number; vatCents?: number; baseCents?: number }) =>
+  p.emptyTax === true && p.rateBp === undefined && p.vatCents === undefined && p.baseCents !== undefined;
+
 export function parsePurchaseDocument(doc: PdfDocumentText): ParsedPurchase {
   const invoice = parseInvoice(doc);
   const withholding = parseWithholdingDocument(doc);
@@ -79,6 +86,7 @@ export function parsePurchaseDocument(doc: PdfDocumentText): ParsedPurchase {
 
   const lines: PurchaseLine[] = invoice.products.map((p, i) => {
     const description = p.description.trim();
+    const emptyVat = isEmptyVat(p);
     const line: PurchaseLine = {
       index: i,
       page: p.page,
@@ -90,11 +98,11 @@ export function parsePurchaseDocument(doc: PdfDocumentText): ParsedPurchase {
       discountCents: money(cell(i, at.discount)),
       surchargeCents: money(cell(i, at.surcharge)),
       baseCents: p.baseCents,
-      vatCents: p.vatCents,
-      rateBp: p.rateBp,
+      vatCents: emptyVat ? 0 : p.vatCents,
+      rateBp: emptyVat ? 0 : p.rateBp,
     };
     const missing = [!description && "la descripción", p.baseCents === undefined && "el «Precio unitario de venta»"].filter(Boolean);
-    if (p.issue || missing.length) {
+    if ((p.issue && !emptyVat) || missing.length) {
       line.issue = p.issue ?? `No se pudo identificar ${missing.join(" ni ")}.`;
       line.detectedText = p.description;
     }

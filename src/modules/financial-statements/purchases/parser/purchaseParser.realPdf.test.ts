@@ -5,7 +5,7 @@
  *   PURCHASE_PDF="/ruta/a.pdf:/ruta/b.pdf" npx vitest run purchaseParser.realPdf
  *
  * Sin la variable, la prueba se omite. Los valores concretos se verifican solo en las facturas de referencia
- * (MONO COLOMBIA FE-29827 y PRICESMART COFE-3333593).
+ * (MONO COLOMBIA FE-29827, PRICESMART COFE-3333593 y ANAYAP PAY-9571).
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -47,6 +47,12 @@ describe.skipIf(files.length === 0)("compras con facturas reales", () => {
         expect(doc.issuer).toMatchObject({ nit: "901398069", name: "MONO COLOMBIA S.A.S.", personType: "PJ", fiscalCodes: ["R-99-PN"] });
         expect(doc.lines).toHaveLength(1);
         expect(doc.lines[0]).toMatchObject({ code: "M20", unit: "ZZ", quantity: 1, unitPriceCents: 195_000_000, baseCents: 195_000_000, vatCents: 37_050_000, rateBp: 1900 });
+      }
+      if (doc.number === "PAY-9571") {
+        // IVA y % vacíos = IVA 0; la descripción partida por caracteres en tres líneas se une sin residuos de otras columnas.
+        expect(doc.lines).toHaveLength(1);
+        expect(doc.lines[0]).toMatchObject({ code: "2", description: "Plataforma SAAS: transacciones Diciembre 2025 (ya abonado)", unit: "ZZ", quantity: 1, baseCents: 21_000_000, vatCents: 0, rateBp: 0 });
+        expect(doc.lines[0].issue).toBeUndefined();
       }
       if (doc.number === "COFE-3333593") {
         expect(doc).toMatchObject({ issueDate: "2026-05-10", buyerNit: "901748281", subtotalCents: 59_988_400, vatCents: 4_408_300, retefuenteCents: 0, totalCents: 64_396_800 });
