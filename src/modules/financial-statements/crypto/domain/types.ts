@@ -1,12 +1,13 @@
+import { ACCOUNTING_LABEL, type AccountingPresentation } from "../../shared/accountingPresentation";
 /**
  * Transacciones Cripto → Reporte de operaciones. Tipos que viajan entre la interfaz y los comandos de Rust
  * (`src-tauri/src/database/crypto.rs`) y los que usa el dominio para calcular.
  */
 
 export type CryptoKind = "purchase" | "sale";
-export type CryptoPresentation = "otc" | "banks" | "dr";
+export type CryptoPresentation = AccountingPresentation;
 
-export const PRESENTATION_LABEL: Record<CryptoPresentation, string> = { otc: "OTC", banks: "Bancos", dr: "DR" };
+export const PRESENTATION_LABEL = ACCOUNTING_LABEL;
 
 export type CellValue = string | number;
 /** Valores originales de una fila de Excel por texto de encabezado (solo las celdas con contenido). */

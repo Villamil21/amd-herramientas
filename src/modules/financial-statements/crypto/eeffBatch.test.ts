@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BatchSummary } from "../../../types/fs";
 import { decision, model, purchaseData, saleData, stored, upload } from "./domain/testkit";
-import { buildEeffBatch, eeffSyncState, latestEeffBatch, staleCryptoYears } from "./eeffBatch";
+import { buildEeffBatch, eeffSyncState, isOutdatedBatch, liveMovements, latestEeffBatch, staleCryptoYears } from "./eeffBatch";
 
 const rows = () => [
   stored(1, "purchase", 2, purchaseData({ amount: 600_000_000, date: "2026-01-10", docType: "CC", doc: "1", firstName: "A", firstSurname: "B", city: "Cali" })),
@@ -75,5 +75,24 @@ describe("efecto de Transacciones Cripto en Estados Financieros", () => {
     expect(staleCryptoYears([stale])).toEqual([{ year: 2026, reason: "hay duplicados" }]);
     expect(staleCryptoYears([stale, mk({ id: 6 })])).toEqual([]);
     expect(staleCryptoYears([mk({ id: 7, status: "voided", metadata: null })])).toEqual([]);
+  });
+
+  it("un lote activo marcado desactualizado cuenta como retirado del cálculo y bloquea hasta poder actualizarse", () => {
+    const outdated = mk({ id: 5, metadata: { ...(base.metadata as object), outdated: 1, outdatedReason: "El periodo está cerrado" } });
+    expect(isOutdatedBatch(outdated)).toBe(true);
+    expect(latestEeffBatch([outdated], 2026)?.id).toBe(5);
+    expect(staleCryptoYears([outdated])).toEqual([{ year: 2026, reason: "El periodo está cerrado" }]);
+    // Sigue sin poder recalcularse: bloqueado. Si ya se puede, se vuelve a intentar el reemplazo.
+    expect(eeffSyncState(outdated, null)).toBe("stale");
+    expect(eeffSyncState(outdated, base)).toBe("update");
+    expect(staleCryptoYears([mk({ id: 6 })])).toEqual([]);
+  });
+
+  it("los movimientos de un lote desactualizado no alimentan el cálculo vigente", () => {
+    const outdated = mk({ id: 5, metadata: { outdated: 1 } });
+    const fresh = mk({ id: 8, metadata: {} });
+    const movements = [{ batchId: 5, n: 1 }, { batchId: 8, n: 2 }, { batchId: 99, n: 3 }];
+    expect(liveMovements(movements, [outdated, fresh])).toEqual([{ batchId: 8, n: 2 }, { batchId: 99, n: 3 }]);
+    expect(liveMovements(movements, [fresh])).toHaveLength(3);
   });
 });

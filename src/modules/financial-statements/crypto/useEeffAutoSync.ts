@@ -5,7 +5,8 @@ import { errorMessage } from "../../../services/tauri";
 import type { BatchSummary } from "../../../types/fs";
 import type { CryptoModel } from "./domain/model";
 import { blocking } from "./domain/problems";
-import { buildEeffBatch, eeffSyncState, latestEeffBatch, type EeffSyncState } from "./eeffBatch";
+import { runEeffSync } from "./eeffSyncRunner";
+import { buildEeffBatch, eeffSyncState, isOutdatedBatch, latestEeffBatch, type EeffSyncState } from "./eeffBatch";
 
 /**
  * Mantiene al día el efecto de Transacciones Cripto en Estados Financieros. Tras el primer envío manual, cualquier cambio de
@@ -41,17 +42,24 @@ export function useEeffAutoSync(companyId: number | null, model: CryptoModel | n
     if (attempted.current === key) return;
     attempted.current = key;
     setUpdating(true);
-    const run =
-      state === "update" && built
-        ? fsService.send({ ...built, replace: true }).then((outcome) => {
-            if (outcome.kind === "sent") toast("Estados Financieros se actualizó con el nuevo cálculo de Transacciones Cripto.");
-          })
-        : fsService.voidCryptoBatch(latest!.id, blocking(model.problems.eeff).map((p) => p.message).join(" · ")).then(() => toast("El efecto en Estados Financieros se retiró del cálculo: hay pendientes que impiden recalcularlo.", "error"));
-    run
+    runEeffSync(state, built, latest, blocking(model.problems.eeff).map((p) => p.message), { send: fsService.send, void: fsService.voidCryptoBatch, markOutdated: fsService.markCryptoOutdated })
+      .then((result) => {
+        if (result.kind === "updated") toast("Estados Financieros se actualizó con el nuevo cálculo de Transacciones Cripto.");
+        else if (result.kind === "retired") toast("El efecto en Estados Financieros se retiró del cálculo: hay pendientes que impiden recalcularlo.", "error");
+        else if (result.kind === "outdated") toast(`El efecto en Estados Financieros quedó fuera del cálculo y bloqueado: ${result.reason}`, "error");
+      })
       .then(() => reload())
       .catch((e) => toast(errorMessage(e), "error"))
       .finally(() => setUpdating(false));
   }, [state, built, updating, latest, model, reload, toast]);
 
-  return { state, updating, batch: latest, reload };
+  /** Vuelve a intentar la actualización (p. ej. después de reabrir un periodo cerrado). */
+  const retry = useCallback(() => {
+    attempted.current = "";
+    void reload();
+  }, [reload]);
+
+  const outdatedReason = latest && isOutdatedBatch(latest) ? String((latest.metadata as { outdatedReason?: unknown } | null)?.outdatedReason ?? "") : null;
+
+  return { state, updating, batch: latest, reload, retry, outdatedReason };
 }

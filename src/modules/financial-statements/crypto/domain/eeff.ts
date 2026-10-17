@@ -196,6 +196,8 @@ export interface PucCheck {
   /** Tiene ubicación en Estados Financieros (por familia de cuatro dígitos o por el código completo). */
   located: boolean;
   location?: string;
+  /** Por qué la ubicación no sirve aunque exista (línea desactivada o de otro rol). */
+  problem?: string;
 }
 
 export interface ComponentReadiness extends EeffComponent {
@@ -208,7 +210,7 @@ export function componentReadiness(components: readonly EeffComponent[], puc: (k
   return components.map((c) => {
     const check = puc(c.pucKey);
     // Un componente en cero no llega a Estados Financieros: no exige cuenta PUC.
-    const issue = c.cents === 0 ? null : c.cents === null ? (c.blocked ?? "Depende de un valor aún no calculable.") : !check.code ? `Falta la cuenta PUC de ${c.label}.` : !check.valid ? `La cuenta PUC ${check.code} no existe o no se puede asignar.` : !check.located ? `La cuenta ${check.code} no tiene ubicación en Estados Financieros (familia ${check.code.slice(0, 4)}).` : null;
+    const issue = c.cents === 0 ? null : c.cents === null ? (c.blocked ?? "Depende de un valor aún no calculable.") : !check.code ? `Falta la cuenta PUC de ${c.label}.` : !check.valid ? `La cuenta PUC ${check.code} no existe o no se puede asignar.` : !check.located ? (check.problem ?? `La cuenta ${check.code} no tiene ubicación en Estados Financieros (familia ${check.code.slice(0, 4)}).`) : null;
     return { ...c, puc: check, issue };
   });
 }

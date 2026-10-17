@@ -392,12 +392,12 @@ export function pendingBalanceText(b: BankBalanceStatus): string {
 /** «2026-09» → «septiembre de 2026». */
 export const monthText = (month: string) => periodLabel(month).toLowerCase().replace(" ", " de ");
 
-export function checklist(s: Statements, other: Statements, duplicates: DuplicateGroup[], absences: unknown[], payrollWithoutArea: number, cryptoStale: { year: number; reason: string }[] = [], cryptoOutside: { year: number; cutoff: string }[] = [], range: { start: string; end: string } = { start: "", end: "" }): CheckItem[] {
+export function checklist(s: Statements, other: Statements, duplicates: DuplicateGroup[], absences: unknown[], payrollWithoutArea: number, cryptoStale: { year: number; reason: string }[] = [], cryptoOutside: { year: number; cutoff: string }[] = [], range: { start: string; end: string } = { start: "", end: "" }, cryptoSyncing = false): CheckItem[] {
   const balanced = isBalanced(s);
   const sameResult = s.eerr.beforeTax === other.eerr.beforeTax;
   const pendingBalances = pendingBankBalances(s);
   const taxBlocking = s.tax.issues.filter((i) => i.level === "blocking");
-  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0, taxBlocking.length > 0, cryptoStale.length > 0, cryptoOutside.length > 0].filter(Boolean).length;
+  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0, taxBlocking.length > 0, cryptoStale.length > 0, cryptoOutside.length > 0, cryptoSyncing].filter(Boolean).length;
   return [
     { id: "balanced", label: "Activo = Pasivo + Patrimonio", ok: balanced },
     { id: "classified", label: "Todos los PUC clasificados o excluidos", ok: s.unclassified.length === 0, detail: s.unclassified.length ? `${s.unclassified.length} sin clasificar` : undefined },
@@ -420,9 +420,11 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
     {
       id: "crypto",
       label: "Transacciones Cripto al día",
-      ok: cryptoStale.length === 0 && cryptoOutside.length === 0,
+      ok: cryptoStale.length === 0 && cryptoOutside.length === 0 && !cryptoSyncing,
       detail: cryptoStale.length
-        ? `El efecto de ${cryptoStale.map((c) => c.year).join(", ")} se retiró del cálculo porque no se puede recalcular${cryptoStale[0].reason ? `: ${cryptoStale[0].reason}` : ""}`
+        ? `El efecto de Transacciones Cripto ${cryptoStale.map((c) => c.year).join(", ")} está fuera del cálculo (se conserva solo para auditoría) porque no se pudo recalcular${cryptoStale[0].reason ? `: ${cryptoStale[0].reason}` : ""}. Resuélvelo (reabre el periodo o corrige los pendientes) para volver a generar, marcar como listo, cerrar o exportar.`
+        : cryptoSyncing
+          ? "Estados Financieros se está actualizando con la presentación vigente de Transacciones Cripto: espera unos segundos."
         : cryptoOutside.length
           ? `Transacciones Cripto está fechado al ${cryptoOutside.map((c) => c.cutoff).join(", ")} (según su última cobertura aceptada), fuera del rango ${range.start} a ${range.end}: su efecto (Ventas y Costo de ventas) no entra. Amplía el rango del Generador hasta esa fecha.`
           : undefined,
@@ -430,6 +432,6 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
     { id: "sales", label: "Sin ventas pendientes", ok: true, detail: "Las ventas no se envían con tipos de documento sin clasificar." },
     { id: "duplicates", label: "Sin duplicados activos", ok: duplicates.length === 0, detail: duplicates.length ? `${duplicates.length} documentos en más de una importación` : undefined },
     { id: "eerr", label: "Resultado EERR validado", ok: s.unclassified.length === 0 && Number.isFinite(s.eerr.beforeTax) },
-    { id: "presentation", label: "Presentación Banco/OTC no altera resultado", ok: sameResult, detail: sameResult ? undefined : `Diferencia: ${(s.eerr.beforeTax - other.eerr.beforeTax) / 100}` },
+    { id: "presentation", label: "La presentación (OTC/Bancos) no altera el resultado", ok: sameResult, detail: sameResult ? undefined : `Diferencia: ${(s.eerr.beforeTax - other.eerr.beforeTax) / 100}` },
   ];
 }

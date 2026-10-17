@@ -396,7 +396,7 @@ export interface Adjustment extends AdjustmentInput {
 export type Presentation = "bank" | "otc";
 
 /** Solo en la app: nunca aparece en el PDF. */
-export const PRESENTATION_LABEL: Record<Presentation, string> = { bank: "Banco", otc: "OTC" };
+export const PRESENTATION_LABEL: Record<Presentation, string> = { bank: "Bancos", otc: "OTC" };
 
 export type PeriodStatus = "preparing" | "ready" | "pdf_generated" | "needs_review" | "closed";
 

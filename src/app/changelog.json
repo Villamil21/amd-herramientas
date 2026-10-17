@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.37.0",
+    "date": "2026-10-17",
+    "notes": [
+      "Presentación contable única por empresa y año (OTC, Bancos o DR): el Generador y Transacciones Cripto leen y cambian el mismo valor, con el mismo nombre («Bancos») en ambos lugares. Cambiarla en cualquiera de los dos reemplaza solo el lote de Cripto en Estados Financieros, sin bloqueo ni pasos manuales.",
+      "Reglas por presentación: OTC (Ventas = ingreso propio + valor de referencia; Costo de ventas = valor de referencia), Bancos (Ventas = ingreso propio; Ingresos y Costos para terceros = valor de referencia) y DR (solo Ventas = ingreso propio, sin movimientos ni PUC de terceros).",
+      "Si el lote no se puede actualizar (por ejemplo, periodo cerrado), el anterior se conserva solo para auditoría, sale del cálculo vigente y se bloquea generar, marcar como listo, cerrar y exportar hasta poder actualizarlo; la pantalla de Cripto explica el motivo y permite reintentar.",
+      "Las cuentas PUC de Ventas, Costo de ventas, Ingresos para terceros y Costos para terceros deben estar ubicadas en su línea del Estado de Resultados y activa; si no, el resultado se bloquea en vez de conservar un efecto anterior."
+    ]
+  },
+  {
     "version": "1.36.1",
     "date": "2026-10-17",
     "notes": [

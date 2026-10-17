@@ -18,7 +18,7 @@ interface Props {
   year: number;
   onSent: () => void;
   onPuc: () => void;
-  sync: { state: EeffSyncState; updating: boolean };
+  sync: { state: EeffSyncState; updating: boolean; outdatedReason?: string | null; retry?: () => void };
 }
 
 /** Estados Financieros: cálculo del ingreso propio y valor de referencia, componentes con su PUC y envío al motor. */
@@ -43,7 +43,17 @@ export function EeffTab({ model, companyId, onSent, onPuc, sync }: Props) {
       />
       {model.eeff.ownIncomeCents !== null && <Alert tone="info">{effectiveText(model)} Entra en cualquier Generador cuyo rango incluya esa fecha.</Alert>}
       {sync.state === "in_sync" && <Alert tone="success">Estados Financieros está al día con este cálculo. Los cambios de cargas, decisiones, corte, presentación o cuentas PUC lo actualizan automáticamente.</Alert>}
-      {sync.state === "update" && <Alert tone="info">{sync.updating ? "Actualizando Estados Financieros…" : "Estados Financieros se actualizará con el cálculo vigente."}</Alert>}
+      {sync.outdatedReason !== null && sync.outdatedReason !== undefined && !sync.updating && (
+        <Alert tone="danger" title="El envío anterior no se pudo actualizar y quedó fuera del cálculo">
+          {sync.outdatedReason || "No se pudo actualizar con el cálculo vigente."} Se conserva solo para auditoría: no se puede generar, marcar como listo, cerrar ni exportar ningún estado financiero de este año hasta que el periodo permita actualizarlo (por ejemplo, reabriéndolo).{" "}
+          {sync.retry && (
+            <button type="button" className="link-button" onClick={sync.retry}>
+              Reintentar actualización
+            </button>
+          )}
+        </Alert>
+      )}
+      {sync.state === "update" && !sync.outdatedReason && <Alert tone="info">{sync.updating ? "Actualizando Estados Financieros…" : "Estados Financieros se actualizará con el cálculo vigente."}</Alert>}
       {(sync.state === "stale" || sync.state === "retire") && (
         <Alert tone="danger" title="Estados Financieros no incluye Transacciones Cripto mientras no se pueda recalcular">
           {sync.state === "retire" ? "Se está retirando el envío anterior del cálculo vigente. " : "El envío anterior se retiró del cálculo vigente y se conserva para auditoría. "}

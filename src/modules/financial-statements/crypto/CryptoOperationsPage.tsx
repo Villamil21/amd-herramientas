@@ -5,6 +5,7 @@ import { fileService } from "../../../services/fileService";
 import { cryptoService } from "../../../services/cryptoService";
 import { errorMessage } from "../../../services/tauri";
 import { formatInteger } from "../../../utils/format";
+import { ACCOUNTING_LABEL, ACCOUNTING_PRESENTATIONS } from "../shared/accountingPresentation";
 import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import { formatExactCents } from "../shared/money";
@@ -106,12 +107,14 @@ export default function CryptoOperationsPage() {
           <Field label="Fecha de corte" hint="Dentro del año">
             {(id) => <DateInput id={id} value={model?.settings.cutoff ?? ""} disabled={!model} onChange={(v) => v && void data.decide("setting", "cutoff", v)} />}
           </Field>
-          <Field label="Presentación">
+          <Field label="Presentación" hint="La misma del Generador">
             {(id) => (
               <Select id={id} value={model?.settings.presentation ?? "otc"} disabled={!model} onChange={(e) => void data.decide("setting", "presentation", e.target.value)}>
-                <option value="otc">OTC</option>
-                <option value="banks">Bancos</option>
-                <option value="dr">DR</option>
+                {ACCOUNTING_PRESENTATIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {ACCOUNTING_LABEL[p]}
+                  </option>
+                ))}
               </Select>
             )}
           </Field>

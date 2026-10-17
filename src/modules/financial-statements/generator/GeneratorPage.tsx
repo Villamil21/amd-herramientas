@@ -33,7 +33,10 @@ import { taxPucItems } from "../tax-obligations/services/pucItems";
 import { ExcessReviewModal } from "../tax-obligations/ExcessReviewModal";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligations/types";
-import { cryptoOutsideRange, staleCryptoYears } from "../crypto/eeffBatch";
+import { cryptoOutsideRange, liveMovements, staleCryptoYears } from "../crypto/eeffBatch";
+import { useCryptoData } from "../crypto/useCryptoData";
+import { useEeffAutoSync } from "../crypto/useEeffAutoSync";
+import { ACCOUNTING_LABEL, ACCOUNTING_PRESENTATIONS, engineView, isAccountingPresentation, type AccountingPresentation } from "../shared/accountingPresentation";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
@@ -70,7 +73,6 @@ export default function GeneratorPage() {
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
-  const [presentation, setPresentation] = useState<Presentation | "">("");
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [period, setPeriod] = useState<Period | null>(null);
   const [signers, setSigners] = useState<CertificateSigner[]>([]);
@@ -92,6 +94,15 @@ export default function GeneratorPage() {
 
   const company = data.companies?.find((c) => c.id === companyId) ?? null;
   const rangeOk = isIsoDate(start) && isIsoDate(end) && start <= end;
+  // Una sola presentación por empresa y año (la de Transacciones Cripto): este selector la lee y la cambia por el mismo camino.
+  const presentationYear = rangeOk ? Number(end.slice(0, 4)) : NaN;
+  const yearOk = presentationYear >= 2000 && presentationYear <= 2100;
+  const crypto = useCryptoData(companyId !== null && rangeOk && yearOk ? companyId : null, yearOk ? presentationYear : new Date().getFullYear());
+  const cryptoSync = useEeffAutoSync(companyId !== null && rangeOk && yearOk ? companyId : null, crypto.model);
+  const accounting: AccountingPresentation | null = crypto.model && crypto.model.year === presentationYear ? crypto.model.settings.presentation : null;
+  const presentation: Presentation | "" = accounting ? engineView(accounting) : "";
+  const [wantedPresentation, setWantedPresentation] = useState<{ year: number; value: AccountingPresentation } | null>(null);
+  const changeAccounting = useCallback((value: string) => { if (isAccountingPresentation(value)) void crypto.decide("setting", "presentation", value); }, [crypto]);
   const key: PeriodKey | null = companyId !== null && rangeOk && presentation ? { companyId, startDate: start, endDate: end, presentation } : null;
   const keyId = key ? `${key.companyId}|${key.startDate}|${key.endDate}|${key.presentation}` : "";
 
@@ -126,6 +137,20 @@ export default function GeneratorPage() {
     void loadLedger();
   }, [loadLedger]);
 
+  // Cuando Transacciones Cripto reemplaza, retira o marca su lote, el Generador relee los movimientos.
+  const syncMark = `${cryptoSync.batch?.id ?? ""}|${cryptoSync.batch?.status ?? ""}|${JSON.stringify(cryptoSync.batch?.metadata ?? null)}`;
+  useEffect(() => {
+    if (companyId !== null) void loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncMark]);
+
+  // Un periodo guardado con otra presentación la aplica a su año por el mismo camino (se sincroniza Transacciones Cripto).
+  useEffect(() => {
+    if (!wantedPresentation || !crypto.model || crypto.model.year !== wantedPresentation.year) return;
+    if (engineView(crypto.model.settings.presentation) !== engineView(wantedPresentation.value)) void crypto.decide("setting", "presentation", wantedPresentation.value);
+    setWantedPresentation(null);
+  }, [wantedPresentation, crypto]);
+
   const loadPeriod = useCallback(async () => {
     if (!key) return setPeriod(null);
     try {
@@ -147,7 +172,7 @@ export default function GeneratorPage() {
       company,
       catalog: data.catalog,
       mappings: data.mappings,
-      movements: ledger.movements,
+      movements: liveMovements(ledger.movements, ledger.batches),
       bankBalances: ledger.balances,
       bankLifecycles: ledger.bankLifecycles,
       pucConcepts: data.index.concepts,
@@ -200,7 +225,8 @@ export default function GeneratorPage() {
 
   const cryptoStale = useMemo(() => (ledger && rangeOk ? staleCryptoYears(ledger.batches).filter((c) => c.year >= Number(start.slice(0, 4)) && c.year <= Number(end.slice(0, 4))) : []), [ledger, rangeOk, start, end]);
   const cryptoOutside = useMemo(() => (ledger && rangeOk ? cryptoOutsideRange(ledger.batches, start, end) : []), [ledger, rangeOk, start, end]);
-  const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea, cryptoStale, cryptoOutside, { start, end }) : []), [statements, review, cryptoStale, cryptoOutside, start, end]);
+  const cryptoSyncing = cryptoSync.state === "update" || cryptoSync.updating;
+  const checks = useMemo(() => (statements && review ? checklist(statements.current, statements.other, review.duplicates, review.absences, review.withoutArea, cryptoStale, cryptoOutside, { start, end }, cryptoSyncing) : []), [statements, review, cryptoStale, cryptoOutside, start, end, cryptoSyncing]);
   const allOk = checks.length > 0 && checks.every((c) => c.ok);
   const pendingChecks = checks.filter((c) => !c.ok).length;
   const closed = period?.status === "closed";
@@ -294,7 +320,7 @@ export default function GeneratorPage() {
               </div>
               <div className="context-bar__item">
                 <dt>Presentación</dt>
-                <dd>{PRESENTATION_LABEL[presentation as Presentation]} (interna)</dd>
+                <dd>{accounting ? ACCOUNTING_LABEL[accounting] : "—"} (interna)</dd>
               </div>
             </dl>
             <div className="context-bar__actions">
@@ -323,12 +349,15 @@ export default function GeneratorPage() {
           <Field label="Fecha final" required error={start && end && start > end ? "Debe ser posterior a la inicial." : null}>
             {(id) => <DateInput id={id} value={end} onChange={setEnd} />}
           </Field>
-          <Field label="Presentación" required hint="Solo interna: no aparece en el PDF.">
+          <Field label="Presentación" hint="Una sola por empresa y año: también se cambia en Transacciones Cripto. Solo interna: no aparece en el PDF.">
             {(id) => (
-              <Select id={id} value={presentation} onChange={(e) => setPresentation(e.target.value as Presentation | "")}>
-                <option value="">Seleccionar…</option>
-                <option value="bank">Banco</option>
-                <option value="otc">OTC</option>
+              <Select id={id} value={accounting ?? ""} disabled={!accounting} onChange={(e) => changeAccounting(e.target.value)}>
+                {!accounting && <option value="">{companyId !== null && rangeOk ? "Cargando…" : "Elige empresa y fechas"}</option>}
+                {ACCOUNTING_PRESENTATIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {ACCOUNTING_LABEL[p]}
+                  </option>
+                ))}
               </Select>
             )}
           </Field>
@@ -341,7 +370,7 @@ export default function GeneratorPage() {
           <Card
             className="fs-period-status"
             title={<StepTitle n={2}>Estado del periodo</StepTitle>}
-            description={`${formatIsoDate(start)} a ${formatIsoDate(end)} · Presentación ${PRESENTATION_LABEL[presentation as Presentation]} (interna)`}
+            description={`${formatIsoDate(start)} a ${formatIsoDate(end)} · Presentación ${accounting ? ACCOUNTING_LABEL[accounting] : "—"} (interna)`}
             actions={<span className={`period-pill period-pill--${closed ? "closed" : (period?.status ?? "preparing")}`}>{PERIOD_STATUS_LABEL[period?.status ?? "preparing"]}</span>}
           >
             <div className="stack">
@@ -570,7 +599,7 @@ export default function GeneratorPage() {
                 <Item label="Compras de cripto" value={formatExactCents(s.crypto.buysCents)} />
                 <Item label="Resultado propio" value={formatExactCents(s.crypto.ownResultCents)} />
                 <Item label={`Promedio mensual de ventas (${s.crypto.months.length} meses)`} value={formatExactCents(s.crypto.monthlyAverageCents)} />
-                <Item label="Resultado antes de impuestos Banco" value={formatStatementPesos(roundThousands(presentation === "bank" ? s.eerr.beforeTax : statements!.other.eerr.beforeTax))} />
+                <Item label="Resultado antes de impuestos Bancos" value={formatStatementPesos(roundThousands(presentation === "bank" ? s.eerr.beforeTax : statements!.other.eerr.beforeTax))} />
                 <Item label="Resultado antes de impuestos OTC" value={formatStatementPesos(roundThousands(presentation === "otc" ? s.eerr.beforeTax : statements!.other.eerr.beforeTax))} />
               </div>
             </Card>
@@ -684,7 +713,7 @@ export default function GeneratorPage() {
                 <table className="table">
                   <tbody>
                     {otherPeriods.map((p) => (
-                      <tr key={p.id} className="is-clickable" onClick={() => { setStart(p.startDate); setEnd(p.endDate); setPresentation(p.presentation); setConfigOpen(false); }}>
+                      <tr key={p.id} className="is-clickable" onClick={() => { setStart(p.startDate); setEnd(p.endDate); setWantedPresentation({ year: Number(p.endDate.slice(0, 4)), value: p.presentation === "otc" ? "otc" : "banks" }); setConfigOpen(false); }}>
                         <td>
                           {formatIsoDate(p.startDate)} a {formatIsoDate(p.endDate)}
                         </td>
@@ -707,7 +736,7 @@ export default function GeneratorPage() {
       )}
 
       {companyId !== null && rangeOk && presentation && !s && <Card><span className="muted">Cargando información de la empresa…</span></Card>}
-      {companyId !== null && company && (!rangeOk || !presentation) && <Alert tone="info">Elige el rango de fechas y la presentación para preparar los estados. Los datos fuera del rango se conservan.</Alert>}
+      {companyId !== null && company && (!rangeOk || !presentation) && <Alert tone="info">Elige el rango de fechas para preparar los estados; la presentación sale de la configuración de la empresa y el año. Los datos fuera del rango se conservan.</Alert>}
 
       <PucSettingsModal
         open={pucOpen}

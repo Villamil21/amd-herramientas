@@ -159,6 +159,7 @@ pub fn run() {
             commands::fs::register_fs_empty_period,
             commands::fs::void_fs_empty_period,
             commands::fs::void_fs_crypto_batch,
+            commands::fs::mark_fs_crypto_batch_outdated,
             commands::fs::list_fs_batches,
             commands::fs::list_fs_movements,
             commands::fs::reclassify_fs_movements,

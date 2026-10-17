@@ -48,11 +48,21 @@ export type EeffSyncState = "none" | "in_sync" | "update" | "retire" | "stale";
 
 type CryptoBatchLike = Pick<BatchSummary, "id" | "status" | "metadata">;
 
-/** El envío más reciente de un año (activo o retirado por desactualizado). */
+/** El envío más reciente de un año (activo, activo pero desactualizado, o retirado por desactualizado). */
 export const latestEeffBatch = (batches: readonly BatchSummary[], year: number) =>
   batches.filter((b) => b.source === "crypto_ops" && b.dedupeKey === eeffDedupeKey(year) && (b.status === "active" || (b.status === "voided" && isStaleBatch(b)))).sort((a, b) => b.id - a.id)[0];
 
+/** Retirado del cálculo (anulado) porque ya no se podía recalcular. */
 export const isStaleBatch = (b: Pick<BatchSummary, "metadata">) => Boolean((b.metadata as { stale?: unknown } | null)?.stale);
+
+/** Activo pero marcado desactualizado: no se pudo reemplazar (p. ej. periodo cerrado). Solo auditoría: no alimenta el cálculo. */
+export const isOutdatedBatch = (b: Pick<BatchSummary, "status" | "metadata">) => b.status === "active" && Boolean((b.metadata as { outdated?: unknown } | null)?.outdated);
+
+/** Movimientos que alimentan el cálculo vigente: se excluyen los de lotes de Cripto desactualizados (se conservan solo para auditoría). */
+export function liveMovements<M extends { batchId: number }>(movements: readonly M[], batches: readonly BatchSummary[]): M[] {
+  const outdated = new Set(batches.filter((b) => b.source === "crypto_ops" && isOutdatedBatch(b)).map((b) => b.id));
+  return outdated.size ? movements.filter((m) => !outdated.has(m.batchId)) : [...movements];
+}
 
 /**
  * Qué hacer con el efecto en Estados Financieros. Mientras nunca se haya enviado, el primer envío es manual (`none`). Desde
@@ -62,7 +72,7 @@ export const isStaleBatch = (b: Pick<BatchSummary, "metadata">) => Boolean((b.me
  */
 export function eeffSyncState(latest: CryptoBatchLike | undefined, built: BatchInput | null): EeffSyncState {
   if (!latest) return "none";
-  if (latest.status === "voided") return built ? "update" : "stale";
+  if (latest.status === "voided" || isOutdatedBatch(latest)) return built ? "update" : "stale";
   if (!built) return "retire";
   const sent = (latest.metadata as { fingerprint?: string } | null)?.fingerprint;
   return sent === eeffFingerprint(built, String((built.metadata as { cutoff?: unknown } | null)?.cutoff ?? "")) ? "in_sync" : "update";
@@ -74,7 +84,10 @@ export function staleCryptoYears(batches: readonly BatchSummary[]): { year: numb
   const out: { year: number; reason: string }[] = [];
   for (const year of years) {
     const latest = latestEeffBatch(batches, year);
-    if (latest?.status === "voided") out.push({ year, reason: String((latest.metadata as { staleReason?: unknown } | null)?.staleReason ?? "") });
+    if (latest && (latest.status === "voided" || isOutdatedBatch(latest))) {
+      const meta = latest.metadata as { staleReason?: unknown; outdatedReason?: unknown } | null;
+      out.push({ year, reason: String(meta?.staleReason ?? meta?.outdatedReason ?? "") });
+    }
   }
   return out.sort((a, b) => a.year - b.year);
 }
@@ -93,7 +106,7 @@ export interface CryptoOutsideRange {
 export function cryptoOutsideRange(batches: readonly BatchSummary[], start: string, end: string): CryptoOutsideRange[] {
   const out: CryptoOutsideRange[] = [];
   for (const b of batches) {
-    if (b.source !== "crypto_ops" || b.status !== "active" || !b.dedupeKey.startsWith("crypto:")) continue;
+    if (b.source !== "crypto_ops" || b.status !== "active" || isOutdatedBatch(b) || !b.dedupeKey.startsWith("crypto:")) continue;
     const year = Number(b.dedupeKey.slice(7));
     if (year < Number(start.slice(0, 4)) || year > Number(end.slice(0, 4))) continue;
     const meta = b.metadata as { effectiveDate?: unknown; cutoff?: unknown } | null;

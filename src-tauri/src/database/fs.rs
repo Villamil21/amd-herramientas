@@ -562,6 +562,32 @@ pub fn void_crypto_batch(conn: &mut Connection, batch_id: i64, reason: &str) -> 
     Ok(invalidated)
 }
 
+/// Marca como desactualizado un lote de Transacciones Cripto que no se pudo reemplazar (p. ej. por un periodo cerrado). A
+/// diferencia de `void_crypto_batch` no cambia movimientos ni periodos —por eso funciona aunque el periodo esté cerrado—: el lote
+/// queda solo para auditoría (el cálculo vigente lo ignora y generar, marcar listo, cerrar y exportar se bloquean) hasta que
+/// pueda reemplazarse con las fuentes actuales.
+pub fn mark_crypto_batch_outdated(conn: &mut Connection, batch_id: i64, reason: &str) -> AppResult<()> {
+    let row: Option<(i64, String, String)> = conn.query_row("SELECT company_id, source, status FROM fs_batches WHERE id = ?1", [batch_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    let Some((company_id, source, status)) = row else {
+        return Err(AppError::user("El envío ya no existe. Recarga la pantalla."));
+    };
+    if source != "crypto_ops" || status != "active" {
+        return Err(AppError::user("Solo se puede marcar un envío activo de Transacciones Cripto."));
+    }
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    tx.execute(
+        "UPDATE fs_batches SET metadata = json_set(COALESCE(metadata, '{}'), '$.outdated', 1, '$.outdatedReason', ?3), updated_at = ?1 WHERE id = ?2",
+        params![now, batch_id, reason.trim()],
+    )?;
+    tx.execute(
+        "INSERT INTO fs_decisions (company_id, batch_id, source, document_key, decision, detail, created_at) VALUES (?1, ?2, 'crypto_ops', '', 'crypto_outdated', ?3, ?4)",
+        params![company_id, batch_id, reason.trim(), now],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Periodos sin actividad («Sin compras», «Sin nómina», «Sin ventas»…)
 // ---------------------------------------------------------------------------
@@ -1882,6 +1908,29 @@ mod tests {
         assert_eq!(active(&conn, a), vec![("413595".to_string(), 700)]);
         // Solo se retiran envíos activos de Transacciones Cripto.
         assert!(void_crypto_batch(&mut conn, batch_id, "otra vez").is_err());
+    }
+
+    #[test]
+    fn outdated_crypto_batch_works_in_closed_periods_and_is_replaced_when_reopened() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let SendOutcome::Sent { batch_id: other, .. } = send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-03-11", "513595", 100, "f1")])).unwrap() else { panic!() };
+        let SendOutcome::Sent { batch_id, .. } = send_batch(&mut conn, &batch(a, "crypto_ops", "crypto:2026", vec![movement("2026-03-10", "413595", 500, "crypto:2026:sales")])).unwrap() else { panic!() };
+        mark_ready(&mut conn, &key(a), "h").unwrap();
+        close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
+        // Reemplazarlo en un periodo cerrado falla…
+        let mut replacement = batch(a, "crypto_ops", "crypto:2026", vec![movement("2026-03-10", "413595", 900, "crypto:2026:sales")]);
+        replacement.replace = true;
+        assert!(send_batch(&mut conn, &replacement).unwrap_err().0.contains("periodo cerrado"));
+        // …pero marcarlo desactualizado no toca movimientos ni periodos.
+        mark_crypto_batch_outdated(&mut conn, batch_id, "El periodo está cerrado").unwrap();
+        let b = list_batches(&conn, a).unwrap().into_iter().find(|b| b.id == batch_id).unwrap();
+        assert_eq!(b.status, "active");
+        assert_eq!(b.metadata["outdated"], serde_json::json!(1));
+        assert_eq!(b.metadata["outdatedReason"], serde_json::json!("El periodo está cerrado"));
+        assert_eq!(active(&conn, a).len(), 2, "los movimientos no se modifican (el Generador los ignora por la marca)");
+        // Solo envíos activos de Transacciones Cripto.
+        assert!(mark_crypto_batch_outdated(&mut conn, other, "x").is_err());
     }
 
     #[test]
