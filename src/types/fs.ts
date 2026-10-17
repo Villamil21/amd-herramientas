@@ -68,14 +68,15 @@ export interface FsPucMapping {
   updatedAt: string;
 }
 
-export type FsSource = "purchases" | "bank" | "payroll" | "sales_einvoice" | "sales_tpsv" | "opening" | "adjustment";
+export type FsSource = "purchases" | "bank" | "payroll" | "sales_einvoice" | "sales_tpsv" | "crypto_ops" | "opening" | "adjustment";
 
 export const SOURCE_LABEL: Record<FsSource, string> = {
   purchases: "Compras",
   bank: "Extractos bancarios",
   payroll: "Nómina",
   sales_einvoice: "Ventas electrónicas",
-  sales_tpsv: "Reporte de operaciones",
+  sales_tpsv: "Reportes UIAF",
+  crypto_ops: "Transacciones Cripto",
   opening: "Saldos iniciales",
   adjustment: "Ajustes",
 };

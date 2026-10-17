@@ -1,4 +1,4 @@
-import { ArrowRight, FileSpreadsheet, Landmark, ShieldCheck, Users, HandCoins } from "lucide-react";
+import { ArrowRight, Bitcoin, FileSpreadsheet, Landmark, ShieldCheck, Users, HandCoins } from "lucide-react";
 import type { ReactNode } from "react";
 import { navigate, paths } from "../../../app/router";
 import { Badge, Card, EmptyState, PageHeader } from "../../../components/ui";
@@ -72,7 +72,9 @@ export default function ExogenaHome() {
         <FormatCard title="1010 · Socios, accionistas y similares" description="Socios con su participación y el capital suscrito asignado a 31 de diciembre, desde Empresas." icon={<Users size={18} />} onOpen={() => open("1010")} footer={records("1010")} />
         <FormatCard title="1009 · Saldos de cuentas por pagar al 31 de diciembre" description="Saldo pendiente por tercero al cierre: proveedores, DIAN y seguridad social, conciliado con el ESF." icon={<Landmark size={18} />} onOpen={() => open("1009")} footer={records("1009")} />
         <FormatCard title="1008 · Saldo de cuentas por cobrar al 31 de diciembre" description="CxC a socios (capital suscrito − pagado) repartida por participación, con conceptos propios del formato." icon={<HandCoins size={18} />} onOpen={() => open("1008")} footer={records("1008")} />
-        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1008, 1009 y 1010" : "Selecciona una empresa"}</span>} />
+        <FormatCard title="1007 · Ingresos recibidos" description="Ventas por cliente (concepto 4001), desde Transacciones Cripto." icon={<Bitcoin size={18} />} onOpen={() => open("1007")} footer={records("1007")} />
+        <FormatCard title="1647 · Ingresos recibidos para terceros" description="Compras por tercero asignadas a un pagador de Ventas (concepto 4070), desde Transacciones Cripto." icon={<Bitcoin size={18} />} onOpen={() => open("1647")} footer={records("1647")} />
+        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1007, 1008, 1009, 1010 y 1647" : "Selecciona una empresa"}</span>} />
       </div>
       <Card title="Formatos previstos para fases posteriores" description="Están registrados para agregarlos sin cambiar la infraestructura, pero todavía no tienen pantalla.">
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>

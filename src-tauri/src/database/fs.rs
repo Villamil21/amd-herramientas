@@ -530,6 +530,38 @@ pub fn send_batch(conn: &mut Connection, input: &BatchInput) -> AppResult<SendOu
     Ok(SendOutcome::Sent { batch_id, replaced_batch_ids, invalidated_periods })
 }
 
+/// Retira del cálculo vigente el lote de Transacciones Cripto cuyo efecto ya no se puede recalcular con las fuentes actuales.
+/// El lote y sus movimientos se conservan para auditoría (quedan «voided» y marcados `stale`); los periodos «Cuadrado» o
+/// «PDF generado» que tocaba vuelven a «Requiere nueva revisión». Un periodo cerrado no se modifica: hay que desbloquearlo.
+pub fn void_crypto_batch(conn: &mut Connection, batch_id: i64, reason: &str) -> AppResult<i64> {
+    let row: Option<(i64, String, String)> = conn.query_row("SELECT company_id, source, status FROM fs_batches WHERE id = ?1", [batch_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    let Some((company_id, source, status)) = row else {
+        return Err(AppError::user("El envío ya no existe. Recarga la pantalla."));
+    };
+    if source != "crypto_ops" || status != "active" {
+        return Err(AppError::user("Solo se puede retirar un envío activo de Transacciones Cripto."));
+    }
+    let dates: BTreeSet<String> = conn
+        .prepare("SELECT DISTINCT accounting_date FROM fs_movements WHERE batch_id = ?1 AND status = 'active'")?
+        .query_map([batch_id], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    ensure_open(conn, company_id, &dates)?;
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    tx.execute("UPDATE fs_movements SET status = 'voided', updated_at = ?1 WHERE batch_id = ?2 AND status = 'active'", params![now, batch_id])?;
+    tx.execute(
+        "UPDATE fs_batches SET status = 'voided', metadata = json_set(COALESCE(metadata, '{}'), '$.stale', 1, '$.staleReason', ?3), updated_at = ?1 WHERE id = ?2",
+        params![now, batch_id, reason.trim()],
+    )?;
+    tx.execute(
+        "INSERT INTO fs_decisions (company_id, batch_id, source, document_key, decision, detail, created_at) VALUES (?1, ?2, 'crypto_ops', '', 'crypto_stale_voided', ?3, ?4)",
+        params![company_id, batch_id, reason.trim(), now],
+    )?;
+    let invalidated = invalidate_periods(&tx, company_id, &dates, "El efecto de Transacciones Cripto quedó desactualizado y se retiró del cálculo: resuelve sus pendientes y vuelve a revisar el periodo.")?;
+    tx.commit()?;
+    Ok(invalidated)
+}
+
 // ---------------------------------------------------------------------------
 // Periodos sin actividad («Sin compras», «Sin nómina», «Sin ventas»…)
 // ---------------------------------------------------------------------------
@@ -1828,6 +1860,41 @@ mod tests {
         close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
         assert!(register_empty_period(&mut conn, &empty_input(a, "payroll", &["2026-02"], false)).unwrap_err().0.contains("periodo cerrado"));
         assert!(matches!(register_empty_period(&mut conn, &empty_input(a, "payroll", &["2026-09"], false)).unwrap(), EmptyPeriodOutcome::Registered { .. }));
+    }
+
+    #[test]
+    fn stale_crypto_batch_leaves_the_calculation_but_stays_for_audit() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let SendOutcome::Sent { batch_id, .. } = send_batch(&mut conn, &batch(a, "crypto_ops", "crypto:2026", vec![movement("2026-03-10", "413595", 500, "crypto:2026:sales")])).unwrap() else { panic!() };
+        mark_ready(&mut conn, &key(a), "h").unwrap();
+        assert_eq!(active(&conn, a), vec![("413595".to_string(), 500)]);
+        let invalidated = void_crypto_batch(&mut conn, batch_id, "Hay duplicados sin resolver").unwrap();
+        assert_eq!(invalidated, 1, "el periodo cuadrado vuelve a revisión");
+        assert!(active(&conn, a).is_empty(), "ya no alimenta el cálculo vigente");
+        let b = list_batches(&conn, a).unwrap().into_iter().find(|b| b.id == batch_id).unwrap();
+        assert_eq!(b.status, "voided");
+        assert_eq!(b.metadata["stale"], serde_json::json!(1));
+        // Sus movimientos siguen ahí, anulados, para auditoría.
+        assert_eq!(list_movements(&conn, a).unwrap().iter().filter(|m| m.status == "voided").count(), 1);
+        // Un nuevo cálculo vuelve a ocupar la misma llave sin pedir reemplazo.
+        assert!(matches!(send_batch(&mut conn, &batch(a, "crypto_ops", "crypto:2026", vec![movement("2026-03-10", "413595", 700, "crypto:2026:sales")])).unwrap(), SendOutcome::Sent { .. }));
+        assert_eq!(active(&conn, a), vec![("413595".to_string(), 700)]);
+        // Solo se retiran envíos activos de Transacciones Cripto.
+        assert!(void_crypto_batch(&mut conn, batch_id, "otra vez").is_err());
+    }
+
+    #[test]
+    fn stale_crypto_batch_respects_closed_periods_and_other_sources() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let SendOutcome::Sent { batch_id, .. } = send_batch(&mut conn, &batch(a, "crypto_ops", "crypto:2026", vec![movement("2026-03-10", "413595", 500, "d")])).unwrap() else { panic!() };
+        let SendOutcome::Sent { batch_id: other, .. } = send_batch(&mut conn, &batch(a, "purchases", "", vec![movement("2026-03-11", "513595", 100, "f1")])).unwrap() else { panic!() };
+        assert!(void_crypto_batch(&mut conn, other, "x").is_err());
+        mark_ready(&mut conn, &key(a), "h").unwrap();
+        close_period(&mut conn, &key(a), &serde_json::json!({})).unwrap();
+        assert!(void_crypto_batch(&mut conn, batch_id, "x").unwrap_err().0.contains("periodo cerrado"));
+        assert_eq!(active(&conn, a).len(), 2, "un periodo cerrado no se modifica");
     }
 
     fn key(company_id: i64) -> PeriodKey {

@@ -145,6 +145,10 @@ pub struct BackupFile {
     /// `None` en backups anteriores: se conserva la información actual. El RUT de los socios (PDF) no viaja en el backup.
     #[serde(default)]
     pub exogena: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
+    /// Transacciones Cripto (cargas de Excel con sus filas de origen, decisiones, homologaciones y auditoría).
+    /// `None` en backups anteriores: se conserva la información actual.
+    #[serde(default)]
+    pub crypto: Option<BTreeMap<String, Vec<serde_json::Map<String, serde_json::Value>>>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -260,6 +264,7 @@ pub fn build(conn: &Connection, logos_dir: &Path, signatures_dir: &Path, documen
         minimum_wages: Some(minimum_wages::list(conn)?),
         financial_statements: Some(dump_financial_statements(conn)?),
         exogena: Some(dump_tables(conn, EXO_TABLES)?),
+        crypto: Some(dump_tables(conn, CRYPTO_TABLES)?),
     })
 }
 
@@ -316,6 +321,9 @@ fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
 /// Tablas de Información Exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso):
 /// los catálogos con sus ajustes, la auditoría de catálogos y el estado / registros / sincronizaciones por formato.
 const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs"];
+
+/// Tablas de Transacciones Cripto en orden de dependencias (se restauran en este orden y se vacían en el inverso).
+const CRYPTO_TABLES: &[&str] = &["crypto_homologations", "crypto_uploads", "crypto_upload_versions", "crypto_rows", "crypto_decisions", "crypto_audit"];
 
 fn dump_tables(conn: &Connection, tables: &[&str]) -> AppResult<FsDump> {
     use rusqlite::types::Value as Sql;
@@ -763,6 +771,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
         tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
         // Un backup anterior a Exógena no la trae: se conserva la actual (borrar las empresas la borraría en cascada).
         let kept_exogena = if file.exogena.is_none() { Some(dump_tables(&tx, EXO_TABLES)?) } else { None };
+        let kept_crypto = if file.crypto.is_none() { Some(dump_tables(&tx, CRYPTO_TABLES)?) } else { None };
         tx.execute("DELETE FROM companies", [])?;
         tx.execute("DELETE FROM retention_concepts", [])?;
         let placeholders = INTERNAL_SETTINGS.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -1061,6 +1070,23 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                 rows.retain(|r| r.get("company_id").and_then(|v| v.as_i64()).map_or(true, |id| ids.contains(&id)));
             }
             restore_tables(&tx, EXO_TABLES, &data, "No se pudo conservar la información de Exógena.")?;
+        }
+        if let Some(data) = &file.crypto {
+            restore_tables(&tx, CRYPTO_TABLES, data, "La información de Transacciones Cripto del backup está dañada o incompleta.")?;
+        } else if let Some(mut data) = kept_crypto {
+            let ids: Vec<i64> = file.companies.iter().map(|c| c.company.id).collect();
+            let kept_uploads: Vec<i64> = data
+                .get("crypto_uploads")
+                .map(|rows| rows.iter().filter(|r| r.get("company_id").and_then(|v| v.as_i64()).map_or(true, |id| ids.contains(&id))).filter_map(|r| r.get("id").and_then(|v| v.as_i64())).collect())
+                .unwrap_or_default();
+            for (table, rows) in data.iter_mut() {
+                if table == "crypto_rows" || table == "crypto_upload_versions" {
+                    rows.retain(|r| r.get("upload_id").and_then(|v| v.as_i64()).map_or(true, |id| kept_uploads.contains(&id)));
+                } else {
+                    rows.retain(|r| r.get("company_id").and_then(|v| v.as_i64()).map_or(true, |id| ids.contains(&id)));
+                }
+            }
+            restore_tables(&tx, CRYPTO_TABLES, &data, "No se pudo conservar la información de Transacciones Cripto.")?;
         }
         if let Some(data) = &file.financial_statements {
             restore_financial_statements(&tx, data)?;
@@ -1566,6 +1592,41 @@ mod tests {
         let without_company = BackupFile { exogena: None, companies: vec![], ..parsed };
         restore(&mut target, &dir, &dir, &dir, &without_company).unwrap();
         assert!(exogena::list_records(&target, 5, 2025, "1010").unwrap().is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// Transacciones Cripto (cargas con sus filas, decisiones y homologaciones) sobrevive a exportar y restaurar,
+    /// y un backup anterior (sin esa sección) no borra la que ya hay.
+    #[test]
+    fn crypto_survives_backup_and_old_backups_keep_it() {
+        use crate::database::crypto::{self, CryptoRowInput, SaveUploadInput};
+        let dir = std::env::temp_dir().join(format!("amd-json-crypto-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x')", []).unwrap();
+        let rows = vec![CryptoRowInput { kind: "purchase".into(), sheet: "Compras".into(), row_number: 2, fingerprint: "fp1".into(), data: serde_json::json!({"Valor total de la operación": 1000}) }];
+        crypto::save_upload(&mut conn, &SaveUploadInput { company_id: 5, year: 2026, file_name: "enero.xlsx".into(), sheets: serde_json::json!(["Compras"]), rows, summary: serde_json::json!({}), replace: false }).unwrap();
+        crypto::set_decision(&conn, 5, 2026, "duplicate", "enero.xlsx|purchase|fp1|0", "keep", "fp1").unwrap();
+        crypto::save_homologation(&conn, "city", "STGO DE CALI", "76001").unwrap();
+
+        let file = build(&conn, &dir, &dir, &dir, "1.41.0").unwrap();
+        let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert!(parsed.crypto.as_ref().unwrap().contains_key("crypto_rows"));
+
+        let mut target = Connection::open_in_memory().unwrap();
+        target.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut target).unwrap();
+        restore(&mut target, &dir, &dir, &dir, &parsed).unwrap();
+        let state = crypto::state(&target, 5, 2026).unwrap();
+        assert_eq!((state.uploads.len(), state.rows.len(), state.decisions.len()), (1, 1, 1));
+        assert_eq!(state.rows[0].data["Valor total de la operación"], 1000);
+        assert_eq!(crypto::list_homologations(&target).unwrap().len(), 1);
+
+        let older = BackupFile { crypto: None, ..parsed.clone() };
+        restore(&mut target, &dir, &dir, &dir, &older).unwrap();
+        assert_eq!(crypto::state(&target, 5, 2026).unwrap().rows.len(), 1, "se conserva");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

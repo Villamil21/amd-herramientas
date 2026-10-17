@@ -6,6 +6,7 @@ pub mod backup;
 pub mod companies;
 pub mod company_documents;
 pub mod concepts;
+pub mod crypto;
 pub mod dropi;
 pub mod exogena;
 pub mod files;

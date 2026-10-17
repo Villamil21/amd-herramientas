@@ -26,6 +26,7 @@ export const SOURCE_PATH: Record<FsSource, string> = {
   payroll: paths.submodule("estados-financieros", "nomina"),
   sales_einvoice: paths.provider("estados-financieros", "ventas", "facturacion-electronica"),
   sales_tpsv: paths.provider("estados-financieros", "ventas", "reporte-de-operaciones"),
+  crypto_ops: paths.provider("estados-financieros", "transacciones-cripto", "reporte-de-operaciones"),
   opening: paths.submodule("estados-financieros", "saldos-iniciales"),
   adjustment: paths.submodule("estados-financieros", "generador"),
 };

@@ -45,6 +45,8 @@ export const fsService = {
 
   // Movimientos
   send: (input: BatchInput) => call<SendOutcome>("send_fs_batch", { input }),
+  /** Retira del cálculo un envío de Transacciones Cripto desactualizado (se conserva para auditoría); devuelve los periodos que vuelven a revisión. */
+  voidCryptoBatch: (batchId: number, reason: string) => call<number>("void_fs_crypto_batch", { batchId, reason }),
   batches: (companyId: number) => call<BatchSummary[]>("list_fs_batches", { companyId }),
   /** Meses sin actividad (sin movimientos): cubren el Generador. `allowWithData`: el usuario aceptó la advertencia de datos reales. */
   registerEmptyPeriod: (input: { companyId: number; source: EmptyPeriodSource; months: string[]; confirmation: string; allowWithData?: boolean }) =>

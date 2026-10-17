@@ -24,7 +24,7 @@ pub const SECTIONS: [&str; 11] = [
 /// Secciones donde el usuario puede crear líneas nuevas (ESF completo; en EERR, por ahora, los gastos operacionales).
 pub const CREATABLE_SECTIONS: [&str; 7] = ["asset_current", "asset_noncurrent", "liability_current", "liability_noncurrent", "equity", "admin_expenses", "sales_expenses"];
 
-pub const SOURCES: [&str; 7] = ["purchases", "bank", "payroll", "sales_einvoice", "sales_tpsv", "opening", "adjustment"];
+pub const SOURCES: [&str; 8] = ["purchases", "bank", "payroll", "sales_einvoice", "sales_tpsv", "crypto_ops", "opening", "adjustment"];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

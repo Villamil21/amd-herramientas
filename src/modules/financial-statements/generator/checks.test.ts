@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BankAccountLifecycle, BankBalance, BatchSummary, Movement } from "../../../types/fs";
 import type { TaxReturn } from "../tax-obligations/types";
-import { activeDuplicates, bankCoverage, coverage, maskAccount, taxCoverage } from "./checks";
+import { activeDuplicates, bankCoverage, checklist, coverage, maskAccount, taxCoverage } from "./checks";
 import { bankBalanceStatus } from "./engine";
 
 const mv = (id: number, date: string, batchId: number, extra: Partial<Movement> = {}) =>
@@ -253,5 +253,18 @@ describe("cobertura de obligaciones tributarias", () => {
     expect(t.vat.periods.map((p) => [p.period, p.months.length, p.returns.length])).toEqual([[1, 2, 0], [2, 2, 0], [3, 2, 0], [4, 2, 1], [5, 1, 0]]);
     expect(t.income.map((y) => [y.year, y.returns.length])).toEqual([[2023, 1], [2024, 0], [2025, 1]]);
     expect(taxCoverage(months, returns, "four_monthly", "2026-09-30").vat.periods.map((p) => p.months.length)).toEqual([4, 4, 1]);
+  });
+});
+
+describe("Transacciones Cripto desactualizado bloquea el periodo", () => {
+  const clean = { esf: { differenceCents: 0 }, eerr: { beforeTax: 0 }, unclassified: [], bankBalances: [], tax: { issues: [] } } as never;
+  it("sin efecto retirado todos los puntos se cumplen; con uno, el punto falla y cuenta como bloqueo", () => {
+    const ok = checklist(clean, clean, [], [], 0, []);
+    expect(ok.every((c) => c.ok)).toBe(true);
+    const stale = checklist(clean, clean, [], [], 0, [{ year: 2026, reason: "hay duplicados sin resolver" }]);
+    expect(stale.find((c) => c.id === "crypto")).toMatchObject({ ok: false });
+    expect(stale.find((c) => c.id === "crypto")?.detail).toContain("2026");
+    expect(stale.find((c) => c.id === "blocking")?.ok).toBe(false);
+    expect(stale.every((c) => c.ok)).toBe(false);
   });
 });

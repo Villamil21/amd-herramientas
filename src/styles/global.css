@@ -4410,7 +4410,8 @@ body.is-reordering * {
 }
 
 .source-tag--sales_einvoice,
-.source-tag--sales_tpsv {
+.source-tag--sales_tpsv,
+.source-tag--crypto_ops {
   background: var(--accent-green-soft);
   color: var(--accent-green-ink);
 }

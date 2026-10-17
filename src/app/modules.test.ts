@@ -3,20 +3,21 @@ import type { ModuleDef } from "../types/modules";
 import { findModule, MODULES, orderedSubmodules } from "./modules";
 
 describe("orden de las tarjetas", () => {
-  it("el Generador de Estados Financieros siempre es la primera tarjeta", () => {
+  it("Transacciones Cripto es la primera tarjeta y el Generador la sigue", () => {
     const fs = findModule("estados-financieros")!;
     const names = orderedSubmodules(fs).map((s) => s.name);
-    expect(names[0]).toBe("Generador de Estados Financieros");
+    expect(names[0]).toBe("Transacciones Cripto");
+    expect(names[1]).toBe("Generador de Estados Financieros");
     // Notas Financieras va junto al Generador; los demás, alfabéticamente.
-    expect(names[1]).toBe("Notas Financieras");
-    expect(names.slice(2)).toEqual(["Clasificación contable de compras", "Empleados", "Extractos bancarios", "Movimientos contables", "Nómina", "Obligaciones tributarias", "Saldos iniciales", "Ventas"]);
+    expect(names[2]).toBe("Notas Financieras");
+    expect(names.slice(3)).toEqual(["Clasificación contable de compras", "Empleados", "Extractos bancarios", "Movimientos contables", "Nómina", "Obligaciones tributarias", "Saldos iniciales", "Ventas"]);
   });
 
-  it("un submódulo nuevo (aunque se declare antes o se llame «A…») no desplaza a uno con prioridad 0", () => {
+  it("un submódulo nuevo (aunque se declare antes o se llame «A…») no desplaza a los de prioridad definida", () => {
     const fs = findModule("estados-financieros")!;
     const extra = { id: "x", name: "Activos fijos", description: "", icon: fs.icon };
     const module: ModuleDef = { ...fs, submodules: [extra, ...fs.submodules, { ...extra, id: "y", name: "Notas Financieras" }] };
-    expect(orderedSubmodules(module)[0].id).toBe("generador");
+    expect(orderedSubmodules(module).slice(0, 2).map((s) => s.id)).toEqual(["transacciones-cripto", "generador"]);
   });
 
   it("las herramientas y los submódulos se ordenan alfabéticamente", () => {
@@ -26,9 +27,9 @@ describe("orden de las tarjetas", () => {
     expect(orderedSubmodules(findModule("calculadoras")!).map((s) => s.name)).toEqual(["Calculadora de aportes para Dependientes", "Calculadora de aportes para Independientes"]);
   });
 
-  it("Información Exógena tiene las pantallas 1010, 1009, 1008 y Control y exportación", () => {
+  it("Información Exógena tiene las pantallas 1010, 1009, 1008, 1007, 1647 y Control y exportación", () => {
     const exo = findModule("informacion-exogena")!;
-    expect(orderedSubmodules(exo).map((s) => s.id)).toEqual(["1010", "1009", "1008", "control"]);
+    expect(orderedSubmodules(exo).map((s) => s.id)).toEqual(["1010", "1009", "1008", "1007", "1647", "control"]);
     expect(exo.submodules.every((s) => Boolean(s.component))).toBe(true);
     expect(exo.landing).toBeDefined();
   });

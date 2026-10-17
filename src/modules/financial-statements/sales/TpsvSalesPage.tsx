@@ -34,7 +34,7 @@ const ITEMS = [
 ];
 
 /**
- * Ventas → Reporte de operaciones (TPSV). Suma TODAS las filas de «Monto
+ * Ventas → Reportes UIAF (TPSV). Suma TODAS las filas de «Monto
  * Acumulado» (nunca «Monto Acumulado 2»): Código Tipo 2 = compra, 3 = venta.
  * Fecha contable: «Fecha».
  */
@@ -52,7 +52,7 @@ export default function TpsvSalesPage() {
   async function pick() {
     setBook((b) => ({ ...b, picking: true, error: null }));
     try {
-      const picked = await fileService.pickExcelOrText("Importar reporte de operaciones");
+      const picked = await fileService.pickExcelOrText("Importar reporte UIAF");
       if (!picked) return setBook((b) => ({ ...b, picking: false }));
       try {
         const result =
@@ -61,7 +61,7 @@ export default function TpsvSalesPage() {
             : { fileName: picked.fileName, format: "TXT" as const, data: readTpsvWorkbook(tpsvTextToWorkbook(picked.fileName, decodeText(fromBase64(picked.dataBase64)))) };
         setBook({ result, error: null, picking: false });
       } catch (e) {
-        setBook({ result: null, picking: false, error: e instanceof SalesFormatError ? e.message : "No fue posible leer el archivo. Verifica que sea el reporte de operaciones." });
+        setBook({ result: null, picking: false, error: e instanceof SalesFormatError ? e.message : "No fue posible leer el archivo. Verifica que sea el reporte UIAF." });
       }
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -99,7 +99,7 @@ export default function TpsvSalesPage() {
   const sentBatches = [...new Set(alreadySent.map((r) => sent.get(r.fingerprint)!))];
   const detected = describeMonths(valid.map((r) => r.date!.slice(0, 7)));
   const missingKeys = [valid.some((r) => r.kind === "buy") && !data.settingsMap.get(BUY_KEY) && BUY_KEY, valid.some((r) => r.kind === "sell") && !data.settingsMap.get(SELL_KEY) && SELL_KEY].filter(Boolean) as string[];
-  const blocked = !book.result ? "Selecciona el archivo" : companyId === null ? "Selecciona la empresa" : issues.length ? `${issues.length} filas con datos ilegibles` : missingKeys.length ? "Faltan cuentas PUC del reporte de operaciones" : valid.length === 0 ? "No hay operaciones para enviar" : null;
+  const blocked = !book.result ? "Selecciona el archivo" : companyId === null ? "Selecciona la empresa" : issues.length ? `${issues.length} filas con datos ilegibles` : missingKeys.length ? "Faltan cuentas PUC de Reportes UIAF" : valid.length === 0 ? "No hay operaciones para enviar" : null;
 
   function build(): BatchInput | null {
     if (!book.result || companyId === null) return null;
@@ -108,7 +108,7 @@ export default function TpsvSalesPage() {
       companyId,
       source: "sales_tpsv",
       fileName: book.result.fileName,
-      periodLabel: `Reporte de operaciones · ${book.result.fileName}`,
+      periodLabel: `Reportes UIAF · ${book.result.fileName}`,
       periodStart: dates[0],
       periodEnd: dates[dates.length - 1],
       metadata: { format: book.result.format, sheets: book.result.data.sheets, otherTypes: other.length, repeated: repeated.length },
@@ -171,8 +171,8 @@ export default function TpsvSalesPage() {
     <>
       <PageHeader
         eyebrow="Estados Financieros · Ventas"
-        title="Reporte de operaciones"
-        description="Importa el reporte de operaciones (TPSV) en Excel o TXT. Se revisan todas las hojas con la estructura válida y se suman todas las filas de «Monto Acumulado»."
+        title="Reportes UIAF"
+        description="Importa el reporte UIAF (TPSV) en Excel o TXT. Se revisan todas las hojas con la estructura válida y se suman todas las filas de «Monto Acumulado»."
         actions={
           <>
             <Button icon={<CalendarX2 size={15} />} onClick={() => setEmptyOpen(true)}>
@@ -234,7 +234,7 @@ export default function TpsvSalesPage() {
           {repeated.length > 0 && <Alert tone="warning">{formatInteger(repeated.length)} filas repetidas en el archivo (mismo N° Registro, Fecha, Código Tipo y Monto): no se suman dos veces.</Alert>}
           {other.length > 0 && <Alert tone="info">{formatInteger(other.length)} filas con otro Código Tipo (ni 2 ni 3): no se envían.</Alert>}
           {missingKeys.length > 0 && (
-            <Alert tone="warning" title="Faltan cuentas PUC del reporte de operaciones">
+            <Alert tone="warning" title="Faltan cuentas PUC de Reportes UIAF">
               <Button size="sm" onClick={() => setSettingsOpen(true)}>
                 Configurar
               </Button>
@@ -308,7 +308,7 @@ export default function TpsvSalesPage() {
         </>
       )}
       <EmptyPeriodModal open={emptyOpen} source="sales_tpsv" companies={data.companies} companyId={companyId} defaultMonth={valid.length ? valid.map((r) => r.date!.slice(0, 7)).sort()[0] : null} onClose={() => setEmptyOpen(false)} onChanged={() => setSentKey((k) => k + 1)} />
-      <PucSettingsModal open={settingsOpen} title="Cuentas PUC del reporte de operaciones" items={ITEMS} index={data.index} settings={data.settingsMap} mappings={data.mappingMap} required={missingKeys} onClose={() => setSettingsOpen(false)} onSaved={data.reloadSettings} onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])} />
+      <PucSettingsModal open={settingsOpen} title="Cuentas PUC de Reportes UIAF" items={ITEMS} index={data.index} settings={data.settingsMap} mappings={data.mappingMap} required={missingKeys} onClose={() => setSettingsOpen(false)} onSaved={data.reloadSettings} onCodesChanged={() => Promise.all([data.reloadCodes(), data.reloadMappings()])} />
     </>
   );
 }

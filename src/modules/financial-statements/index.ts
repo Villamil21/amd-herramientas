@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BookCheck, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, Bitcoin, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
 
@@ -16,6 +16,20 @@ export const financialStatementsModule: ModuleDef = {
   accent: "green",
   submoduleCards: "name",
   submodules: [
+    {
+      id: "transacciones-cripto",
+      name: "Transacciones Cripto",
+      // Al inicio de Estados Financieros, antes del Generador.
+      priority: -1,
+      description: "Cargas acumulativas de Excel de compras y ventas cripto: Estados Financieros y formatos 1007 y 1647 de Exógena.",
+      icon: Bitcoin,
+      providersDescription: "Selecciona el submódulo.",
+      providers: [
+        { id: "reporte-de-operaciones", name: "Reporte de operaciones", description: "Importa los Excel de Compras y Ventas por empresa y año, revisa duplicados y prepara EEFF, 1007 y 1647.", icon: Landmark, component: lazy(() => import("./crypto/CryptoOperationsPage")) },
+        // Sin componente = «Próximamente»: el Certificado Cripto no se implementa en esta entrega.
+        { id: "certificado-cripto", name: "Certificado Cripto", description: "", icon: ScrollText },
+      ],
+    },
     {
       // El id se conserva (rutas y accesos guardados); el nombre visible cambió.
       id: "codigos-puc-por-factura",
@@ -56,12 +70,12 @@ export const financialStatementsModule: ModuleDef = {
     {
       id: "ventas",
       name: "Ventas",
-      description: "Facturación electrónica y Reporte de operaciones (cripto).",
+      description: "Facturación electrónica y Reportes UIAF (cripto).",
       icon: ShoppingBag,
       providersDescription: "Selecciona la fuente de ventas.",
       providers: [
         { id: "facturacion-electronica", name: "Facturación electrónica", description: "Excel de facturación electrónica (DIAN).", icon: Receipt, component: lazy(() => import("./sales/EInvoiceSalesPage")) },
-        { id: "reporte-de-operaciones", name: "Reporte de operaciones", description: "Reporte de operaciones TPSV (compra y venta de cripto).", icon: Landmark, component: lazy(() => import("./sales/TpsvSalesPage")) },
+        { id: "reporte-de-operaciones", name: "Reportes UIAF", description: "Reporte UIAF (TPSV) de compra y venta de cripto.", icon: Landmark, component: lazy(() => import("./sales/TpsvSalesPage")) },
       ],
     },
     {

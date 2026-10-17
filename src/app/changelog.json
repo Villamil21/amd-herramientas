@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.36.0",
+    "date": "2026-10-17",
+    "notes": [
+      "Nuevo en Estados Financieros: Transacciones Cripto → Reporte de operaciones. Importa los Excel de Compras y Ventas (acumulativos por empresa y año), con reemplazo por mismo nombre y revisión de cambios, posibles duplicados que nunca se omiten solos, homologación de documentos y ciudades, y conciliación exacta de filas (aceptadas, otro año, duplicados, excluidas) que no deja ninguna fila sin estado.",
+      "La cobertura mensual solo cuenta filas aceptadas: un mes con filas pendientes se muestra aparte, con su cantidad y motivo, y no se marca cubierto hasta aceptarlas o excluirlas.",
+      "El efecto en Estados Financieros (OTC, Bancos, Débito/Crédito) se actualiza solo al cambiar el corte o las fuentes; si ya no se puede calcular, el lote anterior se conserva para auditoría, sale del cálculo vigente y el Generador bloquea marcar listo, generar el PDF y cerrar hasta recalcular.",
+      "Información Exógena: nuevos formatos 1007 (ingresos recibidos, concepto 4001) y 1647 (ingresos recibidos para terceros, concepto 4070) con asignación de Ventas a Compras sin dividir terceros; el formato marcado como «Listo» se reabre si cambia una carga, un duplicado, una asignación o una ciudad. Certificado Cripto queda como «Próximamente»."
+    ]
+  },
+  {
     "version": "1.35.0",
     "date": "2026-10-16",
     "notes": [

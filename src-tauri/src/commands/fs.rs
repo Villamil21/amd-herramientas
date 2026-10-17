@@ -61,6 +61,12 @@ pub fn void_fs_empty_period(db: State<'_, Db>, batch_id: i64, reason: String) ->
     db.with(|c| fs::void_empty_period(c, batch_id, &reason))
 }
 
+/// Retira del cálculo vigente un envío de Transacciones Cripto desactualizado (se conserva para auditoría).
+#[tauri::command]
+pub fn void_fs_crypto_batch(db: State<'_, Db>, batch_id: i64, reason: String) -> AppResult<i64> {
+    db.with(|c| fs::void_crypto_batch(c, batch_id, &reason))
+}
+
 #[tauri::command]
 pub fn list_fs_batches(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BatchSummary>> {
     db.with(|c| fs::list_batches(c, company_id))

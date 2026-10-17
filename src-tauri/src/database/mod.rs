@@ -3,6 +3,7 @@
 pub mod companies;
 pub mod company_documents;
 pub mod concepts;
+pub mod crypto;
 pub mod dropi;
 pub mod exo_concepts;
 pub mod exogena;
