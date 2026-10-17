@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.38.3",
+    "date": "2026-10-17",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.38.2",
     "date": "2026-10-17",
     "notes": [

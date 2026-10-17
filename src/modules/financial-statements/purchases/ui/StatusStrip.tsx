@@ -44,10 +44,19 @@ export function StatusStrip({ counts, status, notApplicable = {}, dests = DESTS,
                 detail?.(d) ??
                 (status[d] === "ready" ? "Sin pendientes." : `${counts[d].block} bloquean · ${counts[d].pending} por confirmar · ${counts[d].review} por revisar`)}
             </span>
+            {onSelect && <span className="state-strip__cta">{status[d] === "na" ? "Ver justificación" : status[d] === "ready" ? "Ver estado" : "Resolver pendientes"} →</span>}
           </>
         );
+        // Toda la tarjeta es el botón: clic en cualquier parte, Enter o Espacio abren los pendientes de ese destino.
         return onSelect ? (
-          <button key={d} type="button" className="state-strip__item" onClick={() => onSelect(d)} style={{ textAlign: "left", cursor: "pointer" }}>
+          <button
+            key={d}
+            type="button"
+            className="state-strip__item state-strip__item--action"
+            aria-haspopup="dialog"
+            aria-label={cardLabel(d, status[d], counts[d])}
+            onClick={() => onSelect(d)}
+          >
             {body}
           </button>
         ) : (
@@ -59,3 +68,7 @@ export function StatusStrip({ counts, status, notApplicable = {}, dests = DESTS,
     </div>
   );
 }
+
+/** Nombre accesible de la tarjeta: destino, estado y cantidades. */
+export const cardLabel = (d: Dest, status: DestStatus, c: DestCounts) =>
+  `${DEST_LABEL[d]}: ${STATUS_LABEL[status]}${status === "ready" || status === "na" ? "" : ` (${c.block} bloquean, ${c.pending} por confirmar, ${c.review} por revisar)`}. Abrir pendientes`;

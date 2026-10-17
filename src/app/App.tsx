@@ -9,6 +9,7 @@ import { findModule } from "./modules";
 import { navigate, paths, useRoute } from "./router";
 import { UpdateNotice } from "./UpdateNotice";
 import { WhatsNewModal } from "./WhatsNewModal";
+import { PendingReturnBar } from "../modules/financial-statements/purchases/ui/PendingReturnBar";
 import { ToolsPage } from "../pages/ToolsPage";
 import { ModulePage } from "../pages/ModulePage";
 import { ProviderSelectPage } from "../pages/ProviderSelectPage";
@@ -110,6 +111,7 @@ export function App() {
 
   return (
     <AppLayout active={active} crumbs={crumbs} version={startup?.currentVersion ?? "—"}>
+      <PendingReturnBar />
       {dbError ? (
         <Card>
           <EmptyState

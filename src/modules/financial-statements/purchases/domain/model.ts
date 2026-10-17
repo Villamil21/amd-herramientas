@@ -265,7 +265,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     const month = doc.issueDate ? Number(doc.issueDate.slice(5, 7)) : null;
 
     const alerts: Alert[] = [];
-    const add = (a: Omit<Alert, "id"> & { key?: string }) => alerts.push({ ...a, id: `${a.code}:${doc.id}:${a.key ?? ""}` });
+    const add = (a: Omit<Alert, "id"> & { key?: string }) => alerts.push({ ...a, docId: doc.id, id: `${a.code}:${doc.id}:${a.key ?? ""}` });
     const docTarget: AlertTarget = { kind: "document", docId: doc.id };
     const label = `${data.number ?? doc.fileName}`;
 
@@ -461,6 +461,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
       const hasProposal = Boolean(p.pucCode || p.concept1001);
       add({
         code: "line-unconfirmed",
+        variant: hasProposal ? "proposal" : "no-proposal",
         severity: "pending",
         dests: ["EEFF", "1001"],
         title: `${label} · ${lineLabel(l.line)}`,
@@ -905,10 +906,13 @@ function buildCoverage(docs: DocView[]): MonthCoverage[] {
 }
 
 /** Agrupa alertas repetidas por tipo (para no listar mil líneas por confirmar una a una). */
+/** Clave de agrupación: severidad + tipo (+ subtipo cuando la misma causa se resuelve distinto) + destinos. */
+export const groupKey = (a: Alert) => `${a.severity}|${a.code}${a.variant ? `:${a.variant}` : ""}|${a.dests.join(",")}`;
+
 export function groupAlerts(alerts: readonly Alert[]): { code: string; severity: Severity; dests: Dest[]; title: string; items: Alert[] }[] {
   const groups = new Map<string, { code: string; severity: Severity; dests: Dest[]; title: string; items: Alert[] }>();
   for (const a of alerts) {
-    const key = `${a.severity}|${a.code}|${a.dests.join(",")}`;
+    const key = groupKey(a);
     const g = groups.get(key) ?? { code: a.code, severity: a.severity, dests: a.dests, title: a.title, items: [] };
     g.items.push(a);
     groups.set(key, g);

@@ -80,6 +80,10 @@ export interface Alert {
   /** Cómo corregirlo. */
   how: string;
   target: AlertTarget;
+  /** Factura que origina la alerta (ausente en las globales de empresa y año). */
+  docId?: number;
+  /** Subtipo cuando una misma causa se resuelve de forma distinta (p. ej. línea con o sin propuesta). */
+  variant?: string;
   /** Etiqueta del botón que abre el dato (por defecto «Resolver»). */
   action?: string;
 }

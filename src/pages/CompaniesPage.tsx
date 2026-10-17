@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Building2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, EmptyState, Input, Loader, Menu, PageHeader, useToast } from "../components/ui";
 import { LogoThumb } from "../components/LogoThumb";
@@ -6,7 +6,10 @@ import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
 import { companyService } from "../services/companyService";
 import type { Company } from "../types/models";
+import { findCompanyByNit } from "../modules/financial-statements/shared/companyMatch";
+import { getPendingReturn, patchPendingReturn } from "../modules/financial-statements/purchases/pendingReturn";
 import { CompanyFormModal } from "./companies/CompanyFormModal";
+import type { CompanyTab } from "./companies/companyTabs";
 import { COMPANY_STATE_LABEL, companyStatus } from "./companies/companyStatus";
 
 export function CompaniesPage() {
@@ -17,6 +20,8 @@ export function CompaniesPage() {
   const [editing, setEditing] = useState<Company | null | undefined>(undefined); // undefined = cerrado
   const [deleting, setDeleting] = useState<Company | null>(null);
   const [busy, setBusy] = useState(false);
+  const [startTab, setStartTab] = useState<CompanyTab | undefined>(undefined);
+  const opened = useRef(false);
 
   async function confirmDelete() {
     if (!deleting) return;
@@ -34,6 +39,18 @@ export function CompaniesPage() {
   }
 
   const companies = list.data ?? [];
+
+  // Llegada desde el panel de pendientes de Compras: abre la ficha exacta (pestaña fiscal) y deja la ruta de regreso.
+  useEffect(() => {
+    const ctx = getPendingReturn();
+    if (opened.current || !ctx?.openCompanyNit || !list.data || query) return;
+    opened.current = true;
+    const target = findCompanyByNit(list.data, ctx.openCompanyNit);
+    patchPendingReturn({ openCompanyNit: undefined });
+    if (!target) return;
+    setStartTab(ctx.companyTab);
+    setEditing(target);
+  }, [list.data, query]);
 
   return (
     <>
@@ -140,7 +157,11 @@ export function CompaniesPage() {
         open={editing !== undefined}
         company={editing ?? null}
         keepOpenOnCreate
-        onClose={() => setEditing(undefined)}
+        initialTab={startTab}
+        onClose={() => {
+          setEditing(undefined);
+          setStartTab(undefined);
+        }}
         onSaved={() => void list.reload()}
       />
       <ConfirmDialog

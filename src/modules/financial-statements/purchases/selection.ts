@@ -27,6 +27,10 @@ function read(): PurchasesSelection {
 let current = read();
 const listeners = new Set<() => void>();
 
+export function setPurchasesSelection(patch: Partial<PurchasesSelection>) {
+  set(patch);
+}
+
 function set(patch: Partial<PurchasesSelection>) {
   current = { ...current, ...patch };
   try {

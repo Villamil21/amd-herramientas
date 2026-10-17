@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FolderSearch, ShoppingBag } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, ContextBar, EmptyState, Field, Input, Loader, MetricBar, PageHeader, Select, Tabs, useToast } from "../../../components/ui";
 import { navigate, paths } from "../../../app/router";
@@ -6,6 +6,8 @@ import { purchasesService } from "../../../services/purchasesService";
 import { errorMessage } from "../../../services/tauri";
 import { formatInteger, formatMoneyCents } from "../../../utils/format";
 import { findCompanyByNit } from "../shared/companyMatch";
+import { panelVisible } from "./domain/pending";
+import { getPendingReturn, setPendingReturn, takePendingReturn } from "./pendingReturn";
 import { DEST_LABEL, stopsDest, type Alert as AlertItem, type Dest } from "./domain/status";
 import { monthName, type DocView, type PurchasesModel, type SupplierView } from "./domain/model";
 import { pickInvoiceFolder, readFolder } from "./import";
@@ -14,6 +16,8 @@ import { useExoPurchasesGuard } from "./useExoPurchasesGuard";
 import { AlertsPanel } from "./ui/AlertsPanel";
 import { DocDetailModal } from "./ui/DocDetailModal";
 import { ImportModal, type PendingImport } from "./ui/ImportModal";
+import { PendingPanel, type PanelMemo } from "./ui/PendingPanel";
+import { TitleClassifyModal } from "./ui/TitleClassifyModal";
 import { StatusChip, StatusStrip } from "./ui/StatusStrip";
 import { SupplierEditorModal } from "./ui/SupplierEditorModal";
 
@@ -40,10 +44,22 @@ export default function PurchasesPage() {
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [detail, setDetail] = useState<{ docId: number; line: number | null } | null>(null);
   const [supplierNit, setSupplierNit] = useState<string | null>(null);
-  const [destFilter, setDestFilter] = useState<Dest | null>(null);
+  const [panelDest, setPanelDest] = useState<Dest | null>(null);
+  const [titleAsk, setTitleAsk] = useState<{ titleKey: string; title: string } | null>(null);
+  const panelMemo = useRef<PanelMemo>({ expanded: [], scroll: 0 });
   const [filter, setFilter] = useState<DocFilter>("all");
   const [search, setSearch] = useState("");
   const cancelled = useRef(false);
+
+  // Regreso desde otro módulo (franja «Volver a pendientes»): reabre el panel en el mismo destino y posición.
+  useEffect(() => {
+    const ctx = getPendingReturn();
+    if (!ctx) return;
+    takePendingReturn();
+    if (!ctx.returning) return;
+    panelMemo.current = { expanded: ctx.expanded, scroll: ctx.scroll };
+    setPanelDest(ctx.dest);
+  }, []);
 
   const detailView = useMemo(() => model?.docs.find((d) => d.doc.id === detail?.docId) ?? null, [model, detail]);
   const supplierView = useMemo(() => model?.suppliers.find((s) => s.nit === supplierNit) ?? null, [model, supplierNit]);
@@ -66,18 +82,39 @@ export default function PurchasesPage() {
     }
   }
 
-  function resolve(alert: AlertItem) {
+  /**
+   * Abre el dato que causa la alerta. `fromPanel`: el panel se oculta mientras se edita y reaparece al cerrar el editor (no se
+   * cambia de pestaña); si el dato vive en otro módulo, se guarda la ruta de regreso al panel.
+   */
+  function resolve(alert: AlertItem, fromPanel = false) {
     const t = alert.target;
+    const leave = (extra: { openCompanyNit?: string; companyTab?: "fiscal" } = {}) => {
+      if (fromPanel && panelDest && model) {
+        setPendingReturn({ dest: panelDest, buyerNit: model.buyerNit, year: model.year, companyName: data.company?.razonSocial ?? `NIT ${model.buyerNit}`, scroll: panelMemo.current.scroll, expanded: panelMemo.current.expanded, ...extra });
+        setPanelDest(null);
+      }
+    };
     if (t.kind === "document") setDetail({ docId: t.docId, line: null });
     else if (t.kind === "line") setDetail({ docId: t.docId, line: t.lineIndex });
     else if (t.kind === "supplier") {
-      setTab("suppliers");
+      if (!fromPanel) setTab("suppliers");
       setSupplierNit(t.nit);
-    } else if (t.kind === "company") navigate(paths.companies);
-    else if (t.kind === "title") setTab("docs");
-    else if (t.kind === "concept") navigate(paths.exogenaCatalogs);
-    else if (t.kind === "upload") setTab("uploads");
+    } else if (t.kind === "company") {
+      leave({ openCompanyNit: t.nit, companyTab: "fiscal" });
+      navigate(paths.companies);
+    } else if (t.kind === "title") {
+      if (fromPanel) setTitleAsk({ titleKey: t.titleKey, title: t.title });
+      else setTab("docs");
+    } else if (t.kind === "concept") {
+      leave();
+      navigate(paths.exogenaCatalogs);
+    } else if (t.kind === "upload") setTab("uploads");
   }
+
+  const openPanel = (d: Dest) => {
+    panelMemo.current = { expanded: [], scroll: 0 };
+    setPanelDest(d);
+  };
 
   const scopeOptions = (scopes ?? []).map((s) => ({ key: scopeKey(s.buyerNit, s.year), s, label: `${(fs.companies && findCompanyByNit(fs.companies, s.buyerNit)?.razonSocial) || `NIT ${s.buyerNit}`} · ${s.year ?? "Sin fecha"} (${s.current} ${s.current === 1 ? "factura" : "facturas"})` }));
   const current = scopeKey(selection.buyerNit ?? "", selection.year);
@@ -131,23 +168,26 @@ export default function PurchasesPage() {
       ) : !model ? (
         <Loader />
       ) : (
-        <Body data={data} model={model} tab={tab} setTab={setTab} destFilter={destFilter} setDestFilter={setDestFilter} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} onResolve={resolve} onOpen={(docId) => setDetail({ docId, line: null })} onSupplier={setSupplierNit} />
+        <Body data={data} model={model} tab={tab} setTab={setTab} onSelectDest={openPanel} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} onResolve={resolve} onOpen={(docId) => setDetail({ docId, line: null })} onSupplier={setSupplierNit} />
       )}
 
       <ImportModal data={data} pending={pending} onClose={() => setPending(null)} />
       <DocDetailModal data={data} view={detailView} focusLine={detail?.line} onClose={() => setDetail(null)} />
       <SupplierEditorModal data={data} supplier={supplierView} onClose={() => setSupplierNit(null)} />
+      {titleAsk && <TitleClassifyModal data={data} titleKey={titleAsk.titleKey} title={titleAsk.title} onClose={() => setTitleAsk(null)} />}
+      {model && panelDest && panelVisible({ panelDest, editing: detail !== null || supplierNit !== null || titleAsk !== null }) && (
+        <PendingPanel model={model} dest={panelDest} companyName={data.company?.razonSocial ?? `NIT ${model.buyerNit}`} memo={panelMemo} onClose={() => setPanelDest(null)} onResolve={(a) => resolve(a, true)} />
+      )}
     </>
   );
 }
 
-function Body({ data, model, tab, setTab, destFilter, setDestFilter, filter, setFilter, search, setSearch, onResolve, onOpen, onSupplier }: {
+function Body({ data, model, tab, setTab, onSelectDest, filter, setFilter, search, setSearch, onResolve, onOpen, onSupplier }: {
   data: PurchasesData;
   model: PurchasesModel;
   tab: TabId;
   setTab: (t: TabId) => void;
-  destFilter: Dest | null;
-  setDestFilter: (d: Dest | null) => void;
+  onSelectDest: (d: Dest) => void;
   filter: DocFilter;
   setFilter: (f: DocFilter) => void;
   search: string;
@@ -160,7 +200,7 @@ function Body({ data, model, tab, setTab, destFilter, setDestFilter, filter, set
   const blocking = model.alerts.filter((a) => (a.severity === "block" || a.severity === "pending") && a.dests.length).length;
   return (
     <>
-      <StatusStrip counts={model.counts} status={model.status} notApplicable={model.notApplicable} onSelect={(d) => setDestFilter(destFilter === d ? null : d)} />
+      <StatusStrip counts={model.counts} status={model.status} notApplicable={model.notApplicable} onSelect={onSelectDest} />
       <MetricBar
         label="Resumen de compras"
         metrics={[
@@ -195,7 +235,7 @@ function Body({ data, model, tab, setTab, destFilter, setDestFilter, filter, set
         {tab === "summary" && (
           <div className="stack">
             <CoverageCard model={model} />
-            <AlertsPanel alerts={model.alerts.filter((a) => a.severity !== "info" || !destFilter)} dest={destFilter} onResolve={onResolve} />
+            <AlertsPanel alerts={model.alerts} onResolve={onResolve} />
             {model.alerts.length === 0 && <Alert tone="success">Sin pendientes para esta empresa y año.</Alert>}
           </div>
         )}

@@ -26,6 +26,8 @@ interface Props {
   initial?: Partial<CompanyInput>;
   /** Tras crear, la ficha sigue abierta (para agregar socios) en vez de cerrarse. */
   keepOpenOnCreate?: boolean;
+  /** Pestaña con la que abre una empresa existente (por defecto «Resumen y documentos»). */
+  initialTab?: CompanyTab;
   onClose: () => void;
   onSaved: (company: Company) => void;
 }
@@ -40,7 +42,7 @@ const toInput = (company: Company): CompanyInput => {
  * cuatro pestañas que comparten un único borrador, así que cambiar de pestaña no pierde nada. Una empresa nueva empieza en
  * «Resumen y documentos»; los socios se habilitan tras el primer guardado.
  */
-export function CompanyFormModal({ open, company: companyProp, initial, keepOpenOnCreate, onClose, onSaved }: Props) {
+export function CompanyFormModal({ open, company: companyProp, initial, keepOpenOnCreate, initialTab, onClose, onSaved }: Props) {
   const toast = useToast();
   const [company, setCompany] = useState<Company | null>(companyProp);
   const [values, setValues] = useState<CompanyInput>(EMPTY_COMPANY_INPUT);
@@ -64,7 +66,7 @@ export function CompanyFormModal({ open, company: companyProp, initial, keepOpen
     setCompany(companyProp);
     setValues(start);
     setBaseline(start);
-    setTab("resumen");
+    setTab(companyProp && initialTab ? initialTab : "resumen");
     setErrors({});
     setBlockers([]);
     setError(null);
