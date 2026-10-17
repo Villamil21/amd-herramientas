@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.38.2",
+    "date": "2026-10-17",
+    "notes": [
+      "Compras: al volver a importar exactamente la misma carpeta, la app avisa antes de guardar y ofrece Cancelar o «Reemplazar carga existente». Reemplazar no crea facturas, duplicados ni evidencias y conserva las clasificaciones, confirmaciones y decisiones; cobertura, conteos, Estados Financieros y Exógena no cambian.",
+      "Compras: si la carpeta tiene cambios reales, las facturas con el mismo contenido que una vigente ya no generan filas «Duplicada (evidencia)»; solo las facturas efectivamente distintas piden decisión."
+    ]
+  },
+  {
     "version": "1.38.1",
     "date": "2026-10-17",
     "notes": [

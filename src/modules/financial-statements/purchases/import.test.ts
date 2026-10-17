@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedPurchase } from "../../../types/purchases";
-import { planFolder, toDocInput, uploadFor, type ReadResult } from "./import";
+import { folderFingerprints, planFolder, replaceFilesOf, toDocInput, uploadFor, type ReadResult } from "./import";
 
 const parsed = (buyerNit: string | undefined, number: string, date = "2025-03-10"): ParsedPurchase => ({
   pageCount: 1,
@@ -43,5 +43,28 @@ describe("planFolder", () => {
     expect(main.summary.exceptions).toEqual([{ fileName: "c.pdf", buyerNit: "902" }]);
     const other = uploadFor("carpeta", "902", plan.others[0].files, plan, false);
     expect(other.summary.exceptions).toBeUndefined();
+  });
+});
+
+describe("misma carpeta importada otra vez", () => {
+  const folder = (names: string[]) => planFolder(names.map((n, i) => ok(n, parsed("901", `F${i + 1}`)))).main;
+
+  it("las huellas del conjunto no dependen del nombre de los archivos: la misma carpeta renombrada coincide", () => {
+    const a = folderFingerprints(folder(["a.pdf", "b.pdf", "c.pdf"]));
+    const b = folderFingerprints(folder(["x.pdf", "y.pdf", "z.pdf"]));
+    expect(b).toEqual(a);
+  });
+
+  it("una carpeta con un cambio real tiene otro conjunto y solo cambia esa huella", () => {
+    const a = folderFingerprints(folder(["a.pdf", "b.pdf", "c.pdf"]));
+    const changed = planFolder([ok("a.pdf", parsed("901", "F1")), ok("b.pdf", { ...parsed("901", "F2"), totalCents: 9999 }), ok("c.pdf", parsed("901", "F3"))]).main;
+    const b = folderFingerprints(changed);
+    expect(b.filter((fp, i) => fp !== a[i])).toHaveLength(1);
+    expect(b[1]).not.toBe(a[1]);
+  });
+
+  it("al reemplazar solo viajan el nombre del archivo y la huella de su contenido", () => {
+    const files = folder(["a.pdf", "b.pdf"]);
+    expect(replaceFilesOf(files)).toEqual([{ fileName: "a.pdf", fingerprint: files[0].fingerprint }, { fileName: "b.pdf", fingerprint: files[1].fingerprint }]);
   });
 });

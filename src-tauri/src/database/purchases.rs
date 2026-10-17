@@ -160,6 +160,26 @@ pub struct SavedDocument {
 pub struct SavePurchaseUploadOutcome {
     pub upload_id: i64,
     pub documents: Vec<SavedDocument>,
+    /// Facturas que ya estaban vigentes con exactamente el mismo contenido (otra carga): no se vuelven a guardar ni crean evidencia.
+    pub unchanged: i64,
+}
+
+/// Carga vigente cuyo conjunto de facturas coincide exactamente con el de una carpeta nueva.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IdenticalUpload {
+    pub upload_id: i64,
+    pub folder_name: String,
+    pub imported_at: String,
+    pub document_count: i64,
+}
+
+/// Archivo de la carpeta nueva al reemplazar una carga idéntica: solo su nombre y la huella de su contenido.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceFile {
+    pub file_name: String,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -375,27 +395,35 @@ pub fn save_upload(conn: &mut Connection, input: &SavePurchaseUploadInput) -> Ap
     )?;
     let upload_id = tx.last_insert_rowid();
     let mut saved = Vec::new();
+    let mut unchanged = 0_i64;
     let mut touched: std::collections::BTreeMap<(String, Option<i64>), (i64, i64)> = Default::default();
     for f in &input.files {
-        let current: Option<(i64, Option<String>, Option<i64>)> = if !f.number_key.is_empty() {
+        let current: Option<(i64, Option<String>, Option<i64>, String, i64)> = if !f.number_key.is_empty() {
             tx.query_row(
-                "SELECT id, issue_date, total_cents FROM purchase_documents WHERE buyer_nit = ?1 AND issuer_nit = ?2 AND number_key = ?3 AND status = 'current' ORDER BY id LIMIT 1",
+                "SELECT id, issue_date, total_cents, fingerprint, upload_id FROM purchase_documents WHERE buyer_nit = ?1 AND issuer_nit = ?2 AND number_key = ?3 AND status = 'current' ORDER BY id LIMIT 1",
                 params![f.buyer_nit, f.issuer_nit, f.number_key],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?
         } else if let Some(cufe) = f.cufe.as_ref().filter(|c| !c.is_empty()) {
             tx.query_row(
-                "SELECT id, issue_date, total_cents FROM purchase_documents WHERE buyer_nit = ?1 AND cufe = ?2 AND status = 'current' ORDER BY id LIMIT 1",
+                "SELECT id, issue_date, total_cents, fingerprint, upload_id FROM purchase_documents WHERE buyer_nit = ?1 AND cufe = ?2 AND status = 'current' ORDER BY id LIMIT 1",
                 params![f.buyer_nit, cufe],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?
         } else {
             None
         };
+        // Mismo contenido que una factura vigente de una carga anterior: no hay nada que decidir ni que guardar.
+        if let Some((_, _, _, fp, up)) = &current {
+            if *up != upload_id && *fp == f.fingerprint {
+                unchanged += 1;
+                continue;
+            }
+        }
         let (status, duplicate_of, same) = match &current {
-            Some((id, date, total)) => ("evidence", Some(*id), *date == f.issue_date && *total == f.total_cents),
+            Some((id, date, total, _, _)) => ("evidence", Some(*id), *date == f.issue_date && *total == f.total_cents),
             None => ("current", None, false),
         };
         tx.execute(
@@ -418,8 +446,77 @@ pub fn save_upload(conn: &mut Connection, input: &SavePurchaseUploadInput) -> Ap
     for ((nit, year), (count, duplicates)) in touched {
         audit(&tx, &nit, year, "import", &serde_json::json!({ "folder": input.folder_name.trim(), "documents": count, "duplicates": duplicates }))?;
     }
+    if saved.is_empty() {
+        // Todo era idéntico a lo vigente: no queda ni una carga vacía (se descarta la transacción).
+        return Ok(SavePurchaseUploadOutcome { upload_id: 0, documents: saved, unchanged });
+    }
     tx.commit()?;
-    Ok(SavePurchaseUploadOutcome { upload_id, documents: saved })
+    Ok(SavePurchaseUploadOutcome { upload_id, documents: saved, unchanged })
+}
+
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v
+}
+
+/// Carga vigente (con al menos una factura vigente) del mismo comprador cuyo conjunto de huellas es exactamente el de la carpeta nueva.
+pub fn find_identical_upload(conn: &Connection, buyer_nit: &str, fingerprints: &[String]) -> AppResult<Option<IdenticalUpload>> {
+    if fingerprints.is_empty() {
+        return Ok(None);
+    }
+    let wanted = sorted(fingerprints.to_vec());
+    let mut stmt = conn.prepare(
+        "SELECT u.id, u.folder_name, u.imported_at FROM purchase_uploads u
+         WHERE u.buyer_nit = ?1 AND EXISTS (SELECT 1 FROM purchase_documents d WHERE d.upload_id = u.id AND d.status = 'current') ORDER BY u.id",
+    )?;
+    let uploads: Vec<(i64, String, String)> = stmt.query_map([buyer_nit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+    for (id, folder_name, imported_at) in uploads {
+        let have = sorted(conn.prepare("SELECT fingerprint FROM purchase_documents WHERE upload_id = ?1")?.query_map([id], |r| r.get::<_, String>(0))?.collect::<Result<_, _>>()?);
+        if have == wanted {
+            return Ok(Some(IdenticalUpload { upload_id: id, folder_name, imported_at, document_count: have.len() as i64 }));
+        }
+    }
+    Ok(None)
+}
+
+/// Reemplaza una carga idéntica: actualiza el nombre de la carpeta y de los archivos sobre las MISMAS facturas. No crea facturas,
+/// evidencias ni cargas, así que clasificaciones, confirmaciones, reglas y banderas siguen donde estaban y nada cambia en cobertura,
+/// conteos, Estados Financieros ni Exógena.
+pub fn replace_identical_upload(conn: &mut Connection, upload_id: i64, folder_name: &str, files: &[ReplaceFile]) -> AppResult<i64> {
+    if folder_name.trim().is_empty() {
+        return Err(AppError::user("La carpeta no tiene nombre."));
+    }
+    let tx = conn.transaction()?;
+    let buyer_nit: String = tx
+        .query_row("SELECT buyer_nit FROM purchase_uploads WHERE id = ?1", [upload_id], |r| r.get(0))
+        .optional()?
+        .ok_or_else(|| AppError::user("La carga ya no existe."))?;
+    let fingerprints: Vec<String> = files.iter().map(|f| f.fingerprint.clone()).collect();
+    if find_identical_upload(&tx, &buyer_nit, &fingerprints)?.map(|u| u.upload_id) != Some(upload_id) {
+        return Err(AppError::user("La carpeta ya no coincide con la carga existente. Vuelve a importarla."));
+    }
+    let mut by_fp: std::collections::HashMap<String, Vec<i64>> = Default::default();
+    {
+        let mut stmt = tx.prepare("SELECT id, fingerprint FROM purchase_documents WHERE upload_id = ?1 ORDER BY id")?;
+        for row in stmt.query_map([upload_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+            let (id, fp) = row?;
+            by_fp.entry(fp).or_default().push(id);
+        }
+    }
+    for f in files {
+        let id = by_fp.get_mut(&f.fingerprint).filter(|v| !v.is_empty()).map(|v| v.remove(0)).ok_or_else(|| AppError::user("La carga no coincide."))?;
+        tx.execute("UPDATE purchase_documents SET file_name = ?1 WHERE id = ?2", params![f.file_name, id])?;
+    }
+    tx.execute("UPDATE purchase_uploads SET folder_name = ?1, file_count = ?2, imported_at = ?3 WHERE id = ?4", params![folder_name.trim(), files.len() as i64, now_iso(), upload_id])?;
+    let scopes: Vec<(Option<i64>, i64)> = tx
+        .prepare("SELECT year, COUNT(*) FROM purchase_documents WHERE upload_id = ?1 GROUP BY year")?
+        .query_map([upload_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (year, count) in scopes {
+        audit(&tx, &buyer_nit, year, "reimport_identical", &serde_json::json!({ "folder": folder_name.trim(), "documents": count }))?;
+    }
+    tx.commit()?;
+    Ok(files.len() as i64)
 }
 
 /// Sustituye el documento vigente por una evidencia (autorización explícita del usuario). Las líneas del nuevo quedan «Por confirmar».
@@ -724,6 +821,115 @@ mod tests {
         let scopes = list_scopes(&c).unwrap();
         let s2026 = scopes.iter().find(|s| s.year == Some(2026)).unwrap();
         assert_eq!((s2026.documents, s2026.current, s2026.evidence, s2026.uploads), (3, 1, 2, 2));
+    }
+
+    fn folder() -> Vec<PurchaseDocFileInput> {
+        vec![file("a.pdf", "COFE1", "2026-05-10", 1000), file("b.pdf", "COFE2", "2026-05-11", 500), file("c.pdf", "COFE3", "2025-12-31", 700)]
+    }
+    fn fps(files: &[PurchaseDocFileInput]) -> Vec<String> {
+        files.iter().map(|f| f.fingerprint.clone()).collect()
+    }
+    fn classify(c: &mut Connection, document_id: i64) {
+        save_line_classes(c, &[LineClassInput { document_id, line_index: 0, puc_code: "613505".into(), concept_1001: "5004".into(), retention: Value::Null, save_rule: false, supplier_nit: String::new(), product_key: String::new(), product_label: String::new() }]).unwrap();
+    }
+    fn counts(c: &Connection) -> (i64, i64, i64, i64) {
+        let n = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        (n("SELECT COUNT(*) FROM purchase_uploads"), n("SELECT COUNT(*) FROM purchase_documents"), n("SELECT COUNT(*) FROM purchase_documents WHERE status = 'evidence'"), n("SELECT COUNT(*) FROM purchase_line_class"))
+    }
+
+    #[test]
+    fn identical_folder_is_detected_and_a_different_one_is_not() {
+        let mut c = db();
+        assert!(find_identical_upload(&c, "901748281", &fps(&folder())).unwrap().is_none(), "sin cargas previas no hay coincidencia");
+        let first = upload(&mut c, folder());
+        let found = find_identical_upload(&c, "901748281", &fps(&folder())).unwrap().expect("misma carpeta");
+        assert_eq!((found.upload_id, found.document_count), (first.upload_id, 3));
+        // El orden de los archivos no importa; otra empresa, un archivo de más o de menos o un contenido distinto, sí.
+        let mut shuffled = folder();
+        shuffled.reverse();
+        assert!(find_identical_upload(&c, "901748281", &fps(&shuffled)).unwrap().is_some());
+        assert!(find_identical_upload(&c, "900000000", &fps(&folder())).unwrap().is_none());
+        assert!(find_identical_upload(&c, "901748281", &fps(&folder()[..2])).unwrap().is_none());
+        let mut changed = folder();
+        changed[1].fingerprint = "otra-huella".into();
+        assert!(find_identical_upload(&c, "901748281", &fps(&changed)).unwrap().is_none());
+    }
+
+    #[test]
+    fn replacing_an_identical_upload_creates_nothing_and_keeps_every_decision() {
+        let mut c = db();
+        let first = upload(&mut c, folder());
+        let ids: Vec<i64> = first.documents.iter().map(|d| d.id).collect();
+        classify(&mut c, ids[0]);
+        set_doc_flag(&c, ids[1], "exclude", "1").unwrap();
+        let before = counts(&c);
+        let scopes_before = list_scopes(&c).unwrap();
+        let state_before = state(&c, "901748281", Some(2026)).unwrap();
+
+        // Misma carpeta con otro nombre y archivos renombrados (mismo contenido).
+        let mut again = folder();
+        for (i, f) in again.iter_mut().enumerate() {
+            let fp = f.fingerprint.clone();
+            f.file_name = format!("copia-{i}.pdf");
+            f.fingerprint = fp;
+        }
+        let up = find_identical_upload(&c, "901748281", &fps(&again)).unwrap().unwrap();
+        let rf: Vec<ReplaceFile> = again.iter().map(|f| ReplaceFile { file_name: f.file_name.clone(), fingerprint: f.fingerprint.clone() }).collect();
+        replace_identical_upload(&mut c, up.upload_id, "Mayo (revisada)", &rf).unwrap();
+
+        assert_eq!(counts(&c), before, "ni cargas, ni facturas, ni evidencias, ni clasificaciones nuevas");
+        assert_eq!(list_scopes(&c).unwrap(), scopes_before, "cobertura y conteos por empresa y año no cambian");
+        let after = state(&c, "901748281", Some(2026)).unwrap();
+        assert_eq!(after.documents.iter().map(|d| (d.id, d.status.clone(), d.fingerprint.clone())).collect::<Vec<_>>(), state_before.documents.iter().map(|d| (d.id, d.status.clone(), d.fingerprint.clone())).collect::<Vec<_>>());
+        assert_eq!(after.line_classes, state_before.line_classes, "la clasificación confirmada se conserva");
+        assert_eq!(after.flags, state_before.flags, "las decisiones sobre la factura se conservan");
+        assert_eq!(after.uploads[0].folder_name, "Mayo (revisada)");
+        assert!(after.documents.iter().any(|d| d.file_name == "copia-0.pdf"));
+        assert!(after.audit.iter().any(|a| a.event == "reimport_identical"));
+    }
+
+    #[test]
+    fn replacing_requires_the_set_to_still_match() {
+        let mut c = db();
+        let first = upload(&mut c, folder());
+        let mut changed: Vec<ReplaceFile> = folder().iter().map(|f| ReplaceFile { file_name: f.file_name.clone(), fingerprint: f.fingerprint.clone() }).collect();
+        changed[0].fingerprint = "distinta".into();
+        assert!(replace_identical_upload(&mut c, first.upload_id, "X", &changed).is_err());
+        assert_eq!(counts(&c).1, 3);
+    }
+
+    #[test]
+    fn partially_modified_folder_only_asks_about_the_documents_that_really_changed() {
+        let mut c = db();
+        let first = upload(&mut c, folder());
+        classify(&mut c, first.documents[0].id);
+        let before = counts(&c);
+        // a.pdf y c.pdf no cambian; b.pdf trae otro total (nueva huella) y d.pdf es una factura nueva.
+        let mut next = folder();
+        next[1].total_cents = Some(600);
+        next[1].fingerprint = "fp-b-v2".into();
+        next.push(file("d.pdf", "COFE4", "2026-05-12", 900));
+        assert!(find_identical_upload(&c, "901748281", &fps(&next)).unwrap().is_none(), "con cambios reales no es una carga idéntica");
+        let out = upload(&mut c, next);
+
+        assert_eq!(out.unchanged, 2, "a.pdf y c.pdf no se vuelven a guardar");
+        assert_eq!(out.documents.len(), 2);
+        let b = out.documents.iter().find(|d| d.file_name == "b.pdf").unwrap();
+        assert_eq!((b.status.as_str(), b.same_content), ("evidence", false), "la factura distinta sí queda para decidir");
+        assert_eq!(out.documents.iter().find(|d| d.file_name == "d.pdf").unwrap().status, "current");
+        let after = counts(&c);
+        assert_eq!((after.1 - before.1, after.2 - before.2), (2, 1), "solo la distinta (evidencia) y la nueva");
+        assert_eq!(after.3, before.3, "la clasificación de las intactas no se toca");
+    }
+
+    #[test]
+    fn a_folder_whose_invoices_are_all_unchanged_leaves_no_trace() {
+        let mut c = db();
+        upload(&mut c, folder());
+        let before = counts(&c);
+        let out = upload(&mut c, folder());
+        assert_eq!((out.upload_id, out.unchanged, out.documents.len()), (0, 3, 0));
+        assert_eq!(counts(&c), before);
     }
 
     #[test]

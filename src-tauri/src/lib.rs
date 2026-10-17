@@ -229,6 +229,8 @@ pub fn run() {
             commands::purchases::get_purchases_state,
             commands::purchases::list_purchase_scopes,
             commands::purchases::save_purchase_upload,
+            commands::purchases::find_identical_purchase_upload,
+            commands::purchases::replace_identical_purchase_upload,
             commands::purchases::substitute_purchase_document,
             commands::purchases::save_purchase_line_classes,
             commands::purchases::delete_purchase_line_class,

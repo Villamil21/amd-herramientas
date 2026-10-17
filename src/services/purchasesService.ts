@@ -13,6 +13,8 @@ import type {
   RuleHistory,
   SavePurchaseUploadInput,
   SavePurchaseUploadOutcome,
+  IdenticalUpload,
+  ReplaceFile,
   SupplierFiscalEntry,
   TitleKind,
   TitleType,
@@ -27,6 +29,10 @@ export const purchasesService = {
   state: (buyerNit: string, year: number | null) => call<PurchasesState>("get_purchases_state", { buyerNit, year }),
   scopes: () => call<PurchaseScope[]>("list_purchase_scopes"),
   saveUpload: (input: SavePurchaseUploadInput) => call<SavePurchaseUploadOutcome>("save_purchase_upload", { input }),
+  /** Carga vigente de la empresa con exactamente el mismo conjunto de facturas (por huella de contenido), si existe. */
+  findIdenticalUpload: (buyerNit: string, fingerprints: string[]) => call<IdenticalUpload | null>("find_identical_purchase_upload", { buyerNit, fingerprints }),
+  /** Reemplaza esa carga: solo cambia el nombre de la carpeta y de los archivos; no crea facturas, evidencias ni cargas. */
+  replaceIdenticalUpload: (uploadId: number, folderName: string, files: ReplaceFile[]) => call<number>("replace_identical_purchase_upload", { uploadId, folderName, files }),
   /** Sustituye la factura vigente por esta versión duplicada (autorización explícita; la anterior queda como evidencia). */
   substitute: (id: number) => call<void>("substitute_purchase_document", { id }),
   saveLineClasses: (inputs: LineClassInput[]) => call<void>("save_purchase_line_classes", { inputs }),

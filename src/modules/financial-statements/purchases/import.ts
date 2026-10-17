@@ -1,5 +1,5 @@
 import { call, errorMessage } from "../../../services/tauri";
-import type { ParsedPurchase, PurchaseDocFileInput, SavePurchaseUploadInput, UploadSummary } from "../../../types/purchases";
+import type { ParsedPurchase, PurchaseDocFileInput, ReplaceFile, SavePurchaseUploadInput, UploadSummary } from "../../../types/purchases";
 import { normalizeKey } from "../../../utils/text";
 import { extractPdfText } from "../../bank-analysis/shared/pdf/pdfExtractor";
 import { StatementError } from "../../bank-analysis/shared/types";
@@ -144,3 +144,9 @@ export function uploadFor(folderName: string, buyerNit: string, files: PurchaseD
   };
   return { folderName, buyerNit, files, summary };
 }
+
+/** Huellas de contenido de la carpeta: con ellas se busca una carga vigente idéntica (no depende de nombres ni del orden). */
+export const folderFingerprints = (files: readonly PurchaseDocFileInput[]): string[] => files.map((f) => f.fingerprint);
+
+/** Nombre de cada archivo y huella de su contenido: lo único que cambia al reemplazar una carga idéntica. */
+export const replaceFilesOf = (files: readonly PurchaseDocFileInput[]): ReplaceFile[] => files.map((f) => ({ fileName: f.fileName, fingerprint: f.fingerprint }));

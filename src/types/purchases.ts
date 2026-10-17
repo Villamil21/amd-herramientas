@@ -196,6 +196,21 @@ export interface SavedPurchaseDocument {
 export interface SavePurchaseUploadOutcome {
   uploadId: number;
   documents: SavedPurchaseDocument[];
+  /** Facturas que ya estaban vigentes con el mismo contenido (otra carga): no se guardaron de nuevo. */
+  unchanged: number;
+}
+
+/** Carga vigente cuyo conjunto de facturas coincide exactamente con el de la carpeta que se va a importar. */
+export interface IdenticalUpload {
+  uploadId: number;
+  folderName: string;
+  importedAt: string;
+  documentCount: number;
+}
+
+export interface ReplaceFile {
+  fileName: string;
+  fingerprint: string;
 }
 
 export interface LineClassInput {

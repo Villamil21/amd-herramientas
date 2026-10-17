@@ -26,6 +26,16 @@ pub fn save_purchase_upload(db: State<'_, Db>, input: SavePurchaseUploadInput) -
 }
 
 #[tauri::command]
+pub fn find_identical_purchase_upload(db: State<'_, Db>, buyer_nit: String, fingerprints: Vec<String>) -> AppResult<Option<purchases::IdenticalUpload>> {
+    db.with(|c| purchases::find_identical_upload(c, &buyer_nit, &fingerprints))
+}
+
+#[tauri::command]
+pub fn replace_identical_purchase_upload(db: State<'_, Db>, upload_id: i64, folder_name: String, files: Vec<purchases::ReplaceFile>) -> AppResult<i64> {
+    db.with(|c| purchases::replace_identical_upload(c, upload_id, &folder_name, &files))
+}
+
+#[tauri::command]
 pub fn substitute_purchase_document(db: State<'_, Db>, id: i64) -> AppResult<()> {
     db.with(|c| purchases::substitute_document(c, id))
 }
