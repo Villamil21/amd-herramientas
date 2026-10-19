@@ -17,6 +17,8 @@ import { maskAccount, monthText, type BankAccountCoverage, type BankCell, type B
 import type { LineValue, StatementRow } from "./engine";
 import { BankLifecycleModal, lifecycleText } from "../bank/BankLifecycleModal";
 import { formatDateForDisplay } from "../../../utils/dates";
+import type { CryptoMonthCell } from "../crypto/coverageSource";
+import { openCryptoMonth } from "../crypto/selection";
 
 /** Estado en la app: valores al millar (como en el PDF) y, al abrir una línea, el exacto y su origen por PUC. */
 export function StatementView({ title, rows, lines }: { title: string; rows: StatementRow[]; lines: Map<number, LineValue> }) {
@@ -108,6 +110,7 @@ export function CoverageTable({
   cut,
   companyId,
   onLifecycleChanged,
+  cryptoOps,
 }: {
   months: string[];
   rows: CoverageRow[];
@@ -117,6 +120,8 @@ export function CoverageTable({
   cut?: string;
   companyId?: number | null;
   onLifecycleChanged?: () => void | Promise<unknown>;
+  /** Reporte de operaciones (Transacciones Cripto) por mes; clic en un mes abre ese módulo con empresa, año y mes. */
+  cryptoOps?: Record<string, CryptoMonthCell>;
 }) {
   const [selected, setSelected] = useState<CoverageSelection | null>(null);
   const [editing, setEditing] = useState<BankAccountCoverage | null>(null);
@@ -149,6 +154,37 @@ export function CoverageTable({
         </td>
       );
     });
+
+  const cryptoOpsRow = () => {
+    const cells = cryptoOps ?? {};
+    const missing = months.filter((m) => !cells[m]?.loaded);
+    return (
+      <tr key="crypto-ops">
+        <td>
+          Reporte de operaciones
+          {missing.length > 0 && missing.length < months.length && <div className="table__secondary">Faltan: {missing.map(monthName).join(", ")}</div>}
+        </td>
+        {months.map((m) => {
+          const c = cells[m];
+          const loaded = !!c?.loaded;
+          return (
+            <td key={m} style={{ textAlign: "center" }}>
+              <button
+                type="button"
+                className={`fs-coverage__cell ${loaded ? "is-loaded" : ""}`}
+                disabled={companyId == null}
+                onClick={() => companyId != null && openCryptoMonth(companyId, m)}
+                title={c?.pending ? `${plural(c.pending, "fila pendiente", "filas pendientes")} de resolver` : undefined}
+                aria-label={`Reporte de operaciones ${periodLabel(m)}: ${loaded ? "cargado" : "falta"}. Abrir Reporte de operaciones de ${monthText(m)}`}
+              >
+                {loaded ? <Check size={14} /> : <Minus size={14} />}
+              </button>
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
 
   const finalMonth = months[months.length - 1];
   /** `balancePending`: la cuenta no tiene saldo del mes final (el ESF queda pendiente). */
@@ -379,7 +415,10 @@ export function CoverageTable({
           <tbody>
             {rows.map((r) =>
               r.bank ? (
-                <Fragment key={r.source}>{bankRows(r, r.bank)}</Fragment>
+                <Fragment key={r.source}>
+                  {bankRows(r, r.bank)}
+                  {cryptoOpsRow()}
+                </Fragment>
               ) : (
                 <tr key={r.source}>
                   <td>
@@ -393,6 +432,7 @@ export function CoverageTable({
                 </tr>
               ),
             )}
+            {!rows.some((r) => r.bank) && cryptoOpsRow()}
             {tax && taxRows(tax)}
           </tbody>
         </table>

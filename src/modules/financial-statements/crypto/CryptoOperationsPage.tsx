@@ -13,7 +13,7 @@ import type { CryptoModel } from "./domain/model";
 import { COMPONENT_LABEL, PUC_KEYS, type ComponentKey } from "./domain/eeff";
 import { CryptoFormatError, parseCryptoWorkbook, type ParsedCryptoWorkbook } from "./domain/parse";
 import { blocking } from "./domain/problems";
-import { selectableYears, useCryptoSelection } from "./selection";
+import { selectableYears, useCryptoMonthFocus, useCryptoSelection } from "./selection";
 import { CoverageModal } from "./ui/CoverageModal";
 import { EeffTab } from "./ui/EeffTab";
 import { ExogenaTab } from "./ui/ExogenaTab";
@@ -39,6 +39,9 @@ const pendingRowsOf = (model: CryptoModel, key: "duplicatesPending" | "outOfYear
 export default function CryptoOperationsPage() {
   const toast = useToast();
   const [selection, select] = useCryptoSelection();
+  const [focusMonth, clearFocus] = useCryptoMonthFocus();
+  // El filtro mensual solo vale para la empresa y el año con que se abrió.
+  const month = focusMonth && Number(focusMonth.slice(0, 4)) === selection.year ? focusMonth : null;
   const data = useCryptoData(selection.companyId, selection.year);
   const { fs, company, state, model } = data;
   useExoFormatGuard(selection.companyId, model);
@@ -92,10 +95,10 @@ export default function CryptoOperationsPage() {
       />
       <ContextBar items={[{ label: "Empresa", value: company?.razonSocial ?? "—" }, { label: "Año", value: String(selection.year) }, { label: "Corte", value: model?.settings.cutoff ?? "—" }]}>
         <div className="bank-head__fields">
-          <CompanySelect companies={fs.companies} value={selection.companyId} onChange={(id) => select({ companyId: id })} />
+          <CompanySelect companies={fs.companies} value={selection.companyId} onChange={(id) => (clearFocus(), select({ companyId: id }))} />
           <Field label="Año del reporte" required>
             {(id) => (
-              <Select id={id} value={selection.year} onChange={(e) => select({ year: Number(e.target.value) })}>
+              <Select id={id} value={selection.year} onChange={(e) => (clearFocus(), select({ year: Number(e.target.value) }))}>
                 {selectableYears().map((y) => (
                   <option key={y} value={y}>
                     {y}
@@ -156,7 +159,7 @@ export default function CryptoOperationsPage() {
             ]}
           />
           <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} key={`${tab}-${sentKey}`}>
-            {tab === "operations" && <OperationsTab data={data} model={model} onDetail={setDetail} onCoverage={setCoverageFor} />}
+            {tab === "operations" && <OperationsTab data={data} model={model} onDetail={setDetail} onCoverage={setCoverageFor} month={month} onClearMonth={clearFocus} />}
             {tab === "eeff" && <EeffTab data={data} model={model} companyId={selection.companyId!} year={selection.year} sync={eeffSync} onSent={() => { void eeffSync.reload(); setSentKey((k) => k + 1); }} onPuc={() => setPucOpen(true)} />}
             {tab === "exogena" && <ExogenaTab data={data} model={model} companyId={selection.companyId!} />}
           </div>

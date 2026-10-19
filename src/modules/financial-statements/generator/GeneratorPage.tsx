@@ -25,7 +25,7 @@ import { formatInteger } from "../../../utils/format";
 import { areaFor } from "../payroll/calc";
 import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
-import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, roundThousands } from "../shared/money";
+import { fingerprint, formatExactCents, formatIsoDate, formatStatementPesos, isIsoDate, monthsBetween, roundThousands } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
 import { taxService } from "../tax-obligations/services/taxService";
 import { CAPITAL_RECEIVABLE_KEY, type TaxType } from "../tax-obligations/types";
@@ -36,6 +36,7 @@ import type { TaxEmptyPeriod, TaxReturn, VatPeriodicity } from "../tax-obligatio
 import { PurchasesFsStrip } from "../purchases/ui/PurchasesFsStrip";
 import { cryptoOutsideRange, liveMovements, staleCryptoYears } from "../crypto/eeffBatch";
 import { useCryptoData } from "../crypto/useCryptoData";
+import { useCryptoOpsCoverage } from "../crypto/coverageSource";
 import { useEeffAutoSync } from "../crypto/useEeffAutoSync";
 import { ACCOUNTING_LABEL, ACCOUNTING_PRESENTATIONS, engineView, isAccountingPresentation, type AccountingPresentation } from "../shared/accountingPresentation";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
@@ -224,6 +225,8 @@ export default function GeneratorPage() {
     return { coverage: cov, tax: taxCoverage(cov.months, ledger.taxReturns, ledger.vatPeriodicity, end, ledger.taxEmpty), duplicates: activeDuplicates(ledger.movements), absences, withoutArea };
   }, [ledger, start, end, rangeOk]);
 
+  const coverageMonths = useMemo(() => (rangeOk ? monthsBetween(start, end) : []), [rangeOk, start, end]);
+  const cryptoOpsCells = useCryptoOpsCoverage(companyId !== null && rangeOk ? companyId : null, coverageMonths, crypto.homologations, crypto.catalogs, cryptoSync.batch?.id);
   const cryptoStale = useMemo(() => (ledger && rangeOk ? staleCryptoYears(ledger.batches).filter((c) => c.year >= Number(start.slice(0, 4)) && c.year <= Number(end.slice(0, 4))) : []), [ledger, rangeOk, start, end]);
   const cryptoOutside = useMemo(() => (ledger && rangeOk ? cryptoOutsideRange(ledger.batches, start, end) : []), [ledger, rangeOk, start, end]);
   const cryptoSyncing = cryptoSync.state === "update" || cryptoSync.updating;
@@ -609,7 +612,7 @@ export default function GeneratorPage() {
 
           <Card
             title={<StepTitle n={6}>Fuentes del periodo y cobertura mensual</StepTitle>}
-            description="✓ con información · — sin información · 1/2 cuentas con extracto · N/A cuenta aún no abierta o ya cerrada. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos."
+            description="✓ con información · — sin información (incluye Reporte de operaciones) · 1/2 cuentas con extracto · N/A cuenta aún no abierta o ya cerrada. Los extractos se despliegan por banco y cuenta. Clic en un mes para ver sus importaciones y reemplazos."
           >
             <CoverageTable
               months={review.coverage.months}
@@ -619,6 +622,7 @@ export default function GeneratorPage() {
               cut={end}
               companyId={companyId}
               onLifecycleChanged={loadLedger}
+              cryptoOps={cryptoOpsCells}
             />
           </Card>
 

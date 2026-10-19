@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.38.9",
+    "date": "2026-10-19",
+    "notes": [
+      "Estados Financieros: la tabla «Fuentes del periodo y cobertura mensual» tiene la fila «Reporte de operaciones», que lee las cargas reales de Transacciones cripto por empresa y año: ✓ en los meses con operaciones cargadas y — en los demás, también cuando aún no hay ningún reporte. Al hacer clic en un mes se abre Reporte de operaciones con la misma empresa, año y mes, mostrando solo los archivos de ese mes (con «Quitar filtro»)."
+    ]
+  },
+  {
     "version": "1.38.8",
     "date": "2026-10-19",
     "notes": [

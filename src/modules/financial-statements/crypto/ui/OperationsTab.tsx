@@ -14,10 +14,13 @@ interface Props {
   model: CryptoModel;
   onDetail: (u: CryptoUpload) => void;
   onCoverage: (uploadId: number) => void;
+  /** Mes AAAA-MM con el que se llegó desde Estados Financieros: filtra archivos y cobertura a ese mes. */
+  month?: string | null;
+  onClearMonth?: () => void;
 }
 
 /** Operaciones: cargas vigentes, cobertura por mes, posibles duplicados y filas pendientes. */
-export function OperationsTab({ data, model, onDetail, onCoverage }: Props) {
+export function OperationsTab({ data, model, onDetail, onCoverage, month = null, onClearMonth }: Props) {
   const { state } = data;
   const [retire, setRetire] = useState<CryptoUpload | null>(null);
   const unresolved = model.groups.filter((g) => !g.resolved);
@@ -31,9 +34,21 @@ export function OperationsTab({ data, model, onDetail, onCoverage }: Props) {
     await data.reloadState();
   }
 
+  /** Archivos que cubren el mes o tienen filas pendientes en él. */
+  const monthUploadIds = month ? new Set(model.coverages.filter((c) => c.months.includes(month) || c.pendingMonths.some((p) => p.month === month)).map((c) => c.uploadId)) : null;
+  const matrixRows = month ? model.matrix.filter((m) => m.month === month) : model.matrix;
+
   if (!state) return null;
   return (
     <div className="stack">
+      {month && (
+        <Alert tone="info">
+          Mostrando solo {MONTHS_ES[Number(month.slice(5, 7)) - 1].toLowerCase()} de {month.slice(0, 4)} ({monthUploadIds!.size} {monthUploadIds!.size === 1 ? "archivo" : "archivos"}).{" "}
+          <Button size="sm" variant="ghost" onClick={onClearMonth}>
+            Quitar filtro
+          </Button>
+        </Alert>
+      )}
       <Card flush title="Archivos cargados" description="Las cargas son acumulativas: cada archivo vigente suma a la empresa y al año. Importar un nombre ya existente lo reemplaza (con confirmación).">
         {state.uploads.length === 0 ? (
           <EmptyState title="Sin archivos" description="Importa un Excel con las hojas «Compras» y «Ventas»." />
@@ -53,7 +68,7 @@ export function OperationsTab({ data, model, onDetail, onCoverage }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {model.reconciliation.uploads.map((r) => {
+                {model.reconciliation.uploads.filter((r) => !monthUploadIds || monthUploadIds.has(r.id)).map((r) => {
                   const u = state.uploads.find((x) => x.id === r.id)!;
                   return (
                     <tr key={r.id}>
@@ -106,9 +121,9 @@ export function OperationsTab({ data, model, onDetail, onCoverage }: Props) {
               </tr>
             </thead>
             <tbody>
-              {model.matrix.map((m, i) => (
+              {matrixRows.map((m) => (
                 <tr key={m.month}>
-                  <td>{MONTHS_ES[i].charAt(0) + MONTHS_ES[i].slice(1).toLowerCase()}</td>
+                  <td>{MONTHS_ES[Number(m.month.slice(5, 7)) - 1].charAt(0) + MONTHS_ES[Number(m.month.slice(5, 7)) - 1].slice(1).toLowerCase()}</td>
                   <td>{m.uploads.length ? m.uploads.map((u) => u.fileName).join(", ") : <span className="muted">{m.pending.length ? "No cubierto" : "Sin archivo"}</span>}</td>
                   <td>
                     {m.pending.length === 0 ? (

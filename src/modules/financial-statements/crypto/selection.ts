@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { navigate, paths } from "../../../app/router";
 
 /** Empresa y año de reporte que se están trabajando en Transacciones Cripto (se recuerdan entre pantallas y al reabrir la app). */
 export interface CryptoSelection {
@@ -50,4 +51,28 @@ export function useCryptoSelection(): [CryptoSelection, (patch: Partial<CryptoSe
 export function selectableYears(today = new Date()): number[] {
   const y = today.getFullYear();
   return Array.from({ length: 7 }, (_, i) => y + 1 - i);
+}
+
+/** Mes AAAA-MM con el que se abrió Reporte de operaciones desde otra pantalla (solo en memoria, no se recuerda al reabrir la app). */
+let focusMonth: string | null = null;
+const focusListeners = new Set<() => void>();
+const setFocus = (month: string | null) => {
+  focusMonth = month;
+  for (const l of focusListeners) l();
+};
+const subscribeFocus = (l: () => void) => {
+  focusListeners.add(l);
+  return () => focusListeners.delete(l);
+};
+
+export function useCryptoMonthFocus(): [string | null, () => void] {
+  const month = useSyncExternalStore(subscribeFocus, () => focusMonth, () => focusMonth);
+  return [month, useCallback(() => setFocus(null), [])];
+}
+
+/** Lleva a Reporte de operaciones con la empresa, el año y el mes indicados. */
+export function openCryptoMonth(companyId: number, month: string) {
+  set({ companyId, year: Number(month.slice(0, 4)) });
+  setFocus(month);
+  navigate(paths.provider("estados-financieros", "transacciones-cripto", "reporte-de-operaciones"));
 }
