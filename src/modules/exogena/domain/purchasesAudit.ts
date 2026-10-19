@@ -53,7 +53,7 @@ function thirdName(d: Record<string, unknown>): string {
 
 function docTrace(d: DocView, format: PurchasesExoFormat, concept: string | null): AuditTraceLine[] {
   const base = { invoice: d.data.number ?? d.doc.fileName, date: d.doc.issueDate ?? "sin fecha", file: d.doc.fileName };
-  if (format === "1001") return d.lines.filter((l) => l.concept1001 === concept).map((l) => ({ ...base, detail: `Línea ${l.line.index + 1} · ${lineLabel(l.line)} · PUC ${l.pucCode}`, amountCents: l.baseCents }));
+  if (format === "1001") return d.lines.filter((l) => !l.notApplicable && l.concept1001 === concept).map((l) => ({ ...base, detail: `Línea ${l.line.index + 1} · ${lineLabel(l.line)} · PUC ${l.pucCode}`, amountCents: l.baseCents }));
   return [{ ...base, detail: `${d.kind === "return" ? "Devolución" : "Compra"} · IVA de la factura`, amountCents: Math.abs(d.vatCents) }];
 }
 

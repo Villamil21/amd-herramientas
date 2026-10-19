@@ -24,7 +24,7 @@ import { centsToPesos } from "../../../exogena/domain/numbers";
 import { nitDigits } from "../../../exogena/domain/text";
 import { findCompanyByNit, namesMatch } from "../../shared/companyMatch";
 import type { PucIndex } from "../../puc-codes/services/pucCatalog";
-import { conceptProblem, proposeLine, pucProblem, type Proposal } from "./classify";
+import { conceptProblem, isNotApplicablePuc, normalizeClassification, proposeLine, pucProblem, type Proposal } from "./classify";
 import { regimeAt, regimeChanged, retentionExemption, vatResponsibleAt, vatYearCoverage, type RegimeAt } from "./history";
 import { computeRetention, ratesNear, type RetentionResult } from "./retention";
 import { ratesAt } from "./rateVersions";
@@ -79,6 +79,11 @@ export interface LineView {
   concept1001: string;
   retention: RetentionPick[];
   confirmed: boolean;
+  /** Confirmada con el PUC 7305: excluida a propósito de EEFF y de todo formato exógeno; sus importes de abajo son 0. */
+  notApplicable: boolean;
+  /** Importes de la línea excluida (con signo): solo informativos, nunca se suman a nada. */
+  excludedBaseCents: number;
+  excludedVatCents: number;
   /** Importes de la línea con signo. */
   baseCents: number;
   vatCents: number;
@@ -126,6 +131,9 @@ export interface MonthCoverage {
   pending: number;
   blocked: number;
   excluded: number;
+  /** Líneas «No aplica» (7305) y su importe: informativo, fuera de compras, EEFF y exógena. */
+  notApplicableLines: number;
+  notApplicableCents: number;
 }
 
 export interface SupplierView {
@@ -340,6 +348,14 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
       );
     const baseSum = data.lines.reduce((s, l) => s + (l.baseCents ?? 0), 0);
     const vatSum = data.lines.reduce((s, l) => s + (l.vatCents ?? 0), 0);
+    // Líneas «No aplica» (7305): no cuentan para el IVA, el régimen ni el tercero de los formatos.
+    const isNaLine = (index: number) => {
+      const c = classByLine.get(`${doc.id}:${index}`);
+      return Boolean(c && isNotApplicablePuc(c.pucCode));
+    };
+    const activeLines = data.lines.filter((l) => !isNaLine(l.index));
+    const activeVatSum = activeLines.reduce((s, l) => s + (l.vatCents ?? 0), 0);
+    const hasActive = activeLines.length > 0 || data.lines.length === 0;
     if (!unread.length && data.subtotalCents !== undefined && Math.abs(baseSum - data.subtotalCents) > 100) {
       add({
         code: "base-mismatch",
@@ -364,7 +380,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     }
 
     // --- IVA de la empresa en la fecha de la factura ---
-    if (company && doc.issueDate && vatSum > 0 && vatResponsible === undefined) {
+    if (company && doc.issueDate && activeVatSum > 0 && vatResponsible === undefined) {
       block(
         "vat-profile-unknown",
         `Factura ${label}: falta el perfil de IVA de la empresa`,
@@ -377,7 +393,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     }
 
     // --- Proveedor: régimen y datos del tercero ---
-    if (regime.from === "unknown") {
+    if (regime.from === "unknown" && hasActive) {
       add({
         code: "regime-unknown",
         severity: "pending",
@@ -411,25 +427,33 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     const lines: LineView[] = data.lines.map((line) => {
       const cls = classByLine.get(`${doc.id}:${line.index}`);
       const proposal = proposeLine(line, proposalContext);
-      const base = (line.baseCents ?? 0) * sign;
-      const vat = (line.vatCents ?? 0) * sign;
+      const rawBase = (line.baseCents ?? 0) * sign;
+      const rawVat = (line.vatCents ?? 0) * sign;
+      const clean = cls ? normalizeClassification(cls) : undefined;
+      const na = Boolean(clean && isNotApplicablePuc(clean.pucCode));
+      // Una línea 7305 no aporta importes a ningún resultado: queda solo el informativo.
+      const base = na ? 0 : rawBase;
+      const vat = na ? 0 : rawVat;
       const view: LineView = {
         docId: doc.id,
         line,
         sign,
         class: cls,
         proposal,
-        pucCode: cls?.pucCode ?? "",
-        concept1001: cls?.concept1001 ?? "",
-        retention: cls?.retention ?? [],
+        pucCode: clean?.pucCode ?? "",
+        concept1001: clean?.concept1001 ?? "",
+        retention: clean?.retention ?? [],
         confirmed: Boolean(cls),
+        notApplicable: na,
+        excludedBaseCents: na ? rawBase : 0,
+        excludedVatCents: na ? rawVat : 0,
         baseCents: base,
         vatCents: vat,
         eeffCents: base + (vatResponsible === false ? vat : 0),
         practicedCents: 0,
         assumedCents: 0,
       };
-      if (cls) {
+      if (cls && !na) {
         view.pucProblem = cls.pucCode ? pucProblem(input.pucIndex, cls.pucCode) : "Falta el código PUC.";
         view.conceptProblem = cls.concept1001 ? conceptProblem(conceptsOfYear, cls.concept1001, doc.issueDate) : "Falta el concepto 1001.";
       }
@@ -441,8 +465,9 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     // Tarifa, base mínima y porcentaje vigentes en la fecha de ESTA factura (una vigencia posterior no la recalcula).
     const ratesOfDoc = ratesAt(input.rates, input.rateVersions ?? [], doc.issueDate);
     const retention = computeRetention({
-      lines: lines.map((l) => ({ index: l.line.index, baseCents: l.line.baseCents ?? 0, picks: l.retention })),
-      informedCents,
+      // Las líneas «No aplica» no participan: ni base, ni conceptos, ni parte de la retención informada.
+      lines: lines.filter((l) => !l.notApplicable).map((l) => ({ index: l.line.index, baseCents: l.line.baseCents ?? 0, picks: l.retention })),
+      informedCents: lines.some((l) => !l.notApplicable) ? informedCents : 0,
       exempt: Boolean(exemption),
       exemptDecision: (flags.get("retention_decision")?.value as "keep" | "remove" | undefined) ?? undefined,
       issueYear: year,
@@ -472,7 +497,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         key: String(l.line.index),
       });
     }
-    for (const l of lines.filter((x) => x.confirmed)) {
+    for (const l of lines.filter((x) => x.confirmed && !x.notApplicable)) {
       const target: AlertTarget = { kind: "line", docId: doc.id, lineIndex: l.line.index };
       if (l.pucProblem) add({ code: "puc-invalid", severity: "block", dests: ["EEFF"], title: `${label} · ${lineLabel(l.line)}: PUC no válido`, why: l.pucProblem, how: "Elige un código PUC de activo, costo o gasto vigente en la Tabla de Códigos PUC.", target, action: "Corregir PUC", key: String(l.line.index) });
       if (l.conceptProblem) add({ code: "concept-invalid", severity: "block", dests: ["1001"], title: `${label} · ${lineLabel(l.line)}: concepto 1001`, why: l.conceptProblem, how: "Elige un concepto vigente del catálogo 1001 del año (Datos → Catálogos Exógena).", target, action: "Corregir concepto", key: String(l.line.index) });
@@ -516,9 +541,9 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
 
     // Datos del tercero.
     const third = resolveThird(supplierNit, data.issuer, supplier, input.catalogs, aliases);
-    if (third.missing.length) {
+    if (third.missing.length && hasActive) {
       const dests: Dest[] = ["1001"];
-      if (vatResponsible !== false && (vatSum > 0 || vatResponsible === undefined)) dests.push(ivaDest(kind));
+      if (vatResponsible !== false && (activeVatSum > 0 || vatResponsible === undefined)) dests.push(ivaDest(kind));
       add({
         code: "third-incomplete",
         severity: "block",
@@ -709,7 +734,7 @@ function buildForms(counted: DocView[], thirds: Map<string, ResolvedThird>, vatC
     const docLabel = d.data.number ?? d.doc.fileName;
     const in1001 = d.ready["1001"];
     for (const l of d.lines) {
-      if (in1001) {
+      if (in1001 && !l.notApplicable) {
         const key = `${d.supplierNit}|${l.concept1001}`;
         const g = g1001.get(key) ?? { nit: d.supplierNit, concept: l.concept1001, deductible: 0, ivaDeductible: 0, ivaNonDeductible: 0, practiced: 0, assumed: 0, docs: new Set<string>(), lines: 0 };
         g.deductible += l.baseCents;
@@ -835,7 +860,7 @@ function buildEeffPlan(counted: DocView[]): EeffPlan {
     readyDocs += 1;
     const documentId = d.doc.cufe ?? `${d.doc.issuerNit}|${d.doc.numberKey || d.doc.fileName}`;
     for (const l of d.lines) {
-      if (l.eeffCents === 0) continue;
+      if (l.notApplicable || l.eeffCents === 0) continue;
       dates.push(d.doc.issueDate!);
       total += l.eeffCents;
       movements.push({
@@ -876,7 +901,7 @@ function buildEeffPlan(counted: DocView[]): EeffPlan {
 function buildCoverage(docs: DocView[]): MonthCoverage[] {
   const months = new Map<number, MonthCoverage>();
   const at = (m: number) => {
-    const c = months.get(m) ?? { month: m, purchases: 0, returns: 0, purchaseCents: 0, returnCents: 0, duplicates: 0, pending: 0, blocked: 0, excluded: 0 };
+    const c = months.get(m) ?? { month: m, purchases: 0, returns: 0, purchaseCents: 0, returnCents: 0, duplicates: 0, pending: 0, blocked: 0, excluded: 0, notApplicableLines: 0, notApplicableCents: 0 };
     months.set(m, c);
     return c;
   };
@@ -898,6 +923,11 @@ function buildCoverage(docs: DocView[]): MonthCoverage[] {
     } else {
       c.purchases += 1;
       c.purchaseCents += d.lines.reduce((s, l) => s + l.baseCents, 0);
+    }
+    for (const l of d.lines) {
+      if (!l.notApplicable) continue;
+      c.notApplicableLines += 1;
+      c.notApplicableCents += Math.abs(l.excludedBaseCents);
     }
     if (d.alerts.some((a) => a.severity === "pending")) c.pending += 1;
     if (d.alerts.some((a) => a.severity === "block")) c.blocked += 1;

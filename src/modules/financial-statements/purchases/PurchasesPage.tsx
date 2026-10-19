@@ -291,6 +291,9 @@ function CoverageCard({ model }: { model: PurchasesModel }) {
               <th className="num">Por confirmar</th>
               <th className="num">Con bloqueos</th>
               <th className="num">Duplicadas</th>
+              <th className="num" title="Líneas 7305 — NO APLICA: informativo, no suma a compras, EEFF ni Exógena">
+                No aplica (informativo)
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -304,6 +307,7 @@ function CoverageCard({ model }: { model: PurchasesModel }) {
                 <td className="num">{c.pending || "—"}</td>
                 <td className="num">{c.blocked || "—"}</td>
                 <td className="num">{c.duplicates || "—"}</td>
+                <td className="num">{c.notApplicableLines ? `${c.notApplicableLines} · ${formatMoneyCents(c.notApplicableCents)}` : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -364,8 +368,9 @@ function DocsTab({ model, filter, setFilter, search, setSearch, onOpen }: { mode
           <tbody>
             {rows.map((d) => {
               const f = docFlags(d);
-              const status = d.doc.status === "evidence" ? "review" : d.excluded ? "na" : f.blocked ? "block" : f.pending ? "pending" : "ready";
-              const text = d.doc.status === "evidence" ? "Duplicada (evidencia)" : d.doc.status === "superseded" ? "Sustituida" : d.excluded ? "Excluida" : f.blocked ? `Bloquea · ${d.alerts.filter((a) => a.severity === "block").length}` : f.pending ? `Por confirmar · ${d.alerts.filter((a) => a.severity === "pending").length}` : "Lista";
+              const allNotApplicable = d.lines.length > 0 && d.lines.every((l) => l.notApplicable);
+              const status = d.doc.status === "evidence" ? "review" : d.excluded ? "na" : f.blocked ? "block" : f.pending ? "pending" : allNotApplicable ? "na" : "ready";
+              const text = d.doc.status === "evidence" ? "Duplicada (evidencia)" : d.doc.status === "superseded" ? "Sustituida" : d.excluded ? "Excluida" : f.blocked ? `Bloquea · ${d.alerts.filter((a) => a.severity === "block").length}` : f.pending ? `Por confirmar · ${d.alerts.filter((a) => a.severity === "pending").length}` : allNotApplicable ? "No aplica" : "Lista";
               return (
                 <tr key={d.doc.id} className="is-clickable" onClick={() => onOpen(d.doc.id)}>
                   <td>{d.doc.issueDate ?? "—"}</td>

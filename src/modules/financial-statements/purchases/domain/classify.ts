@@ -12,6 +12,22 @@ import { isAssignable, type PucIndex } from "../../puc-codes/services/pucCatalog
  *   3. Sugerencia general (lo más usado por el proveedor en sus otras reglas).
  */
 
+/**
+ * PUC especial «7305 — NO APLICA»: la línea queda intencionalmente excluida. No alimenta Estados Financieros ni ningún
+ * formato exógeno (1001, 1005, 1006), no genera retenciones y no exige concepto 1001. Se confirma como cualquier otra
+ * clasificación, pero cuenta como resuelta para todos los destinos.
+ */
+export const NOT_APPLICABLE_PUC = "7305";
+export const NOT_APPLICABLE_LABEL = "NO APLICA";
+export const NOT_APPLICABLE_MESSAGE = "No aplica: esta línea no se enviará a Estados Financieros ni a Exógena.";
+
+export const isNotApplicablePuc = (code: string | undefined | null): boolean => code === NOT_APPLICABLE_PUC;
+
+/** Una clasificación con 7305 no puede conservar concepto 1001 ni retenciones: se limpian aquí, no solo en pantalla. */
+export function normalizeClassification<T extends { pucCode: string; concept1001: string; retention: RetentionPick[] }>(c: T): T {
+  return isNotApplicablePuc(c.pucCode) ? { ...c, concept1001: "", retention: [] } : c;
+}
+
 /** Identidad del producto de un proveedor: su código del PDF o, sin código, su descripción normalizada. */
 export function productKey(line: Pick<PurchaseLine, "code" | "description">): string {
   const code = normalizeKey(line.code ?? "");
@@ -115,6 +131,10 @@ export function proposeLine(line: PurchaseLine, ctx: ProposalContext): Proposal 
       sources.retention = "supplier";
     }
   }
+  if (isNotApplicablePuc(pucCode)) {
+    // 7305: sin concepto 1001 ni retención, ni siquiera sugeridos por el PUC o por el proveedor.
+    return { pucCode, concept1001: "", retention: [], sources: { puc: sources.puc }, ruleId: rule?.id };
+  }
   return { pucCode, concept1001: concept, retention, sources, ruleId: rule?.id };
 }
 
@@ -126,6 +146,7 @@ export const CLASS_LABEL: Record<string, string> = { "1": "activo", "2": "pasivo
 /** Por qué una cuenta no sirve para una compra (undefined = sirve). */
 export function pucProblem(index: PucIndex, code: string): string | undefined {
   if (!code) return "Falta el código PUC.";
+  if (isNotApplicablePuc(code)) return undefined;
   if (!isAssignable(index, code)) return `El código ${code} no existe en la Tabla de Códigos PUC o no es una subcuenta asignable.`;
   if (index.inactive.has(code)) return `El código ${code} está inactivo en la Tabla de Códigos PUC.`;
   if (!PURCHASE_CLASSES.has(code[0])) return `El código ${code} es de ${CLASS_LABEL[code[0]] ?? "otra clase"}: una compra solo va a cuentas de activo, costo o gasto (no genera saldos por pagar).`;

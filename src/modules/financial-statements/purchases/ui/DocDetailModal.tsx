@@ -192,7 +192,7 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
   const shownRetention = l.confirmed ? l.retention : proposal.retention;
   const rateName = (id: number) => data.rates.find((r) => r.id === id);
   const problems = [l.pucProblem, l.conceptProblem].filter(Boolean) as string[];
-  const status = l.line.issue ? "block" : problems.length ? "block" : l.confirmed ? "ready" : "pending";
+  const status = l.line.issue ? "block" : problems.length ? "block" : l.notApplicable ? "na" : l.confirmed ? "ready" : "pending";
   return (
     <>
       <tr>
@@ -201,8 +201,8 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
           {lineLabel(l.line)}
           {l.line.issue && <div className="field__error">No se pudo leer: {l.line.issue}</div>}
         </td>
-        <td className="num">{l.line.baseCents === undefined ? "—" : formatMoneyCents(l.baseCents)}</td>
-        <td className="num">{l.line.vatCents === undefined ? "—" : formatMoneyCents(l.vatCents)}</td>
+        <td className="num">{l.line.baseCents === undefined ? "—" : formatMoneyCents(l.notApplicable ? l.excludedBaseCents : l.baseCents)}</td>
+        <td className="num">{l.line.vatCents === undefined ? "—" : formatMoneyCents(l.notApplicable ? l.excludedVatCents : l.vatCents)}</td>
         <td>
           {shownPuc ? `${shownPuc} — ${leafConcept(data.fs.index, shownPuc) ?? ""}` : "—"}
           {!l.confirmed && shownPuc && proposal.sources.puc && <div className="field__hint">{PROPOSAL_SOURCE_LABEL[proposal.sources.puc]}</div>}
@@ -213,7 +213,8 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
         </td>
         <td>{shownRetention.length ? shownRetention.map((r) => rateName(r.rateId)?.name ?? `#${r.rateId}`).join(", ") : "—"}</td>
         <td>
-          <StatusChip status={status} label={l.line.issue ? "Bloquea · ilegible" : problems.length ? "Bloquea · dato inválido" : l.confirmed ? "Confirmada" : "Por confirmar"} />
+          <StatusChip status={status} label={l.line.issue ? "Bloquea · ilegible" : problems.length ? "Bloquea · dato inválido" : l.notApplicable ? "No aplica" : l.confirmed ? "Confirmada" : "Por confirmar"} />
+          {l.notApplicable && <div className="field__hint">Excluida: importe informativo, no se envía a EEFF ni a Exógena.</div>}
           {l.confirmed && l.class && <div className="field__hint">{l.class.scope === "rule" ? "Regla del producto" : "Solo esta factura"}</div>}
         </td>
         <td>

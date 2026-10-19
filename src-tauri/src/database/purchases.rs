@@ -544,6 +544,9 @@ fn valid_puc(code: &str) -> bool {
     code.is_empty() || ((4..=12).contains(&code.len()) && code.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// PUC especial «7305 — NO APLICA»: la línea queda excluida de EEFF y Exógena, sin concepto 1001 ni retenciones.
+pub const NOT_APPLICABLE_PUC: &str = "7305";
+
 fn valid_concept(code: &str) -> bool {
     code.is_empty() || (code.len() == 4 && code.chars().all(|c| c.is_ascii_digit()))
 }
@@ -588,7 +591,10 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
             .query_row("SELECT buyer_nit, year FROM purchase_documents WHERE id = ?1", [i.document_id], |r| Ok((r.get(0)?, r.get(1)?)))
             .optional()?
             .ok_or_else(|| AppError::user("La factura no existe o fue eliminada."))?;
-        let retention = retention_text(&i.retention)?;
+        // Con 7305 no puede quedar ningún concepto ni retención guardados (ni en la línea ni en la regla).
+        let not_applicable = i.puc_code == NOT_APPLICABLE_PUC;
+        let concept_1001 = if not_applicable { "" } else { i.concept_1001.as_str() };
+        let retention = if not_applicable { "[]".to_string() } else { retention_text(&i.retention)? };
         let mut rule_id: Option<i64> = None;
         if i.save_rule {
             let existing: Option<(i64, String, String, String)> = tx
@@ -596,11 +602,11 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
                 .optional()?;
             match existing {
                 Some((id, puc, concept, ret)) => {
-                    let changed = puc != i.puc_code || concept != i.concept_1001 || ret != retention;
+                    let changed = puc != i.puc_code || concept != concept_1001 || ret != retention;
                     tx.execute(
                         "UPDATE purchase_rules SET puc_code = ?1, concept_1001 = ?2, retention = ?3, product_label = CASE WHEN ?4 <> '' THEN ?4 ELSE product_label END, uses = uses + 1,
                                 source_document_id = ?5, updated_at = ?6 WHERE id = ?7",
-                        params![i.puc_code, i.concept_1001, retention, i.product_label, i.document_id, now, id],
+                        params![i.puc_code, concept_1001, retention, i.product_label, i.document_id, now, id],
                     )?;
                     if changed {
                         rule_snapshot(&tx, id, Some(i.document_id))?;
@@ -611,7 +617,7 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
                     tx.execute(
                         "INSERT INTO purchase_rules (supplier_nit, product_key, product_label, puc_code, concept_1001, retention, uses, source_document_id, created_at, updated_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?8)",
-                        params![i.supplier_nit, i.product_key, i.product_label, i.puc_code, i.concept_1001, retention, i.document_id, now],
+                        params![i.supplier_nit, i.product_key, i.product_label, i.puc_code, concept_1001, retention, i.document_id, now],
                     )?;
                     let id = tx.last_insert_rowid();
                     rule_snapshot(&tx, id, Some(i.document_id))?;
@@ -623,7 +629,7 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
             "INSERT INTO purchase_line_class (document_id, line_index, puc_code, concept_1001, retention, rule_id, scope, confirmed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(document_id, line_index) DO UPDATE SET puc_code = excluded.puc_code, concept_1001 = excluded.concept_1001, retention = excluded.retention,
                  rule_id = excluded.rule_id, scope = excluded.scope, confirmed_at = excluded.confirmed_at",
-            params![i.document_id, i.line_index, i.puc_code, i.concept_1001, retention, rule_id, if i.save_rule { "rule" } else { "invoice" }, now],
+            params![i.document_id, i.line_index, i.puc_code, concept_1001, retention, rule_id, if i.save_rule { "rule" } else { "invoice" }, now],
         )?;
         let entry = summary.entry(i.document_id).or_insert((nit, year, 0, false));
         entry.2 += 1;
@@ -702,9 +708,10 @@ pub fn update_rule(conn: &mut Connection, id: i64, puc_code: &str, concept_1001:
         return Err(AppError::user("La regla necesita un código PUC (4 a 12 dígitos) o un concepto 1001 (4 dígitos)."));
     }
     let tx = conn.transaction()?;
+    let not_applicable = puc_code == NOT_APPLICABLE_PUC;
     let n = tx.execute(
         "UPDATE purchase_rules SET puc_code = ?1, concept_1001 = ?2, retention = ?3, updated_at = ?4 WHERE id = ?5",
-        params![puc_code, concept_1001, retention_text(retention)?, now_iso(), id],
+        params![puc_code, if not_applicable { "" } else { concept_1001 }, if not_applicable { "[]".to_string() } else { retention_text(retention)? }, now_iso(), id],
     )?;
     if n == 0 {
         return Err(AppError::user("La regla no existe o fue eliminada."));
@@ -1000,6 +1007,30 @@ mod tests {
         let st = state(&c, "901748281", Some(2026)).unwrap();
         assert!(st.line_classes.iter().all(|l| l.rule_id.is_none()) && st.line_classes.len() == 2);
         assert!(delete_rule(&c, rule.id).is_err());
+    }
+
+    #[test]
+    fn puc_7305_clears_concept_and_retention_in_line_and_rule() {
+        let mut c = db();
+        let up = upload(&mut c, vec![file("a.pdf", "N1", "2026-05-10", 1000)]);
+        let id = up.documents[0].id;
+        let input = |puc: &str, concept: &str, ret: Value| LineClassInput { document_id: id, line_index: 0, puc_code: puc.into(), concept_1001: concept.into(), retention: ret, save_rule: true, supplier_nit: "900319753".into(), product_key: "bolsa".into(), product_label: "Bolsa".into() };
+        save_line_classes(&mut c, &[input("613505", "5004", serde_json::json!([{ "rateId": 3 }]))]).unwrap();
+        // Cambiar a 7305 aunque se envíen datos viejos: nada queda guardado.
+        save_line_classes(&mut c, &[input("7305", "5004", serde_json::json!([{ "rateId": 3 }]))]).unwrap();
+        let st = state(&c, "901748281", Some(2026)).unwrap();
+        let l = &st.line_classes[0];
+        assert_eq!((l.puc_code.as_str(), l.concept_1001.as_str(), l.retention.as_array().map_or(0, |a| a.len())), ("7305", "", 0));
+        let rule = &list_rules(&c).unwrap()[0];
+        assert_eq!((rule.puc_code.as_str(), rule.concept_1001.as_str(), rule.retention.as_array().map_or(0, |a| a.len())), ("7305", "", 0));
+        // Volver a una cuenta normal guarda otra vez sus datos.
+        save_line_classes(&mut c, &[input("613505", "5004", serde_json::json!([{ "rateId": 3 }]))]).unwrap();
+        assert_eq!(state(&c, "901748281", Some(2026)).unwrap().line_classes[0].concept_1001, "5004");
+        // Editar la regla a 7305 también la limpia.
+        let rid = list_rules(&c).unwrap()[0].id;
+        update_rule(&mut c, rid, "7305", "5004", &serde_json::json!([{ "rateId": 3 }])).unwrap();
+        let rule = &list_rules(&c).unwrap()[0];
+        assert_eq!((rule.concept_1001.as_str(), rule.retention.as_array().map_or(0, |a| a.len())), ("", 0));
     }
 
     #[test]

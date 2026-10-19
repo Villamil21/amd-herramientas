@@ -1,9 +1,17 @@
 [
   {
+    "version": "1.38.4",
+    "date": "2026-10-19",
+    "notes": [
+      "Compras: nuevo PUC especial 7305 — NO APLICA. Al confirmarlo, la línea queda excluida a propósito: no va a Estados Financieros ni a Exógena (1001, 1005, 1006), no genera retenciones y no exige concepto 1001. Cuenta como resuelta y se muestra como «No aplica», sin color de error.",
+      "Compras: al elegir 7305 se ocultan Concepto 1001 y Retenciones y se limpian los datos anteriores; al volver a otra cuenta se exigen de nuevo. Se puede guardar como regla del producto para el proveedor o solo para la factura. El importe excluido aparece como informativo en la cobertura mensual."
+    ]
+  },
+  {
     "version": "1.38.3",
     "date": "2026-10-17",
     "notes": [
-      "(Describe aquí las novedades de esta versión)"
+      "Compras: al hacer clic en una tarjeta de destino (Estados Financieros, 1001, 1005, 1006) se abre un panel con los pendientes agrupados por causa, con el avance en líneas y el botón para resolver cada uno."
     ]
   },
   {

@@ -154,7 +154,7 @@ export function lineProgress(model: PurchasesModel, dest: Dest): { resolved: num
     else wholeDocs.add(a.docId);
   }
   let unresolved = 0;
-  for (const d of counted) for (const l of d.lines) if (wholeDocs.has(d.doc.id) || open.has(`${d.doc.id}:${l.line.index}`)) unresolved += 1;
+  for (const d of counted) for (const l of d.lines) if (!l.notApplicable && (wholeDocs.has(d.doc.id) || open.has(`${d.doc.id}:${l.line.index}`))) unresolved += 1;
   return { resolved: total - unresolved, total };
 }
 
