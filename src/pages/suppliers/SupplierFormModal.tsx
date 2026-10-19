@@ -11,6 +11,7 @@ import { withholdingService } from "../../services/withholdingService";
 import { PERSON_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier, type SupplierTaxInput, type VatType, type WithholdingRate } from "../../types/models";
 import { formatDateForDisplay } from "../../utils/dates";
 import { formatDateTimeForDisplay } from "../../utils/dates";
+import { FiscalRegimeField, exemptCodesIn } from "./FiscalRegimeField";
 import { SupplierRegimeHistory } from "./SupplierRegimeHistory";
 import { completeRules, rulesFromSupplier, WithholdingRulesEditor, type RuleDraft } from "./WithholdingRulesEditor";
 
@@ -32,28 +33,6 @@ interface Props {
 /** NIT solo con dígitos y sin dígito de verificación: "900.319.753-1" → "900319753". */
 export function normalizeNit(value: string): string {
   return (value.split("-")[0] ?? "").replace(/\D/g, "");
-}
-
-/** Responsabilidades fiscales que la aplicación reconoce en las facturas. */
-export const FISCAL_CODES: { code: string; label: string; ignoresWithholding?: boolean }[] = [
-  { code: "O-13", label: "Gran contribuyente" },
-  { code: "O-15", label: "Autorretenedor", ignoresWithholding: true },
-  { code: "O-23", label: "Agente de retención IVA" },
-  { code: "O-47", label: "Régimen simple", ignoresWithholding: true },
-  { code: "R-99-PN", label: "No aplica / otros" },
-];
-
-/** «O-13;O-15» → ["O-13", "O-15"] (sin distinguir separadores ni mayúsculas). */
-export const regimeCodes = (regime: string) =>
-  regime
-    .toUpperCase()
-    .split(/[;,\s]+/)
-    .map((c) => c.trim())
-    .filter(Boolean);
-
-function toggleCode(regime: string, code: string): string {
-  const codes = regimeCodes(regime);
-  return (codes.includes(code) ? codes.filter((c) => c !== code) : [...codes, code]).join("; ");
 }
 
 const EMPTY_IDENTITY: IdentityValue = { personType: "", docTypeCode: "", docNumber: "", dv: "", firstSurname: "", secondSurname: "", firstName: "", otherNames: "", legalName: "" };
@@ -165,8 +144,7 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
     }
   }
 
-  const codes = regimeCodes(regime);
-  const ignored = FISCAL_CODES.filter((c) => c.ignoresWithholding && codes.includes(c.code));
+  const ignored = exemptCodesIn(regime);
 
   return (
     <Modal
@@ -233,19 +211,10 @@ export function SupplierFormModal({ open, supplier, draft, rates = [], onClose, 
           {supplier && (
             <>
               <FormSection step={3} title="Datos fiscales" className="span-full">
-                <div className="form-grid form-grid--compact">
-                  <Field label="Régimen / responsabilidades fiscales" hint="Como aparece en la factura. Usa los botones o escribe otros códigos.">
-                    {(id) => <Input id={id} value={regime} onChange={(e) => setRegime(e.target.value)} placeholder="Sin verificar" />}
-                  </Field>
-                </div>
-                <div className="fiscal-chips" role="group" aria-label="Responsabilidades fiscales">
-                  {FISCAL_CODES.map((c) => (
-                    <button key={c.code} type="button" className={`fiscal-chip ${codes.includes(c.code) ? "is-on" : ""}`} aria-pressed={codes.includes(c.code)} onClick={() => setRegime((r) => toggleCode(r, c.code))}>
-                      <strong>{c.code}</strong> {c.label}
-                    </button>
-                  ))}
-                </div>
-                {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención automática. Si una factura suya trae retención, Compras, costos y exógena lo alerta y tú decides si se conserva.</Alert>}
+                <Field label="Régimen / responsabilidades fiscales" hint="Como aparece en la factura. Usa los botones o escribe otros códigos.">
+                  {(id) => <FiscalRegimeField id={id} value={regime} onChange={setRegime} />}
+                </Field>
+                {ignored.length > 0 && <Alert tone="info">{ignored.map((c) => `${c.code} ${c.label.toLowerCase()}`).join(" y ")}: Retención en la fuente compras ignora a este proveedor (no se le practica retención automática; sus reglas predeterminadas de retención se eliminan). Si una factura suya trae retención, Compras, costos y exógena lo alerta y tú decides si se conserva.</Alert>}
                 <SupplierRegimeHistory supplierNit={supplier.nit} currentRegime={regime} />
               </FormSection>
 

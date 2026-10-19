@@ -60,6 +60,8 @@ fn init_inner(paths: &AppPaths, current_version: &str, info: &mut StartupInfo) -
     // El módulo de compras nuevo empieza de cero: los envíos de la antigua clasificación quedan fuera del cálculo.
     database::fs::retire_legacy_purchases(&conn)?;
     database::tax_profiles::unify_prepaid_concept(&conn)?;
+    // Proveedores O-15 / O-47: sin reglas de retención y sin retención calculada automáticamente en sus facturas.
+    database::purchases::clean_exempt_retention(&conn)?;
 
     let previous = database::get_setting(&conn, LAST_RUN_VERSION_KEY)?;
     info.updated = previous.as_deref().is_some_and(|p| p != current_version);

@@ -5,6 +5,8 @@ import { purchasesService } from "../../services/purchasesService";
 import { errorMessage } from "../../services/tauri";
 import type { SupplierFiscalEntry } from "../../types/purchases";
 import { formatDateText } from "../../utils/dates";
+import { cleanupSummary } from "../../modules/financial-statements/purchases/domain/history";
+import { FiscalRegimeField } from "./FiscalRegimeField";
 
 const SOURCE_LABEL: Record<SupplierFiscalEntry["source"], string> = { factura: "Factura", manual: "Manual", proveedor: "Ficha del proveedor" };
 
@@ -32,10 +34,11 @@ export function SupplierRegimeHistory({ supplierNit, currentRegime, onChanged }:
     if (!draft || !draft.date || !draft.regime.trim()) return;
     setBusy(true);
     try {
-      await purchasesService.saveSupplierFiscal({ supplierNit, effectiveDate: draft.date, regime: draft.regime.trim(), source: "manual", note: draft.note.trim() });
+      const cleanup = await purchasesService.saveSupplierFiscal({ supplierNit, effectiveDate: draft.date, regime: draft.regime.trim(), source: "manual", note: draft.note.trim() });
       setDraft(null);
       await reload();
       onChanged?.();
+      if (cleanup && cleanupSummary(cleanup)) toast(`Se aplicó el régimen: ${cleanupSummary(cleanup)}.`);
     } catch (e) {
       toast(errorMessage(e), "error");
     } finally {
@@ -65,7 +68,7 @@ export function SupplierRegimeHistory({ supplierNit, currentRegime, onChanged }:
       {draft && (
         <div className="form-grid form-grid--compact">
           <Field label="Fecha efectiva">{(id) => <DateInput id={id} value={draft.date} onChange={(date) => setDraft({ ...draft, date })} />}</Field>
-          <Field label="Régimen / responsabilidades" hint="Ej.: O-13; O-23">{(id) => <Input id={id} value={draft.regime} onChange={(e) => setDraft({ ...draft, regime: e.target.value })} />}</Field>
+          <Field label="Régimen / responsabilidades" hint="Ej.: O-13; O-23. O-15 y O-47 no generan retención." className="span-full">{(id) => <FiscalRegimeField id={id} value={draft.regime} onChange={(regime) => setDraft({ ...draft, regime })} />}</Field>
           <Field label="Nota">{(id) => <Input id={id} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />}</Field>
           <div className="row">
             <Button variant="primary" size="sm" loading={busy} disabled={!draft.date || !draft.regime.trim()} onClick={save}>

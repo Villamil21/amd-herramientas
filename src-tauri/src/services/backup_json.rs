@@ -1134,6 +1134,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
         }
         // Un backup anterior puede traer «Gastos pagados por anticipado» en siete filas: se unifica en un único concepto.
         crate::database::tax_profiles::unify_prepaid_concept(&tx)?;
+        crate::database::purchases::clean_exempt_retention(&tx)?;
         tx.commit()?;
         Ok(())
     })();

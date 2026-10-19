@@ -169,6 +169,22 @@ pub fn regime_key(value: &str) -> String {
     }
 }
 
+/// O-15 (autorretenedor) y O-47 (régimen simple de tributación): no generan retención en la fuente.
+pub fn is_exempt_regime(regime: &str) -> bool {
+    regime_key(regime).split(';').any(|c| c == "O-15" || c == "O-47")
+}
+
+/// Régimen del historial vigente en una fecha (la última entrada con fecha efectiva anterior o igual).
+pub fn regime_at(conn: &Connection, supplier_nit: &str, date: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT regime FROM supplier_fiscal_history WHERE supplier_nit = ?1 AND effective_date <= ?2 ORDER BY effective_date DESC LIMIT 1",
+            params![supplier_nit, date],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 pub fn list_fiscal_history(conn: &Connection, supplier_nit: Option<&str>) -> AppResult<Vec<SupplierFiscalEntry>> {
     Ok(conn
         .prepare("SELECT supplier_nit, effective_date, regime, source, note, created_at FROM supplier_fiscal_history WHERE (?1 IS NULL OR supplier_nit = ?1) ORDER BY supplier_nit, effective_date")?

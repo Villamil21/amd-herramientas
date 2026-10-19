@@ -6,6 +6,15 @@ export const EXCLUDED_CODES: Record<string, string> = {
   "O-47": "Régimen simple de tributación",
 };
 
+/** Responsabilidades fiscales que la aplicación reconoce en las facturas electrónicas (las que la DIAN informa del emisor). */
+export const FISCAL_REGIMES: { code: string; label: string }[] = [
+  { code: "O-13", label: "Gran contribuyente" },
+  { code: "O-15", label: EXCLUDED_CODES["O-15"] },
+  { code: "O-23", label: "Agente de retención IVA" },
+  { code: "O-47", label: EXCLUDED_CODES["O-47"] },
+  { code: "R-99-PN", label: "No aplica / otros" },
+];
+
 /**
  * Códigos tributarios de un texto de régimen / responsabilidad:
  * "O-13;O-23" → ["O-13", "O-23"], "R-99-PN" → ["R-99-PN"]. Sin repetir y ordenados.

@@ -8,6 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::database::tax_profiles;
 use crate::error::{AppError, AppResult};
 use crate::services::time::now_iso;
 
@@ -587,14 +588,16 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
     let now = now_iso();
     let mut summary: std::collections::BTreeMap<i64, (String, Option<i64>, i64, bool)> = Default::default();
     for i in inputs {
-        let (nit, year): (String, Option<i64>) = tx
-            .query_row("SELECT buyer_nit, year FROM purchase_documents WHERE id = ?1", [i.document_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        let (nit, year, issuer_nit, issue_date, data): (String, Option<i64>, String, Option<String>, String) = tx
+            .query_row("SELECT buyer_nit, year, issuer_nit, issue_date, data FROM purchase_documents WHERE id = ?1", [i.document_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .optional()?
             .ok_or_else(|| AppError::user("La factura no existe o fue eliminada."))?;
-        // Con 7305 no puede quedar ningún concepto ni retención guardados (ni en la línea ni en la regla).
+        // Con 7305 no puede quedar ningún concepto ni retención guardados (ni en la línea ni en la regla); tampoco con un proveedor
+        // O-15 / O-47 en la fecha de la factura, que no genera retención.
         let not_applicable = i.puc_code == NOT_APPLICABLE_PUC;
+        let no_retention = not_applicable || exempt_on_invoice(&tx, &issuer_nit, issue_date.as_deref(), &parse_json(data))?;
         let concept_1001 = if not_applicable { "" } else { i.concept_1001.as_str() };
-        let retention = if not_applicable { "[]".to_string() } else { retention_text(&i.retention)? };
+        let retention = if no_retention { "[]".to_string() } else { retention_text(&i.retention)? };
         let mut rule_id: Option<i64> = None;
         if i.save_rule {
             let existing: Option<(i64, String, String, String)> = tx
@@ -640,6 +643,109 @@ pub fn save_line_classes(conn: &mut Connection, inputs: &[LineClassInput]) -> Ap
     }
     tx.commit()?;
     Ok(())
+}
+
+fn is_empty_retention(text: &str) -> bool {
+    serde_json::from_str::<Value>(text).ok().and_then(|v| v.as_array().map(|a| a.is_empty())).unwrap_or(true)
+}
+
+/// ¿El proveedor era O-15 / O-47 en la fecha de la factura? Rige el historial vigente en esa fecha; sin entrada, lo que trae la factura.
+fn exempt_on_invoice(conn: &Connection, supplier_nit: &str, issue_date: Option<&str>, data: &Value) -> AppResult<bool> {
+    if let Some(date) = issue_date.filter(|d| !d.is_empty()) {
+        if let Some(regime) = tax_profiles::regime_at(conn, supplier_nit, date)? {
+            return Ok(tax_profiles::is_exempt_regime(&regime));
+        }
+    }
+    Ok(data["issuer"]["fiscalCodes"].as_array().is_some_and(|codes| codes.iter().filter_map(Value::as_str).any(|c| c == "O-15" || c == "O-47")))
+}
+
+/// Resultado de `clean_exempt_retention`.
+#[derive(Debug, Default, Serialize, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExemptCleanup {
+    /// Reglas producto/proveedor de Compras a las que se les quitó la retención.
+    pub rules: i64,
+    /// Reglas predeterminadas de retención del proveedor (Proveedores) eliminadas.
+    pub supplier_rules: i64,
+    /// Líneas confirmadas cuya retención calculada automáticamente se corrigió a cero.
+    pub lines: i64,
+    /// Líneas que se dejaron intactas porque la factura trae retención informada por el emisor (decide el usuario).
+    pub kept_informed: i64,
+}
+
+/// Aplica la regla «O-15 / O-47 no generan retención»:
+///  - Proveedores cuyo régimen VIGENTE HOY es O-15/O-47: se quita la retención de sus reglas de Compras y se eliminan sus reglas
+///    predeterminadas de retención, así las compras futuras ya no la proponen.
+///  - Líneas confirmadas de facturas cuyo proveedor era O-15/O-47 EN LA FECHA DE LA FACTURA: su retención calculada se corrige a cero
+///    y queda en la auditoría. Si la factura trae retención informada por el emisor no se toca (la decide el usuario).
+/// Las facturas anteriores a la fecha efectiva del régimen no se alteran. Es idempotente: sin nada que corregir no escribe nada.
+pub fn clean_exempt_retention(conn: &Connection) -> AppResult<ExemptCleanup> {
+    let mut out = ExemptCleanup::default();
+    let today = now_iso()[..10].to_string();
+
+    let nits: Vec<String> = conn
+        .prepare("SELECT nit FROM suppliers UNION SELECT supplier_nit FROM supplier_fiscal_history")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    for nit in nits {
+        let has_history: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM supplier_fiscal_history WHERE supplier_nit = ?1)", [&nit], |r| r.get(0))?;
+        let regime = if has_history {
+            tax_profiles::regime_at(conn, &nit, &today)?
+        } else {
+            conn.query_row("SELECT fiscal_regime FROM suppliers WHERE nit = ?1", [&nit], |r| r.get::<_, Option<String>>(0)).optional()?.flatten()
+        };
+        if !regime.as_deref().is_some_and(tax_profiles::is_exempt_regime) {
+            continue;
+        }
+        let rules: Vec<(i64, String)> = conn
+            .prepare("SELECT id, retention FROM purchase_rules WHERE supplier_nit = ?1")?
+            .query_map([&nit], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, retention) in rules.into_iter().filter(|(_, r)| !is_empty_retention(r)) {
+            conn.execute("UPDATE purchase_rules SET retention = '[]', updated_at = ?1 WHERE id = ?2", params![now_iso(), id])?;
+            rule_snapshot(conn, id, None)?;
+            audit(conn, "", None, "exempt-rule-clean", &serde_json::json!({ "ruleId": id, "supplierNit": nit, "regime": regime, "previous": parse_json(retention) }))?;
+            out.rules += 1;
+        }
+        let removed = conn.execute("DELETE FROM supplier_withholding_rules WHERE is_default = 1 AND supplier_id IN (SELECT id FROM suppliers WHERE nit = ?1)", [&nit])?;
+        if removed > 0 {
+            audit(conn, "", None, "exempt-supplier-rules-clean", &serde_json::json!({ "supplierNit": nit, "regime": regime, "removed": removed }))?;
+            out.supplier_rules += removed as i64;
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    let lines: Vec<(i64, i64, String, String, String, Option<String>, String, Option<i64>, String)> = conn
+        .prepare(
+            "SELECT c.document_id, c.line_index, c.retention, d.issuer_nit, d.buyer_nit, d.issue_date, d.data, d.year, d.status
+             FROM purchase_line_class c JOIN purchase_documents d ON d.id = c.document_id
+             WHERE d.status = 'current' AND c.retention <> '[]'",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))?
+        .collect::<Result<_, _>>()?;
+    for (document_id, line_index, retention, issuer_nit, buyer_nit, issue_date, data, year, _) in lines {
+        if is_empty_retention(&retention) {
+            continue;
+        }
+        let data = parse_json(data);
+        if !exempt_on_invoice(conn, &issuer_nit, issue_date.as_deref(), &data)? {
+            continue;
+        }
+        if data["retefuenteCents"].as_i64().unwrap_or(0) > 0 {
+            out.kept_informed += 1;
+            continue;
+        }
+        conn.execute("UPDATE purchase_line_class SET retention = '[]' WHERE document_id = ?1 AND line_index = ?2", params![document_id, line_index])?;
+        audit(
+            conn,
+            &buyer_nit,
+            year,
+            "exempt-retention-clean",
+            &serde_json::json!({ "documentId": document_id, "lineIndex": line_index, "supplierNit": issuer_nit, "issueDate": issue_date, "previous": parse_json(retention), "reason": "Proveedor O-15 / O-47 en la fecha de la factura: la retención calculada automáticamente se corrige a cero." }),
+        )?;
+        out.lines += 1;
+    }
+    Ok(out)
 }
 
 pub fn delete_line_class(conn: &Connection, document_id: i64, line_index: i64) -> AppResult<()> {
@@ -1031,6 +1137,73 @@ mod tests {
         update_rule(&mut c, rid, "7305", "5004", &serde_json::json!([{ "rateId": 3 }])).unwrap();
         let rule = &list_rules(&c).unwrap()[0];
         assert_eq!((rule.concept_1001.as_str(), rule.retention.as_array().map_or(0, |a| a.len())), ("", 0));
+    }
+
+    #[test]
+    fn exempt_suppliers_lose_rules_and_automatic_retention_without_touching_history() {
+        let mut c = db();
+        let nit = "900319753";
+        c.execute("INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at, fiscal_regime) VALUES (?1, 'PRICESMART', 'purchase', 'x', 'x', 'O-13')", [nit]).unwrap();
+        let save = |c: &Connection, date: &str, regime: &str| {
+            tax_profiles::save_fiscal_entry(c, &tax_profiles::SupplierFiscalEntryInput { supplier_nit: nit.into(), effective_date: date.into(), regime: regime.into(), source: "manual".into(), note: String::new() }).unwrap()
+        };
+        save(&c, "2026-01-01", "O-13");
+        let mut informed = file("c.pdf", "N3", "2026-06-12", 1000);
+        informed.data = serde_json::json!({ "lines": [{ "description": "A" }], "retefuenteCents": 5000 });
+        let up = upload(&mut c, vec![file("a.pdf", "N1", "2026-03-10", 1000), file("b.pdf", "N2", "2026-06-10", 1000), informed]);
+        let ids: Vec<i64> = up.documents.iter().map(|d| d.id).collect();
+        for id in &ids {
+            c.execute("INSERT INTO purchase_line_class (document_id, line_index, puc_code, concept_1001, retention, scope, confirmed_at) VALUES (?1, 0, '613505', '5004', '[{\"rateId\":3}]', 'rule', 'x')", [id]).unwrap();
+        }
+        c.execute("INSERT INTO purchase_rules (supplier_nit, product_key, puc_code, concept_1001, retention, created_at, updated_at) VALUES (?1, 'bolsa', '613505', '5004', '[{\"rateId\":3}]', 'x', 'x')", [nit]).unwrap();
+        let sid: i64 = c.query_row("SELECT id FROM suppliers WHERE nit = ?1", [nit], |r| r.get(0)).unwrap();
+        c.execute("INSERT INTO supplier_withholding_rules (supplier_id, rate_id, base_mode, is_default, created_at, updated_at) VALUES (?1, 3, 'invoice_subtotal', 1, 'x', 'x')", [sid]).unwrap();
+        let retention_of = |c: &Connection, id: i64| -> String { c.query_row("SELECT retention FROM purchase_line_class WHERE document_id = ?1", [id], |r| r.get(0)).unwrap() };
+
+        // Mientras el proveedor no sea O-15/O-47 no se toca nada.
+        assert_eq!(clean_exempt_retention(&c).unwrap(), ExemptCleanup::default());
+
+        // O-15 desde el 1 de mayo: la factura de marzo (anterior) conserva su retención; la de junio se corrige; la informada se deja.
+        save(&c, "2026-05-01", "O-15");
+        assert_eq!(clean_exempt_retention(&c).unwrap(), ExemptCleanup { rules: 1, supplier_rules: 1, lines: 1, kept_informed: 1 });
+        assert_eq!(retention_of(&c, ids[0]), "[{\"rateId\":3}]");
+        assert_eq!(retention_of(&c, ids[1]), "[]");
+        assert_eq!(retention_of(&c, ids[2]), "[{\"rateId\":3}]");
+        assert_eq!(list_rules(&c).unwrap()[0].retention.as_array().map_or(99, |a| a.len()), 0);
+        assert_eq!(list_rules(&c).unwrap()[0].puc_code, "613505", "la regla conserva PUC y concepto");
+        assert_eq!(c.query_row::<i64, _, _>("SELECT COUNT(*) FROM purchase_rule_history WHERE retention = '[]'", [], |r| r.get(0)).unwrap(), 1);
+        let corrections: i64 = c.query_row("SELECT COUNT(*) FROM purchase_audit WHERE event = 'exempt-retention-clean' AND detail LIKE '%rateId%'", [], |r| r.get(0)).unwrap();
+        assert_eq!(corrections, 1, "la corrección queda auditada con el valor anterior");
+        // Idempotente: la segunda pasada solo vuelve a contar la informada.
+        assert_eq!(clean_exempt_retention(&c).unwrap(), ExemptCleanup { kept_informed: 1, ..Default::default() });
+
+        // Guardar una línea de una factura exenta nunca deja retención, aunque la pantalla la envíe.
+        let input = |ret: Value| LineClassInput { document_id: ids[1], line_index: 0, puc_code: "613505".into(), concept_1001: "5004".into(), retention: ret, save_rule: true, supplier_nit: nit.into(), product_key: "bolsa".into(), product_label: "Bolsa".into() };
+        save_line_classes(&mut c, &[input(serde_json::json!([{ "rateId": 3 }]))]).unwrap();
+        assert_eq!(retention_of(&c, ids[1]), "[]");
+        assert_eq!(list_rules(&c).unwrap()[0].retention.as_array().map_or(99, |a| a.len()), 0);
+
+        // Volver a un régimen con retención desde julio: la factura de agosto sí guarda retención y la de junio sigue exenta.
+        save(&c, "2026-07-01", "O-13");
+        let aug = upload(&mut c, vec![file("d.pdf", "N4", "2026-08-05", 1000)]).documents[0].id;
+        let mut august = input(serde_json::json!([{ "rateId": 3 }]));
+        august.document_id = aug;
+        save_line_classes(&mut c, &[august]).unwrap();
+        assert_eq!(retention_of(&c, aug), "[{\"rateId\":3}]");
+        assert_eq!(clean_exempt_retention(&c).unwrap().lines, 0);
+        assert_eq!(retention_of(&c, ids[1]), "[]");
+    }
+
+    #[test]
+    fn invoice_codes_decide_when_the_supplier_has_no_history() {
+        let mut c = db();
+        let mut simple = file("a.pdf", "N1", "2026-03-10", 1000);
+        simple.data = serde_json::json!({ "lines": [{ "description": "A" }], "issuer": { "fiscalCodes": ["O-47"] } });
+        let id = upload(&mut c, vec![simple]).documents[0].id;
+        let input = LineClassInput { document_id: id, line_index: 0, puc_code: "613505".into(), concept_1001: "5004".into(), retention: serde_json::json!([{ "rateId": 3 }]), save_rule: false, supplier_nit: "900319753".into(), product_key: "bolsa".into(), product_label: "Bolsa".into() };
+        save_line_classes(&mut c, &[input]).unwrap();
+        let stored: String = c.query_row("SELECT retention FROM purchase_line_class WHERE document_id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(stored, "[]");
     }
 
     #[test]

@@ -271,6 +271,18 @@ export interface CompanyVatEntry {
   createdAt: string;
 }
 
+/** Resultado de aplicar «O-15 / O-47 no generan retención» (ver `clean_exempt_retention` en Rust). */
+export interface ExemptCleanup {
+  /** Reglas de Compras a las que se les quitó la retención. */
+  rules: number;
+  /** Reglas predeterminadas de retención del proveedor eliminadas. */
+  supplierRules: number;
+  /** Líneas confirmadas cuya retención calculada automáticamente se corrigió a cero. */
+  lines: number;
+  /** Líneas con retención informada por el emisor: se dejaron para que el usuario decida. */
+  keptInformed: number;
+}
+
 export interface SupplierFiscalEntry {
   supplierNit: string;
   effectiveDate: string;

@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.38.7",
+    "date": "2026-10-19",
+    "notes": [
+      "Compras: los proveedores O-15 (Autorretenedor) y O-47 (Régimen simple de tributación) no generan retención. En la clasificación de la línea el selector desaparece y aparece «No aplica retención: el proveedor es …»; la línea se confirma sin retención y nada se calcula ni se envía a EEFF o 1001. Si el régimen cambia a uno que retiene, el selector vuelve.",
+      "Régimen fiscal editable con fecha efectiva (botones O-13, O-15, O-23, O-47, R-99-PN) en Proveedores, en el editor de proveedor de Compras y en la clasificación de la línea. Los cambios no alteran facturas anteriores a su fecha.",
+      "Datos existentes: al iniciar y al cambiar el régimen se quitan las reglas de retención de proveedores O-15/O-47 y se corrige a cero, con auditoría, la retención calculada automáticamente en sus facturas desde la fecha efectiva. Si la factura trae retención informada por el emisor se conserva con alerta para que decidas.",
+      "Compras: nuevo selector desplegable de retenciones con búsqueda y selección múltiple. Muestra la Tabla de retenciones completa agrupada (Compras, Servicios, Honorarios, Arrendamientos) con desplazamiento propio, con % vigente, cuantía mínima y vigencia de la fecha de la factura; funciona con teclado."
+    ]
+  },
+  {
     "version": "1.38.6",
     "date": "2026-10-19",
     "notes": [

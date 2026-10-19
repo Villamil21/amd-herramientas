@@ -17,7 +17,8 @@ import {
 import { hasRetention, previewRetention } from "../domain/lineDraft";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
-import { RetentionPicker } from "./RetentionPicker";
+import { RegimeInline } from "./RegimeInline";
+import { RetentionSection } from "./RetentionSection";
 
 interface Props {
   data: PurchasesData;
@@ -55,6 +56,8 @@ export function LineClassifyModal({
   );
   const [pickingPuc, setPickingPuc] = useState(!puc);
   const notApplicable = isNotApplicablePuc(puc);
+  /** O-15 / O-47 en la fecha de la factura: no hay selector ni cálculo de retención. */
+  const exemption = view.exemption;
   const year = view.doc.issueDate
     ? Number(view.doc.issueDate.slice(0, 4))
     : null;
@@ -104,7 +107,7 @@ export function LineClassifyModal({
             lineIndex: l.line.index,
             pucCode: puc,
             concept1001: notApplicable ? "" : concept,
-            retention: notApplicable ? [] : retention,
+            retention: notApplicable || exemption ? [] : retention,
             saveRule: scope === "rule",
             supplierNit: view.doc.issuerNit,
             productKey: productKey(l.line),
@@ -249,34 +252,28 @@ export function LineClassifyModal({
                 )}
             </section>
 
-            <section className="stack" style={{ gap: 6 }}>
-              <strong>Retenciones</strong>
-              <RetentionPicker
-                rates={data.rates}
-                picks={retention}
-                onChange={setRetention}
-                suggested={suggested}
-                preview={(rate) =>
-                  previewRetention(
-                    rate,
-                    data.rateVersions,
-                    view.doc.issueDate,
-                    data.uvts,
-                    l.line.baseCents ?? 0,
-                    conceptBase(rate.id),
-                    commonFor(rate.id),
-                  )
-                }
-              />
-              {view.retention.mismatch && (
-                <div className="field__hint">
-                  La factura informa{" "}
-                  {formatMoneyCents(view.retention.practicedCents)}; con los
-                  conceptos de la factura la tabla da{" "}
-                  {formatMoneyCents(view.retention.expectedCents)}.
-                </div>
-              )}
-            </section>
+            <RegimeInline data={data} view={view} />
+
+            <RetentionSection
+              view={view}
+              rates={data.rates}
+              versions={data.rateVersions}
+              uvts={data.uvts}
+              picks={retention}
+              onChange={setRetention}
+              suggested={suggested}
+              preview={(rate) =>
+                previewRetention(
+                  rate,
+                  data.rateVersions,
+                  view.doc.issueDate,
+                  data.uvts,
+                  l.line.baseCents ?? 0,
+                  conceptBase(rate.id),
+                  commonFor(rate.id),
+                )
+              }
+            />
           </>
         )}
 

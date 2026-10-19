@@ -1,6 +1,6 @@
 import type { LineClassInput, RateVersion, RetentionPick } from "../../../../types/purchases";
-import type { UvtValue, WithholdingRate } from "../../../../types/models";
-import { minBaseCents, retentionCents } from "../../../taxes/withholding/services/money";
+import { RETENTION_TYPE_LABEL, type RetentionType, type UvtValue, type WithholdingRate } from "../../../../types/models";
+import { formatRateBp, minBaseCents, retentionCents } from "../../../taxes/withholding/services/money";
 import { normalizeKey } from "../../../../utils/text";
 import { rateAt } from "./rateVersions";
 import { allocate, isInvoiceLevel } from "./retention";
@@ -74,10 +74,58 @@ export const addRetention = (picks: readonly RetentionPick[], rateId: number): R
 
 export const removeRetention = (picks: readonly RetentionPick[], rateId: number): RetentionPick[] => picks.filter((p) => p.rateId !== rateId);
 
-/** Conceptos que se pueden añadir: los que aún no están elegidos y coinciden con lo escrito (sin tildes ni mayúsculas). */
-export function searchRates(rates: readonly WithholdingRate[], picks: readonly RetentionPick[], query: string, limit = 12): WithholdingRate[] {
-  const q = normalizeKey(query);
-  return rates.filter((r) => !hasRetention(picks, r.id) && (!q || normalizeKey(r.name).includes(q))).slice(0, limit);
+/** Orden de los grupos del selector desplegable. */
+export const RETENTION_GROUP_ORDER: RetentionType[] = ["purchases", "services", "fees", "rentals"];
+
+export interface RetentionOption {
+  rate: WithholdingRate;
+  /** Tarifa vigente en la fecha de la factura. */
+  rateBp: number;
+  /** Cuantía mínima (UVT de la fecha × base vigente); 0 si no tiene. */
+  minCents: number;
+  /** Falta el UVT del año: no se puede calcular la cuantía mínima. */
+  missingUvt: boolean;
+  /** Fecha desde la que rige la tarifa aplicada; sin ella rige la regla base de la tabla. */
+  appliedFrom?: string;
+}
+
+export interface RetentionGroup {
+  type: RetentionType;
+  label: string;
+  options: RetentionOption[];
+}
+
+/** Sin mayúsculas, tildes ni espacios; la coma decimal vale como punto («3,5» = «3.5»). */
+const compact = (value: string) => normalizeKey(value).replace(/\s+/g, "").replace(/,/g, ".");
+
+/**
+ * Opciones del selector desplegable, agrupadas por tipo (Compras, Servicios, Honorarios, Arrendamientos). Sin texto devuelve la
+ * Tabla de retenciones completa; con texto filtra por nombre, tipo o porcentaje. Nunca ofrece un concepto ya elegido. Cada opción
+ * trae la tarifa, la cuantía mínima y la vigencia que aplican en la fecha de la factura.
+ */
+export function retentionOptions(rates: readonly WithholdingRate[], picks: readonly RetentionPick[], versions: readonly RateVersion[], date: string | null | undefined, uvts: readonly UvtValue[], query = ""): RetentionGroup[] {
+  const q = compact(query);
+  const year = date ? Number(date.slice(0, 4)) : null;
+  const uvt = year === null ? undefined : uvts.find((u) => u.year === year);
+  const groups = new Map<RetentionType, RetentionOption[]>();
+  const ordered = [...rates].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "es"));
+  for (const rate of ordered) {
+    if (hasRetention(picks, rate.id)) continue;
+    const applied = rateAt(rate, versions, date);
+    const haystack = compact(`${rate.name} ${RETENTION_TYPE_LABEL[rate.retentionType]} ${formatRateBp(applied.rateBp)} ${formatRateBp(applied.rateBp, true)}`);
+    if (q && !haystack.includes(q)) continue;
+    const option: RetentionOption = { rate, rateBp: applied.rateBp, minCents: uvt ? minBaseCents(applied.baseUvtCenti, uvt.valuePesos) : 0, missingUvt: !uvt && applied.baseUvtCenti > 0, appliedFrom: applied.appliedFrom };
+    groups.set(rate.retentionType, [...(groups.get(rate.retentionType) ?? []), option]);
+  }
+  return RETENTION_GROUP_ORDER.filter((t) => groups.has(t)).map((type) => ({ type, label: RETENTION_TYPE_LABEL[type], options: groups.get(type)! }));
+}
+
+/** Desplazamiento con teclado por una lista de `count` opciones: flechas (sin dar la vuelta). */
+export function moveActive(current: number, key: string, count: number): number {
+  if (count <= 0) return -1;
+  if (key === "ArrowDown") return Math.min(current + 1, count - 1);
+  if (key === "ArrowUp") return Math.max(current - 1, 0);
+  return current;
 }
 
 /** Retenciones elegidas en orden, ignorando las que ya no existen en la tabla (el cálculo de la factura las reporta aparte). */

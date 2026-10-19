@@ -428,7 +428,9 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
 
     const lines: LineView[] = data.lines.map((line) => {
       const cls = classByLine.get(`${doc.id}:${line.index}`);
-      const proposal = proposeLine(line, proposalContext);
+      // O-15 / O-47 en la fecha de la factura: nada propone ni arrastra retención (ni la de reglas ni la de una clasificación vieja).
+      const proposed = proposeLine(line, proposalContext);
+      const proposal = exemption ? { ...proposed, retention: [] } : proposed;
       const rawBase = (line.baseCents ?? 0) * sign;
       const rawVat = (line.vatCents ?? 0) * sign;
       const clean = cls ? normalizeClassification(cls) : undefined;
@@ -444,7 +446,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         proposal,
         pucCode: clean?.pucCode ?? "",
         concept1001: clean?.concept1001 ?? "",
-        retention: clean?.retention ?? [],
+        retention: exemption ? [] : (clean?.retention ?? []),
         confirmed: Boolean(cls),
         notApplicable: na,
         excludedBaseCents: na ? rawBase : 0,

@@ -15,6 +15,7 @@ import type {
   SavePurchaseUploadOutcome,
   IdenticalUpload,
   ReplaceFile,
+  ExemptCleanup,
   SupplierFiscalEntry,
   TitleKind,
   TitleType,
@@ -55,8 +56,8 @@ export const purchasesService = {
   deleteCompanyVat: (companyId: number, effectiveDate: string) => call<void>("delete_company_vat_entry", { companyId, effectiveDate }),
 
   supplierFiscalHistory: (supplierNit: string | null = null) => call<SupplierFiscalEntry[]>("list_supplier_fiscal_history", { supplierNit }),
-  saveSupplierFiscal: (input: { supplierNit: string; effectiveDate: string; regime: string; source: "factura" | "manual" | "proveedor"; note: string }) => call<void>("save_supplier_fiscal_entry", { input }),
-  deleteSupplierFiscal: (supplierNit: string, effectiveDate: string) => call<void>("delete_supplier_fiscal_entry", { supplierNit, effectiveDate }),
+  saveSupplierFiscal: (input: { supplierNit: string; effectiveDate: string; regime: string; source: "factura" | "manual" | "proveedor"; note: string }) => call<ExemptCleanup>("save_supplier_fiscal_entry", { input }),
+  deleteSupplierFiscal: (supplierNit: string, effectiveDate: string) => call<ExemptCleanup>("delete_supplier_fiscal_entry", { supplierNit, effectiveDate }),
 
   pucConcepts1001: () => call<PucConcept1001[]>("list_puc_concepts_1001"),
   setPucConcept1001: (pucCode: string, conceptCode: string | null) => call<void>("set_puc_concept_1001", { pucCode, conceptCode }),

@@ -61,7 +61,11 @@ pub fn delete_uvt_value(db: State<'_, Db>, year: i64) -> AppResult<()> {
 #[tauri::command]
 pub fn save_supplier_withholding(db: State<'_, Db>, id: i64, profile: WithholdingProfileInput) -> AppResult<()> {
     let profile = profile.validated()?;
-    db.with(|c| suppliers::save_withholding_profile(c, id, &profile))
+    db.with(|c| {
+        suppliers::save_withholding_profile(c, id, &profile)?;
+        // Un proveedor O-15 / O-47 no conserva reglas predeterminadas de retención aunque el formulario las reenvíe.
+        crate::database::purchases::clean_exempt_retention(c).map(|_| ())
+    })
 }
 
 #[tauri::command]
@@ -74,13 +78,20 @@ pub fn create_withholding_supplier(
     let input = input.validated()?;
     let profile = profile.validated()?;
     let regime = fiscal_regime.map(|r| clean(&r, 250)).filter(|r| !r.is_empty());
-    db.with(|c| suppliers::insert_with_profile(c, &input, &profile, regime.as_deref()))
+    db.with(|c| {
+        let id = suppliers::insert_with_profile(c, &input, &profile, regime.as_deref())?;
+        crate::database::purchases::clean_exempt_retention(c)?;
+        Ok(id)
+    })
 }
 
 #[tauri::command]
 pub fn set_supplier_fiscal_regime(db: State<'_, Db>, id: i64, fiscal_regime: String) -> AppResult<()> {
     let regime = clean(&fiscal_regime, 250);
-    db.with(|c| suppliers::set_fiscal_regime(c, id, &regime))
+    db.with(|c| {
+        suppliers::set_fiscal_regime(c, id, &regime)?;
+        crate::database::purchases::clean_exempt_retention(c).map(|_| ())
+    })
 }
 
 #[tauri::command]

@@ -6,7 +6,8 @@ import { useDebounced } from "../hooks/useDebounced";
 import { supplierService } from "../services/supplierService";
 import { withholdingService } from "../services/withholdingService";
 import { RETENTION_TYPE_LABEL, VAT_TYPE_LABEL, type Supplier } from "../types/models";
-import { regimeCodes, SupplierFormModal } from "./suppliers/SupplierFormModal";
+import { regimeCodes } from "./suppliers/FiscalRegimeField";
+import { SupplierFormModal } from "./suppliers/SupplierFormModal";
 import { SupplierWithholdingModal } from "./suppliers/SupplierWithholdingModal";
 
 /** Un proveedor persona natural cuya factura no reveló el tipo de documento: el usuario debe elegirlo (no se supone el 13). */

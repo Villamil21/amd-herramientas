@@ -1,4 +1,4 @@
-import type { CompanyVatEntry, SupplierFiscalEntry } from "../../../../types/purchases";
+import type { CompanyVatEntry, ExemptCleanup, SupplierFiscalEntry } from "../../../../types/purchases";
 import { EXCLUDED_CODES, excludedCode, fiscalCodes, regimeKey } from "../../../taxes/withholding/services/fiscal";
 
 /**
@@ -70,9 +70,23 @@ export function retentionExemption(regime: RegimeAt): { code: string; label: str
   return code ? { code, label: EXCLUDED_CODES[code] } : undefined;
 }
 
+/** Mensaje de la línea cuando el proveedor no genera retención: «No aplica retención: el proveedor es O-15 Autorretenedor». */
+export const exemptionMessage = (exemption: { code: string; label: string }) => `No aplica retención: el proveedor es ${exemption.code} ${exemption.label}`;
+
 /** ¿La factura trae un régimen distinto del vigente en el historial en esa fecha? (cambio por registrar) */
 export function regimeChanged(history: readonly SupplierFiscalEntry[], date: string | null | undefined, invoiceText: string | undefined, invoiceCodes: readonly string[]): boolean {
   const entry = date ? effectiveAt(history, date) : undefined;
   if (!entry || invoiceCodes.length === 0) return false;
   return regimeKey(entry.regime) !== regimeKey(invoiceText ?? invoiceCodes.join(";"));
+}
+
+/** Qué se corrigió al registrar un régimen O-15 / O-47 (para el aviso al usuario); vacío si no hubo nada que corregir. */
+export function cleanupSummary(c: ExemptCleanup): string {
+  const parts = [
+    c.rules ? `${c.rules} ${c.rules === 1 ? "regla de compras sin retención" : "reglas de compras sin retención"}` : "",
+    c.supplierRules ? `${c.supplierRules} ${c.supplierRules === 1 ? "regla predeterminada de retención eliminada" : "reglas predeterminadas de retención eliminadas"}` : "",
+    c.lines ? `${c.lines} ${c.lines === 1 ? "línea corregida" : "líneas corregidas"} a retención cero (queda en la auditoría)` : "",
+    c.keptInformed ? `${c.keptInformed} ${c.keptInformed === 1 ? "línea con retención informada por el emisor: decide en la factura" : "líneas con retención informada por el emisor: decide en cada factura"}` : "",
+  ].filter(Boolean);
+  return parts.join("; ");
 }

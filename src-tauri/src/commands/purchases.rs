@@ -121,13 +121,19 @@ pub fn list_supplier_fiscal_history(db: State<'_, Db>, supplier_nit: Option<Stri
 }
 
 #[tauri::command]
-pub fn save_supplier_fiscal_entry(db: State<'_, Db>, input: SupplierFiscalEntryInput) -> AppResult<()> {
-    db.with(|c| tax_profiles::save_fiscal_entry(c, &input))
+pub fn save_supplier_fiscal_entry(db: State<'_, Db>, input: SupplierFiscalEntryInput) -> AppResult<purchases::ExemptCleanup> {
+    db.with(|c| {
+        tax_profiles::save_fiscal_entry(c, &input)?;
+        purchases::clean_exempt_retention(c)
+    })
 }
 
 #[tauri::command]
-pub fn delete_supplier_fiscal_entry(db: State<'_, Db>, supplier_nit: String, effective_date: String) -> AppResult<()> {
-    db.with(|c| tax_profiles::delete_fiscal_entry(c, &supplier_nit, &effective_date))
+pub fn delete_supplier_fiscal_entry(db: State<'_, Db>, supplier_nit: String, effective_date: String) -> AppResult<purchases::ExemptCleanup> {
+    db.with(|c| {
+        tax_profiles::delete_fiscal_entry(c, &supplier_nit, &effective_date)?;
+        purchases::clean_exempt_retention(c)
+    })
 }
 
 #[tauri::command]

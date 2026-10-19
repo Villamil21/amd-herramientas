@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, DateInput, Field, Input, Modal, useToast } from "../../../../components/ui";
+import { Alert, Button, DateInput, Field, Modal, useToast } from "../../../../components/ui";
 import { purchasesService } from "../../../../services/purchasesService";
 import { supplierService } from "../../../../services/supplierService";
 import { errorMessage } from "../../../../services/tauri";
 import type { PersonType } from "../../../../types/models";
+import { FiscalRegimeField } from "../../../../pages/suppliers/FiscalRegimeField";
 import { IdentityFields, LocationFields, type IdentityValue, type LocationValue } from "../../../exogena/components/ThirdPartyForm";
+import { cleanupSummary } from "../domain/history";
 import type { SupplierView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
 
@@ -53,6 +55,7 @@ export function SupplierEditorModal({ data, supplier, onClose }: Props) {
   async function save() {
     if (!supplier || !identity || !location) return;
     setSaving(true);
+    let summary = "";
     try {
       const existing = supplier.supplier;
       await supplierService.saveWithTax(
@@ -76,10 +79,11 @@ export function SupplierEditorModal({ data, supplier, onClose }: Props) {
         },
       );
       if (regime.trim() && regimeChanged && regimeDate) {
-        await purchasesService.saveSupplierFiscal({ supplierNit: supplier.nit, effectiveDate: regimeDate, regime: regime.trim(), source: "manual", note: "Capturado en Compras, costos y exógena" });
+        const cleanup = await purchasesService.saveSupplierFiscal({ supplierNit: supplier.nit, effectiveDate: regimeDate, regime: regime.trim(), source: "manual", note: "Capturado en Compras, costos y exógena" });
+        summary = cleanupSummary(cleanup);
       }
-      await data.reloadSuppliers();
-      toast("Proveedor actualizado.");
+      await Promise.all([data.reloadSuppliers(), data.reloadRules(), data.reloadState()]);
+      toast(summary ? `Proveedor actualizado. Régimen sin retención: ${summary}.` : "Proveedor actualizado.");
       onClose();
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -116,8 +120,8 @@ export function SupplierEditorModal({ data, supplier, onClose }: Props) {
         <IdentityFields value={identity} onChange={(p) => setIdentity((cur) => (cur ? { ...cur, ...p } : cur))} catalogs={data.catalogs} numberLabel="NIT" numberReadOnly />
         <LocationFields value={location} onChange={(p) => setLocation((cur) => (cur ? { ...cur, ...p } : cur))} catalogs={data.catalogs} />
         <div className="form-grid form-grid--compact">
-          <Field label="Régimen / responsabilidad fiscal" hint="Códigos como O-13, O-15 (autorretenedor), O-47 (régimen simple). Vacío: sin identificar.">
-            {(id) => <Input id={id} value={regime} onChange={(e) => setRegime(e.target.value)} />}
+          <Field label="Régimen / responsabilidad fiscal" hint="O-15 (autorretenedor) y O-47 (régimen simple) no generan retención. Vacío: sin identificar." className="span-full">
+            {(id) => <FiscalRegimeField id={id} value={regime} onChange={setRegime} />}
           </Field>
           <Field label="Rige desde" hint="Un cambio de régimen no recalcula facturas anteriores a esta fecha.">
             {(id) => <DateInput id={id} value={regimeDate} onChange={setRegimeDate} disabled={!regimeChanged} />}

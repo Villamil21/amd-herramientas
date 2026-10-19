@@ -6200,3 +6200,77 @@ body.is-reordering * {
 .pending-group__item:last-child { border-bottom: 0; }
 .pending-return { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-4); margin-bottom: var(--space-3); border: 1px solid var(--color-info); background: var(--color-info-soft); border-radius: 10px; font-size: 13.5px; }
 .pending-return__actions { display: flex; gap: var(--space-2); }
+
+/* Selector desplegable de retenciones (Compras, costos y exógena). */
+.retention-combo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.retention-combo__field {
+  position: relative;
+}
+
+.retention-combo__field .input {
+  padding-right: 38px;
+}
+
+.retention-combo__toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
+.retention-list {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.retention-list__empty {
+  padding: 10px 12px;
+}
+
+.retention-list__group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 12px;
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.retention-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+
+.retention-option.is-active {
+  background: var(--color-primary-soft);
+  border-left-color: var(--color-primary);
+}
+
+.retention-option__name {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.retention-option__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--color-muted);
+  font-size: 12px;
+}

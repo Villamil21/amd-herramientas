@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -5,13 +6,13 @@ import type { PurchaseDocument, PurchaseLine, RateVersion, RetentionPick } from 
 import type { UvtValue, WithholdingRate } from "../../../../types/models";
 import { buildPucIndex } from "../../puc-codes/services/pucCatalog";
 import { RetentionPicker } from "../ui/RetentionPicker";
-import { addRetention, previewRetention, removeRetention, searchRates } from "./lineDraft";
+import { addRetention, moveActive, previewRetention, removeRetention, retentionOptions } from "./lineDraft";
 import { buildPurchasesModel } from "./model";
 
-const rate = (id: number, name: string, rateBp: number, baseUvtCenti = 0): WithholdingRate => ({ id, retentionType: "services", name, baseUvtCenti, rateBp, sortOrder: id, createdAt: "", updatedAt: "" }) as WithholdingRate;
+const rate = (id: number, name: string, rateBp: number, baseUvtCenti = 0, retentionType: WithholdingRate["retentionType"] = "services"): WithholdingRate => ({ id, retentionType, name, baseUvtCenti, rateBp, sortOrder: id, createdAt: "", updatedAt: "" }) as WithholdingRate;
 const SERVICES = rate(1, "Servicios generales", 400, 400);
-const FEES = rate(2, "Honorarios", 1100);
-const RENT = rate(3, "Arrendamientos", 350);
+const FEES = rate(2, "Honorarios", 1100, 0, "fees");
+const RENT = rate(3, "Arrendamientos", 350, 0, "rentals");
 const ALL = [SERVICES, FEES, RENT];
 const UVT: UvtValue[] = [{ year: 2025, valuePesos: 50_000, updatedAt: "" }];
 const VERSIONS: RateVersion[] = [{ rateId: 1, effectiveFrom: "2025-06-01", baseUvtCenti: 400, rateBp: 600 } as RateVersion];
@@ -27,13 +28,6 @@ describe("borrador de retenciones de una línea", () => {
     expect(picks).toEqual([{ rateId: 1 }, { rateId: 2 }]);
     expect(removeRetention(picks, 1)).toEqual([{ rateId: 2 }]);
     expect(removeRetention(removeRetention(picks, 1), 2)).toEqual([]);
-  });
-
-  it("el selector buscable ignora tildes y mayúsculas y no ofrece lo ya elegido", () => {
-    expect(searchRates(ALL, [], "ARRENDAMIENT").map((r) => r.id)).toEqual([3]);
-    expect(searchRates(ALL, [], "honorários".replace("á", "a")).map((r) => r.id)).toEqual([2]);
-    expect(searchRates(ALL, [{ rateId: 1 }], "").map((r) => r.id)).toEqual([2, 3]);
-    expect(searchRates(ALL, [], "zzz")).toEqual([]);
   });
 
   it("muestra base, cuantía mínima, % vigente en la fecha, vigencia y valor calculado", () => {
@@ -52,20 +46,91 @@ describe("borrador de retenciones de una línea", () => {
   });
 });
 
-describe("panel de retenciones: no despliega la tabla completa", () => {
-  const html = (picks: RetentionPick[]) =>
-    renderToStaticMarkup(createElement(RetentionPicker, { rates: ALL, picks, onChange: () => {}, preview: (r) => previewRetention(r, VERSIONS, "2025-03-10", UVT, MILLION), suggested: [1] }));
+const ids = (groups: ReturnType<typeof retentionOptions>) => groups.flatMap((g) => g.options.map((o) => o.rate.id));
 
-  it("con una retención sugerida muestra solo esa (etiqueta + cálculo) y el botón «Añadir otra retención»", () => {
-    const out = html([{ rateId: 1 }]);
-    expect(out).toContain("Servicios generales");
-    expect(out).toContain("sugerida");
-    expect(out).toContain("Añadir otra retención");
-    expect(out).not.toContain("Honorarios");
-    expect(out).not.toContain("Arrendamientos");
-    expect(out).not.toContain('type="checkbox"');
-    for (const col of ["Cuantía mínima", "% vigente", "Vigencia", "Valor calculado"]) expect(out).toContain(col);
-    expect(out).toContain("Regla base de la tabla");
+describe("selector desplegable de retenciones", () => {
+  // Compras (4 y 5), Servicios (1, 6), Honorarios (2), Arrendamientos (3) en orden de tabla mezclado.
+  const BUY = rate(4, "Compras generales", 250, 2700, "purchases");
+  const BUY2 = rate(5, "Compras de café pergamino", 150, 0, "purchases");
+  const SRV2 = rate(6, "Transporte de carga", 100, 400);
+  const TABLE = [SERVICES, FEES, RENT, BUY, BUY2, SRV2];
+  const options = (picks: RetentionPick[] = [], query = "", date = "2025-03-10") => retentionOptions(TABLE, picks, VERSIONS, date, UVT, query);
+
+  it("al abrirlo muestra la tabla completa, agrupada: Compras, Servicios, Honorarios y Arrendamientos", () => {
+    const groups = options();
+    expect(groups.map((g) => g.label)).toEqual(["Compras", "Servicios", "Honorarios", "Arrendamientos"]);
+    expect(ids(groups).sort()).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(groups[0].options.map((o) => o.rate.id)).toEqual([4, 5]);
+  });
+
+  it("cada opción trae el % vigente, la cuantía mínima y la vigencia de la fecha de la factura", () => {
+    const at = (date: string) => options([], "", date).flatMap((g) => g.options).find((o) => o.rate.id === 1)!;
+    // Antes de 2025-06-01 rige la regla base (4 %, 4 UVT × $50.000); desde esa fecha, 6 %.
+    expect(at("2025-03-10")).toMatchObject({ rateBp: 400, minCents: 20_000_000, appliedFrom: undefined, missingUvt: false });
+    expect(at("2025-07-10")).toMatchObject({ rateBp: 600, minCents: 20_000_000, appliedFrom: "2025-06-01" });
+    // Sin UVT del año con base mínima: se avisa en vez de inventar la cuantía.
+    expect(at("2024-03-10")).toMatchObject({ missingUvt: true });
+    const sinMinima = options().flatMap((g) => g.options).find((o) => o.rate.id === 2)!;
+    expect(sinMinima).toMatchObject({ minCents: 0, missingUvt: false });
+  });
+
+  it("busca por nombre, tipo o porcentaje ignorando mayúsculas, tildes y espacios", () => {
+    expect(ids(options([], "ARRENDAMIENT"))).toEqual([3]);
+    expect(ids(options([], "cafe  PERGAMINO"))).toEqual([5]);
+    expect(ids(options([], "  hono rarios "))).toEqual([2]);
+    expect(ids(options([], "servicios")).sort()).toEqual([1, 6]);
+    expect(ids(options([], "11"))).toEqual([2]);
+    expect(ids(options([], "2,5"))).toEqual([4]);
+    expect(ids(options([], "2.5 %"))).toEqual([4]);
+    expect(options([], "zzz")).toEqual([]);
+  });
+
+  it("no ofrece los conceptos ya elegidos; con todos elegidos no queda ninguno", () => {
+    expect(ids(options([{ rateId: 1 }, { rateId: 4 }]))).not.toContain(1);
+    expect(ids(options([{ rateId: 1 }, { rateId: 4 }]))).not.toContain(4);
+    expect(ids(options([{ rateId: 1 }, { rateId: 4 }])).sort()).toEqual([2, 3, 5, 6]);
+    expect(options(TABLE.map((r) => ({ rateId: r.id })))).toEqual([]);
+  });
+
+  it("el teclado recorre sin dar la vuelta", () => {
+    expect(moveActive(0, "ArrowDown", 3)).toBe(1);
+    expect(moveActive(2, "ArrowDown", 3)).toBe(2);
+    expect(moveActive(0, "ArrowUp", 3)).toBe(0);
+    expect(moveActive(2, "ArrowUp", 3)).toBe(1);
+    expect(moveActive(0, "ArrowDown", 0)).toBe(-1);
+    expect(moveActive(1, "a", 3)).toBe(1);
+  });
+
+  const html = (picks: RetentionPick[], open = false) =>
+    renderToStaticMarkup(createElement(RetentionPicker, { rates: TABLE, picks, versions: VERSIONS, uvts: UVT, date: "2025-03-10", onChange: () => {}, preview: (r) => previewRetention(r, VERSIONS, "2025-03-10", UVT, MILLION), suggested: [1], defaultOpen: open }));
+
+  it("cerrado muestra solo las elegidas; abierto, el buscador con rol combobox y la lista con todas", () => {
+    const closed = html([{ rateId: 1 }]);
+    expect(closed).toContain("Servicios generales");
+    expect(closed).toContain("sugerida");
+    expect(closed).toContain('role="combobox"');
+    expect(closed).toContain('aria-expanded="false"');
+    expect(closed).not.toContain('role="listbox"');
+    expect(closed).not.toContain("Transporte de carga");
+    for (const col of ["Cuantía mínima", "% vigente", "Vigencia", "Valor calculado"]) expect(closed).toContain(col);
+
+    const open = html([{ rateId: 1 }], true);
+    expect(open).toContain('aria-expanded="true"');
+    expect(open).toContain('role="listbox"');
+    expect(open).toContain('aria-multiselectable="true"');
+    for (const name of ["Honorarios", "Arrendamientos", "Compras generales", "Compras de café pergamino", "Transporte de carga"]) expect(open).toContain(name);
+    for (const group of ["Compras", "Servicios", "Honorarios", "Arrendamientos"]) expect(open).toContain(`aria-label="${group}"`);
+    // La ya elegida no se ofrece como opción (solo aparece como etiqueta y en la tabla de cálculo).
+    expect(open).not.toMatch(/-opt-1"/);
+    expect(open).toMatch(/-opt-2"/);
+    expect(open).toContain("Mín. ");
+    expect(open).toContain("Regla base de la tabla");
+  });
+
+  it("ninguna retención: lo dice y los botones de quitar no existen", () => {
+    const out = html([]);
+    expect(out).toContain("Sin retención");
+    expect(out).not.toContain("Quitar ");
   });
 
   it("varias retenciones: una etiqueta removible por concepto", () => {
@@ -75,12 +140,12 @@ describe("panel de retenciones: no despliega la tabla completa", () => {
     expect(out).not.toContain("Quitar Arrendamientos");
   });
 
-  it("ninguna retención: lo dice y deja abierto el selector buscable", () => {
-    const out = html([]);
-    expect(out).toContain("Sin retención");
-    expect(out).toContain("Buscar concepto de retención");
-    expect(out).toContain("Honorarios");
-    expect(out).not.toContain("Añadir otra retención");
+  it("la lista tiene desplazamiento propio y grupos fijos para no perder los botones del panel", () => {
+    const css = readFileSync(new URL("../../../../styles/global.css", import.meta.url), "utf8");
+    const rule = css.slice(css.indexOf(".retention-list {"), css.indexOf("}", css.indexOf(".retention-list {")));
+    expect(rule).toMatch(/max-height:\s*\d+px/);
+    expect(rule).toContain("overflow-y: auto");
+    expect(css).toMatch(/\.retention-option\.is-active\s*{/);
   });
 });
 
