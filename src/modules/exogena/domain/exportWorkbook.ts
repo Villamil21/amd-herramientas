@@ -1,7 +1,7 @@
 import type { ExogenaWorkbookInput } from "../../../services/exogenaService";
 import type { ExoRecord, FormatStatusRow } from "../../../types/exogena";
 import { FORMAT_STATUS_LABEL } from "../../../types/exogena";
-import { formatMoneyCents } from "../../../utils/format";
+import { formatExoCents } from "./numbers";
 import { findFormat, IMPLEMENTED_FORMATS } from "./formats";
 import type { Reconciliation } from "./form1009";
 import { exportInteger } from "./numbers";
@@ -42,7 +42,7 @@ export function exportBlockers(state: ExportState): ExportBlocker[] {
     const stoppers = blocking(state.problems[f.code] ?? []);
     if (stoppers.length) out.push({ format: f.code, message: `${f.code} tiene ${stoppers.length} ${stoppers.length === 1 ? "pendiente" : "pendientes"} (${stoppers[0].message})` });
     if (f.code === "1009" && state.reconciliation1009 && state.reconciliation1009.differenceCents !== 0) {
-      out.push({ format: "1009", message: `1009: la diferencia de conciliación con el ESF es ${formatMoneyCents(state.reconciliation1009.differenceCents)}; debe ser cero.` });
+      out.push({ format: "1009", message: `1009: la diferencia de conciliación con el ESF es ${formatExoCents(state.reconciliation1009.differenceCents)}; debe ser cero.` });
     }
   }
   if (out.length === 0 && applicable === 0) out.push({ format: "", message: "No hay formatos aplicables para exportar: todos están marcados «No aplica»." });

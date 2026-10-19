@@ -24,7 +24,7 @@ import { centsToPesos } from "../../../exogena/domain/numbers";
 import { nitDigits } from "../../../exogena/domain/text";
 import { findCompanyByNit, namesMatch } from "../../shared/companyMatch";
 import type { PucIndex } from "../../puc-codes/services/pucCatalog";
-import { conceptProblem, isNotApplicablePuc, normalizeClassification, proposeLine, pucProblem, type Proposal } from "./classify";
+import { conceptProblem, isNotApplicablePuc, normalizeClassification, productKey, proposeLine, pucProblem, type Proposal, type RetentionHistoryEntry } from "./classify";
 import { regimeAt, regimeChanged, retentionExemption, vatResponsibleAt, vatYearCoverage, type RegimeAt } from "./history";
 import { computeRetention, ratesNear, type RetentionResult } from "./retention";
 import { ratesAt } from "./rateVersions";
@@ -248,6 +248,10 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
   const fiscalByNit = new Map<string, SupplierFiscalEntry[]>();
   for (const e of input.supplierFiscal) fiscalByNit.set(e.supplierNit, [...(fiscalByNit.get(e.supplierNit) ?? []), e]);
   const docById = new Map(state.documents.map((d) => [d.id, d]));
+  const classesByDoc = new Map<number, typeof state.lineClasses>();
+  for (const c of state.lineClasses) classesByDoc.set(c.documentId, [...(classesByDoc.get(c.documentId) ?? []), c]);
+  const docsBySupplier = new Map<string, PurchaseDocument[]>();
+  for (const d of state.documents) docsBySupplier.set(d.issuerNit, [...(docsBySupplier.get(d.issuerNit) ?? []), d]);
 
   const currentDocs = state.documents.filter((d) => d.status === "current");
   const majorityBuyerName = mostFrequentName(currentDocs.map((d) => d.buyerName));
@@ -422,7 +426,23 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     }
 
     // --- Líneas clasificadas ---
-    const proposalContext = { rulesByKey: rulesByKey(supplierNit), pucConcepts: input.pucConcepts, supplierRules: input.rules.filter((r) => r.supplierNit === supplierNit), supplier };
+    // Retenciones ya confirmadas por el usuario en facturas anteriores del proveedor (no propuestas), de cuando su régimen sí retenía.
+    const knownRates = new Set(input.rates.map((r) => r.id));
+    const retentionHistory: RetentionHistoryEntry[] = [];
+    if (doc.issueDate && !exemption) {
+      for (const other of docsBySupplier.get(supplierNit) ?? []) {
+        if (other.id === doc.id || other.status !== "current" || !other.issueDate || flagsByDoc.get(other.id)?.has("exclude")) continue;
+        if (other.issueDate > doc.issueDate || (other.issueDate === doc.issueDate && other.id > doc.id)) continue;
+        if (retentionExemption(regimeAt(history, other.issueDate, other.data.issuer.fiscalCodes, other.data.issuer.fiscalText))) continue;
+        for (const c of classesByDoc.get(other.id) ?? []) {
+          const l = other.data.lines.find((x) => x.index === c.lineIndex);
+          if (!l || isNotApplicablePuc(c.pucCode)) continue;
+          const picks = c.retention.filter((r) => knownRates.has(r.rateId));
+          retentionHistory.push({ productKey: productKey(l), pucCode: c.pucCode, concept1001: c.concept1001, retention: picks, date: other.issueDate, confirmedAt: c.confirmedAt });
+        }
+      }
+    }
+    const proposalContext = { rulesByKey: rulesByKey(supplierNit), pucConcepts: input.pucConcepts, supplierRules: input.rules.filter((r) => r.supplierNit === supplierNit), supplier, history: retentionHistory };
     const year = doc.issueDate ? Number(doc.issueDate.slice(0, 4)) : null;
     const conceptsOfYear = input.concepts1001.filter((c) => year === null || c.year === year);
 
@@ -530,7 +550,9 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         key: "exempt",
       });
     }
-    if (retention.mismatch) {
+    // La factura informa retención pero ninguna línea confirmada tiene concepto: el cálculo da 0 y no coincide con lo informado.
+    const informedWithoutConcept = !exemption && retention.practicedCents > 0 && retention.byRate.length === 0 && retention.missingRates.length === 0 && lines.some((l) => l.confirmed && !l.notApplicable);
+    if (retention.mismatch || informedWithoutConcept) {
       const near = ratesNear(ratesOfDoc, retention.suggestedRateBp);
       add({
         code: "retention-mismatch",

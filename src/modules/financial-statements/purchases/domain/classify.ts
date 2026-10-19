@@ -34,14 +34,46 @@ export function productKey(line: Pick<PurchaseLine, "code" | "description">): st
   return code ? `c:${code}` : `d:${normalizeKey(line.description ?? "")}`;
 }
 
-export type ProposalSource = "rule" | "puc" | "general" | "supplier";
+export type ProposalSource = "rule" | "puc" | "general" | "supplier" | "history";
 
 export const PROPOSAL_SOURCE_LABEL: Record<ProposalSource, string> = {
   rule: "Regla confirmada del producto",
   puc: "Sugerencia de la cuenta PUC",
   general: "Sugerencia general del proveedor",
   supplier: "Retención predeterminada del proveedor",
+  history: "Sugerida por factura confirmada del proveedor",
 };
+
+/** Texto del origen de un dato propuesto; el de historial lleva la fecha de la factura confirmada («… del 15/02/2026»). */
+export function proposalSourceText(source: ProposalSource, historyDate?: string): string {
+  if (source !== "history" || !historyDate) return PROPOSAL_SOURCE_LABEL[source];
+  const [y, m, d] = historyDate.split("-");
+  return `${PROPOSAL_SOURCE_LABEL.history} del ${d}/${m}/${y}`;
+}
+
+/** Línea de una factura anterior del proveedor que el usuario ya confirmó (nunca una propuesta pendiente). */
+export interface RetentionHistoryEntry {
+  productKey: string;
+  pucCode: string;
+  concept1001: string;
+  retention: RetentionPick[];
+  /** Fecha de expedición de esa factura (AAAA-MM-DD). */
+  date: string;
+  confirmedAt: string;
+}
+
+/**
+ * Retención que el usuario confirmó antes para el proveedor: la más reciente del mismo producto o, si no hay, la más reciente
+ * de una clasificación equivalente (mismo PUC y, si se propone, mismo concepto 1001). Solo los conceptos: la tarifa, la
+ * cuantía mínima y la vigencia salen de la fecha de la factura nueva.
+ */
+export function historyRetention(history: readonly RetentionHistoryEntry[], key: string, pucCode: string, concept: string): RetentionHistoryEntry | undefined {
+  const latest = (items: RetentionHistoryEntry[]) => items.sort((a, b) => (a.date === b.date ? (a.confirmedAt < b.confirmedAt ? 1 : -1) : a.date < b.date ? 1 : -1))[0];
+  const sameProduct = latest(history.filter((h) => h.productKey === key));
+  if (sameProduct) return sameProduct;
+  if (!pucCode) return undefined;
+  return latest(history.filter((h) => h.pucCode === pucCode && (!concept || h.concept1001 === concept)));
+}
 
 export interface Proposal {
   pucCode: string;
@@ -49,6 +81,8 @@ export interface Proposal {
   retention: RetentionPick[];
   /** De dónde salió cada dato (puede ser distinto para cada uno). */
   sources: { puc?: ProposalSource; concept?: ProposalSource; retention?: ProposalSource };
+  /** Fecha de la factura confirmada de la que sale la retención sugerida por historial. */
+  retentionFrom?: string;
   ruleId?: number;
 }
 
@@ -59,6 +93,8 @@ export interface ProposalContext {
   /** Reglas del proveedor (para la sugerencia general). */
   supplierRules: readonly PurchaseRule[];
   supplier?: Supplier;
+  /** Líneas confirmadas de facturas anteriores del proveedor (con un régimen que sí retenía en su fecha). */
+  history?: readonly RetentionHistoryEntry[];
 }
 
 const mostFrequent = (values: string[]): string | undefined => {
@@ -124,6 +160,15 @@ export function proposeLine(line: PurchaseLine, ctx: ProposalContext): Proposal 
       }
     }
   }
+  let retentionFrom: string | undefined;
+  if (retention.length === 0 && ctx.history?.length && !isNotApplicablePuc(pucCode)) {
+    const hit = historyRetention(ctx.history, productKey(line), pucCode, concept);
+    if (hit?.retention.length) {
+      retention = hit.retention;
+      retentionFrom = hit.date;
+      sources.retention = "history";
+    }
+  }
   if (retention.length === 0) {
     const fromSupplier = supplierDefaultRetention(ctx.supplier);
     if (fromSupplier.length) {
@@ -135,7 +180,7 @@ export function proposeLine(line: PurchaseLine, ctx: ProposalContext): Proposal 
     // 7305: sin concepto 1001 ni retención, ni siquiera sugeridos por el PUC o por el proveedor.
     return { pucCode, concept1001: "", retention: [], sources: { puc: sources.puc }, ruleId: rule?.id };
   }
-  return { pucCode, concept1001: concept, retention, sources, ruleId: rule?.id };
+  return { pucCode, concept1001: concept, retention, sources, retentionFrom, ruleId: rule?.id };
 }
 
 /** Clases del PUC que pueden recibir compras: 1 activo · 5 gastos · 6 costos de ventas · 7 costos de producción. */

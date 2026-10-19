@@ -6,7 +6,7 @@ import { exogenaService } from "../../../services/exogenaService";
 import { fileService } from "../../../services/fileService";
 import { errorMessage } from "../../../services/tauri";
 import { FORMAT_STATUS_LABEL } from "../../../types/exogena";
-import { formatMoneyCents } from "../../../utils/format";
+import { formatExoCents } from "../domain/numbers";
 import { DEST_LABEL, STATUS_LABEL, STATUS_TONE, type Dest, type DestStatus } from "../../financial-statements/purchases/domain/status";
 import { ExogenaContextBar } from "../components/ExogenaContextBar";
 import { ProblemsPanel } from "../components/ProblemsPanel";
@@ -145,15 +145,15 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
             <Card title="Conciliación del IVA" description="IVA descontable 1005 − IVA recuperado 1006 = IVA mayor valor deducible 1001.">
               <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>
                 <span>
-                  1005: <strong>{formatMoneyCents(rec.discountableCents)}</strong>
+                  1005: <strong>{formatExoCents(rec.discountableCents)}</strong>
                 </span>
                 <span>
-                  1006: <strong>{formatMoneyCents(rec.recoveredCents)}</strong>
+                  1006: <strong>{formatExoCents(rec.recoveredCents)}</strong>
                 </span>
                 <span>
-                  1001: <strong>{formatMoneyCents(rec.vat1001Cents)}</strong>
+                  1001: <strong>{formatExoCents(rec.vat1001Cents)}</strong>
                 </span>
-                {rec.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">Diferencia {formatMoneyCents(rec.differenceCents)}</Badge>}
+                {rec.differenceCents === 0 ? <Badge tone="success">Conciliado</Badge> : <Badge tone="danger">Diferencia {formatExoCents(rec.differenceCents)}</Badge>}
               </div>
             </Card>
           )}

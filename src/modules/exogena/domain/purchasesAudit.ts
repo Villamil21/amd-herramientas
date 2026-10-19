@@ -1,5 +1,5 @@
 import type { ExoRecord } from "../../../types/exogena";
-import { formatMoneyCents } from "../../../utils/format";
+import { formatExoCents, formatExoPesos } from "./numbers";
 import { lineLabel, monthName, type DocView, type PurchasesModel } from "../../financial-statements/purchases/domain/model";
 import { DEST_LABEL } from "../../financial-statements/purchases/domain/status";
 import type { PurchasesExoFormat, PurchasesFormatState } from "./purchasesFormat";
@@ -43,7 +43,7 @@ export interface PurchasesAudit {
   totals: { documents: number; lines: number; pendingLines: number };
 }
 
-const money = (v: unknown) => (typeof v === "number" ? formatMoneyCents(Math.round(v * 100)) : "—");
+const money = (v: unknown) => (typeof v === "number" ? formatExoPesos(v) : "—");
 
 function thirdName(d: Record<string, unknown>): string {
   const business = String(d.businessName ?? "").trim();
@@ -90,11 +90,11 @@ export function buildPurchasesAudit(args: { model: PurchasesModel; format: Purch
     problems: state.problems.map((p) => ({ level: p.level === "blocking" ? "Bloquea" : "Advertencia", message: p.message })),
     reconciliation: rec.applicable
       ? [
-          { label: "IVA descontable 1005", value: formatMoneyCents(rec.discountableCents) },
-          { label: "IVA recuperado 1006", value: formatMoneyCents(rec.recoveredCents) },
-          { label: "Neto 1005 − 1006", value: formatMoneyCents(rec.netVatCents) },
-          { label: "IVA deducible 1001", value: formatMoneyCents(rec.vat1001Cents) },
-          { label: "Diferencia", value: formatMoneyCents(rec.differenceCents) },
+          { label: "IVA descontable 1005", value: formatExoCents(rec.discountableCents) },
+          { label: "IVA recuperado 1006", value: formatExoCents(rec.recoveredCents) },
+          { label: "Neto 1005 − 1006", value: formatExoCents(rec.netVatCents) },
+          { label: "IVA deducible 1001", value: formatExoCents(rec.vat1001Cents) },
+          { label: "Diferencia", value: formatExoCents(rec.differenceCents) },
         ]
       : null,
     totals: { documents: model.totals.documents, lines: model.totals.lines, pendingLines: model.totals.pendingLines },

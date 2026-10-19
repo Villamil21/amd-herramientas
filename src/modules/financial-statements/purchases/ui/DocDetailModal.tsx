@@ -5,7 +5,7 @@ import { purchasesService } from "../../../../services/purchasesService";
 import { errorMessage } from "../../../../services/tauri";
 import { formatMoneyCents } from "../../../../utils/format";
 import { leafConcept } from "../../puc-codes/services/pucCatalog";
-import { PROPOSAL_SOURCE_LABEL } from "../domain/classify";
+import { PROPOSAL_SOURCE_LABEL, proposalSourceText } from "../domain/classify";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
 import { confirmProposalsLabel, proposableLines, PROPOSALS_INCLUDE, proposalInputs } from "../domain/lineDraft";
@@ -210,6 +210,7 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
         </td>
         <td>
           {shownRetention.length ? shownRetention.map((r) => rateName(r.rateId)?.name ?? `#${r.rateId}`).join(", ") : "—"}
+          {!l.confirmed && shownRetention.length > 0 && proposal.sources.retention && <div className="field__hint">{proposalSourceText(proposal.sources.retention, proposal.retentionFrom)}</div>}
           {l.commonRetentionRateIds.length > 0 && <div className="field__hint">Participa en la retención común de la factura</div>}
         </td>
         <td>

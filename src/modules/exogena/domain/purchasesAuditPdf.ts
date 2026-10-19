@@ -1,3 +1,4 @@
+import { formatExoCents } from "./numbers";
 import type { PurchasesAudit } from "./purchasesAudit";
 
 /** PDF interno de auditoría de 1001 / 1005 / 1006: hoja Carta, texto corrido con salto de página y numeración al pie. */
@@ -66,7 +67,7 @@ export async function renderPurchasesAuditPdf(audit: PurchasesAudit): Promise<{ 
     y += 4;
     text(`${r.third} · ${r.document}${r.concept ? ` · concepto ${r.concept}` : ""}${r.outdated ? " · DESACTUALIZADO" : ""}`, { bold: true });
     text(r.values.map((v) => `${v.label}: ${v.value}`).join(" · "), { x: MX + 10 });
-    for (const t of r.trace) text(`${t.date} · ${t.invoice} (${t.file}) · ${t.detail} · $ ${(t.amountCents / 100).toLocaleString("es-CO")}`, { size: 8, x: MX + 10, color: "#555555" });
+    for (const t of r.trace) text(`${t.date} · ${t.invoice} (${t.file}) · ${t.detail} · ${formatExoCents(t.amountCents)}`, { size: 8, x: MX + 10, color: "#555555" });
   }
 
   const total = pdf.getNumberOfPages();

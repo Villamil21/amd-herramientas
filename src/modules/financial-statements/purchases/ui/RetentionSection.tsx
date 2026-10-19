@@ -14,6 +14,8 @@ interface Props {
   picks: readonly RetentionPick[];
   onChange: (picks: RetentionPick[]) => void;
   suggested: readonly number[];
+  /** De dónde salen las retenciones sugeridas (p. ej. «Sugerida por factura confirmada del proveedor del 15/02/2026»). */
+  origin?: string;
   preview: (rate: WithholdingRate) => RetentionPreview;
 }
 
@@ -21,7 +23,7 @@ interface Props {
  * Retenciones de una línea. Si el proveedor era O-15 (autorretenedor) u O-47 (régimen simple) en la fecha de la factura NO hay
  * selector, buscador ni opciones: solo el mensaje, y la línea se confirma sin retención. Si no, el selector desplegable.
  */
-export function RetentionSection({ view, rates, versions, uvts, picks, onChange, suggested, preview }: Props) {
+export function RetentionSection({ view, rates, versions, uvts, picks, onChange, suggested, origin, preview }: Props) {
   const { exemption } = view;
   return (
     <section className="stack" style={{ gap: 6 }}>
@@ -40,6 +42,7 @@ export function RetentionSection({ view, rates, versions, uvts, picks, onChange,
       ) : (
         <>
           <RetentionPicker rates={rates} versions={versions} uvts={uvts} date={view.doc.issueDate} picks={picks} onChange={onChange} suggested={suggested} preview={preview} />
+          {origin && picks.length > 0 && <div className="field__hint" data-testid="retention-origin">{origin}</div>}
           {view.retention.mismatch && (
             <div className="field__hint">
               La factura informa {formatMoneyCents(view.retention.practicedCents)}; con los conceptos de la factura la tabla da {formatMoneyCents(view.retention.expectedCents)}.

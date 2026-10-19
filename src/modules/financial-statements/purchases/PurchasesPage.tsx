@@ -7,6 +7,7 @@ import { errorMessage } from "../../../services/tauri";
 import { formatInteger, formatMoneyCents } from "../../../utils/format";
 import { findCompanyByNit } from "../shared/companyMatch";
 import { panelVisible } from "./domain/pending";
+import { formatPesosCompact, retentionCell } from "./domain/retentionSummary";
 import { getPendingReturn, setPendingReturn, takePendingReturn } from "./pendingReturn";
 import { DEST_LABEL, stopsDest, type Alert as AlertItem, type Dest } from "./domain/status";
 import { monthName, type DocView, type PurchasesModel, type SupplierView } from "./domain/model";
@@ -16,6 +17,7 @@ import { useExoPurchasesGuard } from "./useExoPurchasesGuard";
 import { AlertsPanel } from "./ui/AlertsPanel";
 import { DocDetailModal } from "./ui/DocDetailModal";
 import { ImportModal, type PendingImport } from "./ui/ImportModal";
+import { ReteCell } from "./ui/ReteCell";
 import { PendingPanel, type PanelMemo } from "./ui/PendingPanel";
 import { TitleClassifyModal } from "./ui/TitleClassifyModal";
 import { StatusChip, StatusStrip } from "./ui/StatusStrip";
@@ -207,9 +209,9 @@ function Body({ data, model, tab, setTab, onSelectDest, filter, setFilter, searc
           { key: "docs", label: t.documents === 1 ? "factura vigente" : "facturas vigentes", value: formatInteger(t.documents) },
           { key: "lines", label: "líneas", value: formatInteger(t.lines) },
           { key: "pending", label: t.pendingLines === 1 ? "línea por confirmar" : "líneas por confirmar", value: formatInteger(t.pendingLines), tone: t.pendingLines ? "attention" : undefined },
-          { key: "purchases", label: "compras (base)", value: formatMoneyCents(t.purchaseCents) },
-          { key: "returns", label: "devoluciones (base)", value: formatMoneyCents(t.returnCents) },
-          { key: "vat", label: "IVA neto", value: formatMoneyCents(t.purchaseVatCents - t.returnVatCents) },
+          { key: "purchases", label: "compras (base)", value: formatPesosCompact(t.purchaseCents) },
+          { key: "returns", label: "devoluciones (base)", value: formatPesosCompact(t.returnCents) },
+          { key: "vat", label: "IVA neto", value: formatPesosCompact(t.purchaseVatCents - t.returnVatCents) },
         ]}
       />
       <SyncNotice data={data} model={model} />
@@ -302,12 +304,12 @@ function CoverageCard({ model }: { model: PurchasesModel }) {
                 <td>{monthName(c.month)}</td>
                 <td className="num">{c.purchases || "—"}</td>
                 <td className="num">{c.returns || "—"}</td>
-                <td className="num">{c.purchaseCents ? formatMoneyCents(c.purchaseCents) : "—"}</td>
-                <td className="num">{c.returnCents ? formatMoneyCents(c.returnCents) : "—"}</td>
+                <td className="num">{c.purchaseCents ? formatPesosCompact(c.purchaseCents) : "—"}</td>
+                <td className="num">{c.returnCents ? formatPesosCompact(c.returnCents) : "—"}</td>
                 <td className="num">{c.pending || "—"}</td>
                 <td className="num">{c.blocked || "—"}</td>
                 <td className="num">{c.duplicates || "—"}</td>
-                <td className="num">{c.notApplicableLines ? `${c.notApplicableLines} · ${formatMoneyCents(c.notApplicableCents)}` : "—"}</td>
+                <td className="num">{c.notApplicableLines ? `${c.notApplicableLines} · ${formatPesosCompact(c.notApplicableCents)}` : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -320,7 +322,8 @@ function CoverageCard({ model }: { model: PurchasesModel }) {
 function docFlags(d: DocView) {
   const blocked = d.alerts.some((a) => a.severity === "block");
   const pending = d.alerts.some((a) => a.severity === "pending");
-  return { blocked, pending };
+  const review = d.alerts.some((a) => a.severity === "review");
+  return { blocked, pending, review };
 }
 
 function DocsTab({ model, filter, setFilter, search, setSearch, onOpen }: { model: PurchasesModel; filter: DocFilter; setFilter: (f: DocFilter) => void; search: string; setSearch: (s: string) => void; onOpen: (id: number) => void }) {
@@ -362,6 +365,7 @@ function DocsTab({ model, filter, setFilter, search, setSearch, onOpen }: { mode
               <th>Proveedor</th>
               <th className="num">Base</th>
               <th className="num">IVA</th>
+              <th title="Retención en la fuente: porcentaje(s) y valor calculado">Rete</th>
               <th>Estado</th>
             </tr>
           </thead>
@@ -369,16 +373,19 @@ function DocsTab({ model, filter, setFilter, search, setSearch, onOpen }: { mode
             {rows.map((d) => {
               const f = docFlags(d);
               const allNotApplicable = d.lines.length > 0 && d.lines.every((l) => l.notApplicable);
-              const status = d.doc.status === "evidence" ? "review" : d.excluded ? "na" : f.blocked ? "block" : f.pending ? "pending" : allNotApplicable ? "na" : "ready";
-              const text = d.doc.status === "evidence" ? "Duplicada (evidencia)" : d.doc.status === "superseded" ? "Sustituida" : d.excluded ? "Excluida" : f.blocked ? `Bloquea · ${d.alerts.filter((a) => a.severity === "block").length}` : f.pending ? `Por confirmar · ${d.alerts.filter((a) => a.severity === "pending").length}` : allNotApplicable ? "No aplica" : "Lista";
+              const status = d.doc.status === "evidence" ? "review" : d.excluded ? "na" : f.blocked ? "block" : f.pending ? "pending" : f.review ? "review" : allNotApplicable ? "na" : "ready";
+              const text = d.doc.status === "evidence" ? "Duplicada (evidencia)" : d.doc.status === "superseded" ? "Sustituida" : d.excluded ? "Excluida" : f.blocked ? `Bloquea · ${d.alerts.filter((a) => a.severity === "block").length}` : f.pending ? `Por confirmar · ${d.alerts.filter((a) => a.severity === "pending").length}` : f.review ? `Por revisar · ${d.alerts.filter((a) => a.severity === "review").length}` : allNotApplicable ? "No aplica" : "Lista";
               return (
                 <tr key={d.doc.id} className="is-clickable" onClick={() => onOpen(d.doc.id)}>
                   <td>{d.doc.issueDate ?? "—"}</td>
                   <td>{d.kind === "return" ? "Devolución" : d.kind === "purchase" ? "Compra" : d.data.title}</td>
                   <td>{d.data.number ?? d.doc.fileName}</td>
                   <td>{d.doc.issuerName}</td>
-                  <td className="num">{formatMoneyCents(d.baseCents)}</td>
-                  <td className="num">{formatMoneyCents(d.vatCents)}</td>
+                  <td className="num">{formatPesosCompact(d.baseCents)}</td>
+                  <td className="num">{formatPesosCompact(d.vatCents)}</td>
+                  <td className="nowrap">
+                    <ReteCell cell={retentionCell(d)} />
+                  </td>
                   <td>
                     <StatusChip status={status} label={text} />
                   </td>
@@ -387,7 +394,7 @@ function DocsTab({ model, filter, setFilter, search, setSearch, onOpen }: { mode
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7}>No hay facturas con este filtro.</td>
+                <td colSpan={8}>No hay facturas con este filtro.</td>
               </tr>
             )}
           </tbody>

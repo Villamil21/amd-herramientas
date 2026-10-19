@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.38.8",
+    "date": "2026-10-19",
+    "notes": [
+      "Compras: la retención se sugiere también por historial. Si el proveedor tiene facturas anteriores con una retención confirmada y su régimen vigente en la fecha de la nueva factura permite retener, se propone esa misma retención (del mismo producto o, si no hay, de una clasificación equivalente), con el origen «Sugerida por factura confirmada del proveedor del dd/mm/aaaa». La tarifa, cuantía mínima, UVT y vigencia se calculan con la fecha de la factura nueva. Con O-15 u O-47 no se sugiere nada. Entra en «Confirmar propuestas completas».",
+      "Compras: la tabla de Facturas y notas crédito tiene la columna «Rete» con el porcentaje y el valor calculado (3,5 % · $ 3.116), «No aplica» para O-15/O-47 y «Sin retención». Si el concepto no supera la cuantía mínima muestra $ 0 con su explicación; las líneas 7305 se excluyen. Si la retención informada en la factura difiere del cálculo, la factura queda «Por revisar» y no «Lista».",
+      "Compras: el resumen (totales, cobertura mensual y tabla de facturas) muestra pesos enteros, sin decimales.",
+      "Exógena: el PDF de auditoría de 1001, 1005 y 1006 y las pantallas de Exógena muestran únicamente pesos enteros, sin decimales."
+    ]
+  },
+  {
     "version": "1.38.7",
     "date": "2026-10-19",
     "notes": [

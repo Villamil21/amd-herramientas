@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsToPesos, exportInteger, formatPesosPlain, isValidPercentage, percentageHundredths, roundPesos, splitPercentage } from "./numbers";
+import { centsToPesos, exportInteger, formatExoCents, formatExoPesos, formatPesosPlain, isValidPercentage, percentageHundredths, roundPesos, splitPercentage } from "./numbers";
 
 describe("redondeo y formato de montos", () => {
   it("1.000.000,5 se exporta como 1000001 (redondeo convencional) y la interfaz usa separadores", () => {
@@ -37,5 +37,17 @@ describe("porcentaje de participación", () => {
     for (const ok of [100, 50.2, 0.01, 33.34]) expect(isValidPercentage(ok)).toBe(true);
     for (const bad of [0, -1, 100.01, 50.123, Number.NaN]) expect(isValidPercentage(bad)).toBe(false);
     expect(percentageHundredths(33.33) + percentageHundredths(33.33) + percentageHundredths(33.34)).toBe(10000);
+  });
+});
+
+describe("pesos enteros para mostrar e imprimir", () => {
+  it("sin decimales, con miles y signo antes del símbolo", () => {
+    expect(formatExoPesos(1000000.5)).toBe("$ 1.000.001");
+    expect(formatExoPesos(-2.5)).toBe("-$ 3");
+    expect(formatExoPesos(0)).toBe("$ 0");
+    expect(formatExoCents(311_637)).toBe("$ 3.116");
+    expect(formatExoCents(311_850)).toBe("$ 3.119");
+    expect(formatExoCents(-800_049)).toBe("-$ 8.000");
+    for (const v of [formatExoPesos(12345.67), formatExoCents(123_456_789)]) expect(v).not.toMatch(/,\d/);
   });
 });

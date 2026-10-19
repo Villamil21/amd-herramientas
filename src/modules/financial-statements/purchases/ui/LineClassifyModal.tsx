@@ -12,6 +12,7 @@ import {
   NOT_APPLICABLE_MESSAGE,
   NOT_APPLICABLE_PUC,
   PROPOSAL_SOURCE_LABEL,
+  proposalSourceText,
   productKey,
 } from "../domain/classify";
 import { hasRetention, previewRetention } from "../domain/lineDraft";
@@ -262,6 +263,7 @@ export function LineClassifyModal({
               picks={retention}
               onChange={setRetention}
               suggested={suggested}
+              origin={!l.confirmed && l.proposal.sources.retention && suggested.length > 0 ? proposalSourceText(l.proposal.sources.retention, l.proposal.retentionFrom) : undefined}
               preview={(rate) =>
                 previewRetention(
                   rate,

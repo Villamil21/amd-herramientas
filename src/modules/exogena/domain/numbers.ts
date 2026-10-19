@@ -22,6 +22,15 @@ export function formatPesosPlain(value: number): string {
   return `${n < 0 ? "-" : ""}${String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
 }
 
+/** Pesos enteros para mostrar o imprimir: «$ 1.000.001» · «-$ 5». Sin decimales en ninguna parte de Exógena. */
+export function formatExoPesos(value: number): string {
+  const n = roundPesos(value);
+  return `${n < 0 ? "-" : ""}$ ${formatPesosPlain(Math.abs(n))}`;
+}
+
+/** Centavos exactos → «$ 1.000.001» (redondeo convencional a pesos). */
+export const formatExoCents = (cents: number): string => formatExoPesos(centsToPesos(cents));
+
 /** Entero tal como se exporta: sin puntos, comas, símbolo de moneda ni decimales. */
 export const exportInteger = (value: number): number => roundPesos(value);
 

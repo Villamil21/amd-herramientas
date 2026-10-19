@@ -8,7 +8,7 @@ import { exogenaService } from "../../../services/exogenaService";
 import { errorMessage } from "../../../services/tauri";
 import type { ExoRecord, RecordData, SyncOutcome } from "../../../types/exogena";
 import type { WithholdingRate } from "../../../types/models";
-import { formatMoneyCents } from "../../../utils/format";
+import { formatExoCents } from "../domain/numbers";
 import { ExogenaContextBar } from "../components/ExogenaContextBar";
 import { ProblemsPanel } from "../components/ProblemsPanel";
 import { RecordEditor } from "../components/RecordEditor";
@@ -144,15 +144,15 @@ export default function Format1009Page() {
             <div className="fs-kpis" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
               <div className="fs-kpi">
                 <span className="muted">Suma de registros 1009</span>
-                <strong>{formatMoneyCents(rec!.recordsCents)}</strong>
+                <strong>{formatExoCents(rec!.recordsCents)}</strong>
               </div>
               <div className="fs-kpi">
                 <span className="muted">Total pasivos del ESF al 31/12</span>
-                <strong>{formatMoneyCents(rec!.liabilitiesCents)}</strong>
+                <strong>{formatExoCents(rec!.liabilitiesCents)}</strong>
               </div>
               <div className="fs-kpi">
                 <span className="muted">Diferencia</span>
-                <strong className={balanced ? "amount--positive" : "amount--negative"}>{formatMoneyCents(rec!.differenceCents)}</strong>
+                <strong className={balanced ? "amount--positive" : "amount--negative"}>{formatExoCents(rec!.differenceCents)}</strong>
                 <Badge tone={balanced ? "success" : "danger"}>{balanced ? "Conciliado" : "No cuadra"}</Badge>
               </div>
             </div>
@@ -165,7 +165,7 @@ export default function Format1009Page() {
                       <div className="pending-item__text">
                         <strong>{item.label}</strong>
                         <span>
-                          {formatMoneyCents(item.cents)}
+                          {formatExoCents(item.cents)}
                           {item.detail ? ` · ${item.detail}` : ""}
                         </span>
                       </div>
