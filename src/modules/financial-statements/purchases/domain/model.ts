@@ -91,6 +91,8 @@ export interface LineView {
   eeffCents: number;
   practicedCents: number;
   assumedCents: number;
+  /** Conceptos de esta línea que forman parte de la retención común de la factura (se calcula una sola vez; aquí solo participa). */
+  commonRetentionRateIds: number[];
   pucProblem?: string;
   conceptProblem?: string;
 }
@@ -452,6 +454,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         eeffCents: base + (vatResponsible === false ? vat : 0),
         practicedCents: 0,
         assumedCents: 0,
+        commonRetentionRateIds: [],
       };
       if (cls && !na) {
         view.pucProblem = cls.pucCode ? pucProblem(input.pucIndex, cls.pucCode) : "Falta el código PUC.";
@@ -477,6 +480,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     for (const l of lines) {
       l.practicedCents = (retention.practicedByLine.get(l.line.index) ?? 0) * sign;
       l.assumedCents = (retention.assumedByLine.get(l.line.index) ?? 0) * sign;
+      l.commonRetentionRateIds = l.notApplicable ? [] : retention.byRate.filter((e) => e.scope === "invoice" && l.retention.some((r) => r.rateId === e.rateId)).map((e) => e.rateId);
     }
 
     // Alertas por línea: «Por confirmar» o faltantes por destino.

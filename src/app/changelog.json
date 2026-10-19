@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.38.5",
+    "date": "2026-10-19",
+    "notes": [
+      "Compras: al clasificar una línea aparece «Aplicar clasificación completa a las otras N líneas», que copia PUC, concepto 1001 y todas las retenciones a las líneas sin confirmar de esa factura. Es solo para la factura: no crea reglas de producto.",
+      "Compras: cuando una misma retención aplica a todas las líneas incluidas de la factura, la cuantía mínima se evalúa contra el subtotal (sin líneas 7305) y la retención se calcula una sola vez. 1001 y los demás resultados la suman exactamente una vez. Si las retenciones difieren entre líneas, se mantiene el cálculo por línea."
+    ]
+  },
+  {
     "version": "1.38.4",
     "date": "2026-10-19",
     "notes": [

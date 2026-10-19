@@ -103,6 +103,11 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <span>
             Comprador: <strong>{doc.buyerName}</strong> ({doc.buyerNit}) · Subtotal <strong>{formatMoneyCents(view.baseCents * view.sign)}</strong> · IVA <strong>{formatMoneyCents(view.vatCents * view.sign)}</strong> · Retención informada <strong>{formatMoneyCents(parsed.retefuenteCents ?? 0)}</strong>
+            {view.retention.invoiceLevelCents > 0 && (
+              <>
+                {" "}· Retención común de la factura <strong>{formatMoneyCents(view.retention.invoiceLevelCents)}</strong> (una sola vez)
+              </>
+            )}
           </span>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -211,7 +216,10 @@ function LineRows({ data, view, l, editing, onEdit, run, busy }: { data: Purchas
           {shownConcept || "—"}
           {!l.confirmed && shownConcept && proposal.sources.concept && <div className="field__hint">{PROPOSAL_SOURCE_LABEL[proposal.sources.concept]}</div>}
         </td>
-        <td>{shownRetention.length ? shownRetention.map((r) => rateName(r.rateId)?.name ?? `#${r.rateId}`).join(", ") : "—"}</td>
+        <td>
+          {shownRetention.length ? shownRetention.map((r) => rateName(r.rateId)?.name ?? `#${r.rateId}`).join(", ") : "—"}
+          {l.commonRetentionRateIds.length > 0 && <div className="field__hint">Participa en la retención común de la factura</div>}
+        </td>
         <td>
           <StatusChip status={status} label={l.line.issue ? "Bloquea · ilegible" : problems.length ? "Bloquea · dato inválido" : l.notApplicable ? "No aplica" : l.confirmed ? "Confirmada" : "Por confirmar"} />
           {l.notApplicable && <div className="field__hint">Excluida: importe informativo, no se envía a EEFF ni a Exógena.</div>}

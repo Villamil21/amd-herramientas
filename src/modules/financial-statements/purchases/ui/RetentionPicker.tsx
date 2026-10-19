@@ -78,6 +78,9 @@ export function RetentionPicker({ rates, picks, onChange, preview, suggested = [
                     <td>{p.appliedFrom ? `Desde ${formatDateForDisplay(p.appliedFrom)}` : "Regla base de la tabla"}</td>
                     <td className="num">
                       {formatMoneyCents(p.valueCents)}
+                      {p.invoiceLevel && !p.belowMinimum && (
+                        <div className="field__hint">Retención común de la factura: {formatMoneyCents(p.invoiceValueCents)} sobre el subtotal {formatMoneyCents(p.conceptBaseCents)}, contada una sola vez; esta línea participa con su parte.</div>
+                      )}
                       {p.belowMinimum && !p.missingUvt && <div className="field__hint">No supera la cuantía mínima ({formatMoneyCents(p.conceptBaseCents)} en la factura)</div>}
                     </td>
                   </tr>,

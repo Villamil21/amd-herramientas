@@ -10,6 +10,10 @@ import { impliedRateBp, minBaseCents, retentionCents, sameRetention } from "../.
  *  - Nunca se suma una asumida adicional a una practicada: si difieren, se alerta, se conserva el valor documentado y se sugiere
  *    el porcentaje que corresponde.
  *  - La cuantía mínima se evalúa con el UVT del año de la factura sobre la base de cada concepto (suma de sus líneas).
+ *  - Un concepto que aplica a TODAS las líneas incluidas (≥ 2) es una retención de factura: la cuantía mínima se evalúa contra el
+ *    subtotal de la factura (sin líneas 7305, que no entran aquí) y se calcula UNA sola vez sobre ese subtotal; por línea solo se
+ *    muestra su parte, que suma exactamente ese valor. Si los conceptos difieren entre líneas, o uno aplica solo a parte de ellas,
+ *    ese concepto se evalúa con la suma de sus líneas, como antes.
  *  - Las devoluciones usan los mismos importes (el signo lo aplica quien suma).
  */
 
@@ -27,12 +31,16 @@ export interface RateExpectation {
   minCents: number;
   belowMinimum: boolean;
   expectedCents: number;
+  /** «invoice»: el concepto está en todas las líneas incluidas y se calcula una sola vez sobre el subtotal; «lines»: sobre la suma de las líneas que lo tienen. */
+  scope: "invoice" | "lines";
 }
 
 export interface RetentionResult {
   /** Retención esperada por la Tabla de retenciones (suma de conceptos que superan su mínimo). */
   expectedCents: number;
   byRate: RateExpectation[];
+  /** Parte de `expectedCents` que viene de retenciones de factura (cada una contada una sola vez). */
+  invoiceLevelCents: number;
   /** Conceptos elegidos que no existen ya en la Tabla de retenciones. */
   missingRates: number[];
   /** Falta el UVT del año de la factura (no se puede evaluar la cuantía mínima). */
@@ -78,6 +86,9 @@ export interface RetentionInput {
   uvts: readonly UvtValue[];
 }
 
+/** Un concepto es de factura cuando está en todas las líneas incluidas y hay más de una. */
+export const isInvoiceLevel = (linesWithRate: number, includedLines: number): boolean => includedLines >= 2 && linesWithRate === includedLines;
+
 export function computeRetention(input: RetentionInput): RetentionResult {
   const byRate = new Map<number, { base: number; lines: RetentionLineInput[] }>();
   for (const line of input.lines) {
@@ -105,7 +116,8 @@ export function computeRetention(input: RetentionInput): RetentionResult {
     const minCents = uvt ? minBaseCents(rate.baseUvtCenti, uvt.valuePesos) : 0;
     const belowMinimum = !uvt || group.base < minCents;
     const expectedCents = input.exempt || belowMinimum ? 0 : retentionCents(group.base, rate.rateBp);
-    expectations.push({ rateId, name: rate.name, rateBp: rate.rateBp, baseCents: group.base, minCents, belowMinimum, expectedCents });
+    const scope = isInvoiceLevel(group.lines.length, input.lines.length) ? "invoice" : "lines";
+    expectations.push({ rateId, name: rate.name, rateBp: rate.rateBp, baseCents: group.base, minCents, belowMinimum, expectedCents, scope });
     if (expectedCents) {
       const shares = allocate(expectedCents, group.lines.map((l) => l.baseCents));
       group.lines.forEach((l, i) => expectedByLine.set(l.index, (expectedByLine.get(l.index) ?? 0) + shares[i]));
@@ -134,6 +146,7 @@ export function computeRetention(input: RetentionInput): RetentionResult {
   return {
     expectedCents,
     byRate: expectations,
+    invoiceLevelCents: expectations.filter((e) => e.scope === "invoice").reduce((s, e) => s + e.expectedCents, 0),
     missingRates,
     missingUvtYear,
     practicedByLine,
