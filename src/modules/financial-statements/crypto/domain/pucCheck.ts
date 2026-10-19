@@ -1,3 +1,4 @@
+import { resolverOf } from "../../shared/pucGroups";
 import type { FsCatalog, FsLine, FsPucMapping } from "../../../../types/fs";
 import { isAssignable, type PucIndex } from "../../puc-codes/services/pucCatalog";
 import { presentationOf } from "../../shared/presentation";
@@ -25,7 +26,7 @@ export function makePucChecker(settings: ReadonlyMap<string, string>, index: Puc
     const expected = EXPECTED_ROLE[key];
     if (located && expected && catalog) {
       // La línea debe existir, estar activa y ser la de su rol: si no, el Generador no la mostraría donde corresponde (o la dejaría sin clasificar).
-      const m = mappings.get(code) ?? mappings.get(code.slice(0, 4));
+      const m = resolverOf(mappings).resolve(code)?.mapping;
       const line = catalog.lines.find((l) => l.id === m?.lineId);
       if (line && !line.isActive) return { code, valid, located: false, location: presentation.text, problem: `La cuenta ${code} apunta a la línea desactivada «${line.name}» de Estados Financieros: actívala o elige otra cuenta.` };
       if (line && line.role !== expected.role) return { code, valid, located: false, location: presentation.text, problem: `La cuenta ${code} está ubicada en «${line.name}», no en «${expected.label}»: ubícala en esa línea del Estado de Resultados.` };

@@ -397,10 +397,17 @@ export function checklist(s: Statements, other: Statements, duplicates: Duplicat
   const sameResult = s.eerr.beforeTax === other.eerr.beforeTax;
   const pendingBalances = pendingBankBalances(s);
   const taxBlocking = s.tax.issues.filter((i) => i.level === "blocking");
-  const blocking = [!balanced, s.unclassified.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0, taxBlocking.length > 0, cryptoStale.length > 0, cryptoOutside.length > 0, cryptoSyncing].filter(Boolean).length;
+  const blocking = [!balanced, s.unclassified.length > 0, s.mappingConflicts.length > 0, s.missingCounterparts.length > 0, duplicates.length > 0, absences.length > 0, !sameResult, pendingBalances.length > 0, taxBlocking.length > 0, cryptoStale.length > 0, cryptoOutside.length > 0, cryptoSyncing].filter(Boolean).length;
   return [
     { id: "balanced", label: "Activo = Pasivo + Patrimonio", ok: balanced },
-    { id: "classified", label: "Todos los PUC clasificados o excluidos", ok: s.unclassified.length === 0, detail: s.unclassified.length ? `${s.unclassified.length} sin clasificar` : undefined },
+    { id: "classified", label: "Todos los PUC clasificados o excluidos", ok: s.unclassified.length === 0, detail: s.unclassified.length ? `${s.unclassified.length} ${s.unclassified.length === 1 ? "grupo" : "grupos"} de cuatro dígitos sin clasificar` : undefined },
+    { id: "mappingConflicts", label: "Sin clasificaciones PUC contradictorias", ok: s.mappingConflicts.length === 0, detail: s.mappingConflicts.length ? `Resuelve el grupo ${s.mappingConflicts.map((c) => c.family).join(", ")}: sus subcuentas tienen clasificaciones distintas.` : undefined },
+    {
+      id: "counterparts",
+      label: "Líneas no corrientes equivalentes configuradas",
+      ok: s.missingCounterparts.length === 0,
+      detail: s.missingCounterparts.length ? `Falta «${s.missingCounterparts.map((m) => m.lineName).join("», «")}» en la sección no corriente para presentar saldos de años anteriores.` : undefined,
+    },
     { id: "blocking", label: "Sin alertas bloqueantes", ok: blocking === 0 },
     { id: "payroll", label: "Nómina revisada", ok: payrollWithoutArea === 0, detail: payrollWithoutArea ? `${payrollWithoutArea} empleados sin área` : undefined },
     { id: "liquidations", label: "Sin empleados pendientes de liquidación", ok: absences.length === 0, detail: absences.length ? `${absences.length} pendientes` : undefined },

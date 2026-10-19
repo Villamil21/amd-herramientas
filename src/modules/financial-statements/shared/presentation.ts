@@ -1,3 +1,4 @@
+import { resolverOf } from "./pucGroups";
 import { EERR_SECTIONS, ESF_SECTIONS, SECTION_LABEL, type FsCatalog, type FsPucMapping } from "../../../types/fs";
 
 /**
@@ -13,7 +14,7 @@ export interface Presentation {
 
 export function presentationOf(code: string, catalog: FsCatalog | null, mappings: Map<string, FsPucMapping>): Presentation {
   const family = code.slice(0, 4);
-  const m = mappings.get(code) ?? mappings.get(family);
+  const m = resolverOf(mappings).resolve(code)?.mapping;
   if (!m) return { family, state: "none", text: "Sin clasificar" };
   if (m.excluded) return { family, state: "excluded", text: "No afecta Estados Financieros" };
   const line = catalog?.lines.find((l) => l.id === m.lineId);

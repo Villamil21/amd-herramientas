@@ -60,6 +60,8 @@ pub struct FsPucMapping {
     pub line_id: Option<i64>,
     pub excluded: bool,
     pub updated_at: String,
+    /// De dónde viene la decisión: `manual` (cuenta puntual), `group` (grupo de cuatro dígitos).
+    pub origin: String,
 }
 
 pub fn validate_section(section: &str) -> AppResult<()> {

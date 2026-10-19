@@ -156,6 +156,7 @@ pub fn run() {
             commands::fs::set_fs_section_representative,
             commands::fs::list_fs_puc_mappings,
             commands::fs::set_fs_puc_mapping,
+            commands::fs::set_fs_puc_group_mapping,
             commands::fs::send_fs_batch,
             commands::fs::register_fs_empty_period,
             commands::fs::void_fs_empty_period,

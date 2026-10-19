@@ -3,7 +3,7 @@ import type { BankBalance, FsCatalog, FsLine, FsPucMapping, FsSectionKey, Moveme
 import { formatStatementPesos, roundThousands, estimatedIncomeTax } from "../shared/money";
 import { TAX_PUC, type TaxReturn } from "../tax-obligations/types";
 import { checklist, pendingBalanceText } from "./checks";
-import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type EngineInput } from "./engine";
+import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, reclassificationAges, type EngineInput } from "./engine";
 
 // Catálogo inicial (el mismo de la migración 014).
 const SEED: [number, FsSectionKey, string, FsLine["role"]][] = [
@@ -30,6 +30,11 @@ const SEED: [number, FsSectionKey, string, FsLine["role"]][] = [
   [32, "other_income", "Otros Ingresos", null],
   [33, "other_expenses", "Otros Gastos", null],
   [34, "other_expenses", "Otros Gastos financieros", null],
+  // Contrapartes no corrientes (mismo nombre que la línea corriente).
+  [35, "liability_noncurrent", "Cuentas por pagar", null],
+  [36, "asset_noncurrent", "Activos intangibles", null],
+  [37, "asset_current", "Deudores", null],
+  [38, "asset_noncurrent", "Deudores", null],
 ];
 
 const catalog: FsCatalog = {
@@ -49,7 +54,7 @@ const catalog: FsCatalog = {
   ],
 };
 
-const map = (pucCode: string, lineId: number | null, excluded = false): FsPucMapping => ({ pucCode, lineId, excluded, updatedAt: "" });
+const map = (pucCode: string, lineId: number | null, excluded = false): FsPucMapping => ({ pucCode, lineId, excluded, updatedAt: "", origin: "manual" });
 
 const MAPPINGS: FsPucMapping[] = [
   map("111005", 1),
@@ -196,10 +201,10 @@ describe("Estado de Situación Financiera", () => {
     expect(none.pucBalances.has("132505")).toBe(false);
     expect(none.sociosReceivableCents).toBe(0);
     expect(none.tax.issues).toEqual([expect.objectContaining({ level: "blocking", taxType: "capital", pucKey: "capital.receivable" })]);
-    // Con PUC pero sin línea del ESF: queda sin clasificar (por su familia de cuatro dígitos) y no entra.
-    const unmapped = run({ company, capitalReceivablePuc: "132510" });
+    // Con PUC pero sin línea del ESF: queda sin clasificar (por su grupo de cuatro dígitos) y no entra.
+    const unmapped = run({ company, capitalReceivablePuc: "133010" });
     expect(unmapped.sociosReceivableCents).toBe(0);
-    expect(unmapped.unclassified).toEqual([expect.objectContaining({ pucCode: "1325", cents: 50_000_000 })]);
+    expect(unmapped.unclassified).toEqual([expect.objectContaining({ pucCode: "1330", cents: 50_000_000 })]);
   });
 
   it("la ubicación en EEFF de un PUC puede configurarse por familia de cuatro dígitos", () => {
@@ -244,14 +249,14 @@ describe("Estado de Situación Financiera", () => {
 describe("clasificación", () => {
   it("un PUC con movimientos y sin destino queda pendiente; 7305 no aparece ni bloquea", () => {
     const s = run({ movements: [mv("2026-03-01", "519595", 1_000), mv("2026-03-02", "7305", 9_999)] });
-    expect(s.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["519595", 100_000]]);
+    expect(s.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["5195", 100_000]]);
     expect(s.eerr.admin + s.eerr.sales + s.esf.assets).toBe(0);
   });
 
   it("una línea desactivada no se pierde: su PUC vuelve a pendiente", () => {
     const off: FsCatalog = { ...catalog, lines: catalog.lines.map((l) => (l.id === 26 ? { ...l, isActive: false } : l)) };
     const s = run({ catalog: off, movements: [mv("2026-03-01", "513595", 1_000)] });
-    expect(s.unclassified[0]).toMatchObject({ pucCode: "513595", inactiveLine: "Servicios" });
+    expect(s.unclassified[0]).toMatchObject({ pucCode: "5135", inactiveLine: "Servicios" });
   });
 
   it("extractos: el signo lo da la naturaleza de la sección destino", () => {
@@ -275,17 +280,17 @@ describe("clasificación", () => {
       const s = run({ movements });
       expect(s.eerr.otherExpenses).toBe(expected);
       // Sin clasificar se muestra con el mismo signo contable (naturaleza débito de la clase 5).
-      const unmapped = run({ movements: movements.map((m) => ({ ...m, pucCode: "530595" })) });
-      expect(unmapped.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["530595", expected]]);
+      const unmapped = run({ movements: movements.map((m) => ({ ...m, pucCode: "529595" })) });
+      expect(unmapped.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["5295", expected]]);
     });
 
     it("COMISIONES: dos salidas de $20.825 → +$41.650 en «Códigos PUC sin clasificar»", () => {
-      const s = run({ movements: [mv("2026-08-31", "530595", 41_650, { source: "bank", dc: "D", pucConcept: "COMISIONES", detail: { count: 2 } })] });
+      const s = run({ movements: [mv("2026-08-31", "529595", 41_650, { source: "bank", dc: "D", pucConcept: "COMISIONES", detail: { count: 2 } })] });
       expect(s.unclassified[0]).toMatchObject({ concept: "COMISIONES", cents: 4_165_000 });
     });
 
     it("sin clasificar: una entrada a un PUC de ingreso o pasivo es positiva", () => {
-      const s = run({ movements: [mv("2026-08-31", "421095", 3_000, { source: "bank", dc: "C" }), mv("2026-08-31", "238095", 1_000, { source: "bank", dc: "C" })] });
+      const s = run({ movements: [mv("2026-08-31", "429595", 3_000, { source: "bank", dc: "C" }), mv("2026-08-31", "238095", 1_000, { source: "bank", dc: "C" })] });
       expect(s.unclassified.map((u) => u.cents)).toEqual([100_000, 300_000]);
     });
   });
@@ -439,5 +444,169 @@ describe("obligaciones tributarias en el ESF", () => {
     const s = run({ tax: { ...tax, puc: new Map() }, mappings, end: "2026-09-30" });
     expect(s.esf.currentLiabilities).toBe(0);
     expect(checklist(s, s, [], [], 0).find((c) => c.id === "tax")!.ok).toBe(false);
+  });
+});
+
+describe("clasificación por grupo de cuatro dígitos", () => {
+  const familyMv = (code: string, pesos: number) => mv("2026-03-01", code, pesos, { pucConcept: `CONCEPTO ${code}` });
+  const movements = [familyMv("237005", 1_000), familyMv("237006", 2_000), familyMv("237010", 3_000), familyMv("237005", 500)];
+
+  it("2370 con varios PUC de seis dígitos es UNA fila con el total y las subcuentas de trazabilidad", () => {
+    const s = run({ movements });
+    expect(s.unclassified).toHaveLength(1);
+    const group = s.unclassified[0];
+    expect([group.pucCode, group.count, group.cents]).toEqual(["2370", 4, 650_000]);
+    expect(group.children.map((c) => [c.pucCode, c.count, c.cents])).toEqual([["237005", 2, 150_000], ["237006", 1, 200_000], ["237010", 1, 300_000]]);
+    expect(group.children[0].entries).toHaveLength(2);
+    expect(group.children[0].entries[0]).toMatchObject({ date: "2026-03-01", cents: 100_000 });
+  });
+
+  it("clasificar el grupo se aplica a todos los hijos, también a movimientos futuros", () => {
+    const grouped = [...MAPPINGS, map("2370", 6)];
+    const s = run({ mappings: grouped, movements });
+    expect(s.unclassified).toHaveLength(0);
+    expect(s.esf.currentLiabilities).toBe(650_000);
+    expect([...s.pucBalances.keys()].filter((k) => k.startsWith("2370"))).toEqual(["237005", "237006", "237010"]);
+    // Un hijo que aún no existía hereda la decisión del grupo.
+    expect(run({ mappings: grouped, movements: [familyMv("237099", 7_000)] }).esf.currentLiabilities).toBe(700_000);
+  });
+
+  it("clasificaciones antiguas que coinciden valen como la del grupo; las demás subcuentas la heredan", () => {
+    const legacy = [...MAPPINGS, map("237005", 6), map("237006", 6)];
+    const s = run({ mappings: legacy, movements });
+    expect(s.unclassified).toHaveLength(0);
+    expect(s.mappingConflicts).toHaveLength(0);
+    expect(s.esf.currentLiabilities).toBe(650_000);
+  });
+
+  it("clasificaciones antiguas distintas en el mismo grupo: conflicto visible, nada se sobrescribe y bloquea", () => {
+    const legacy = [...MAPPINGS, map("237005", 6), map("237006", 5)];
+    const s = run({ mappings: legacy, movements });
+    expect(s.mappingConflicts).toEqual([
+      expect.objectContaining({
+        family: "2370",
+        options: [expect.objectContaining({ lineId: 6, label: "Cuentas por pagar", codes: ["237005"] }), expect.objectContaining({ lineId: 5, label: "Proveedores", codes: ["237006"] })],
+      }),
+    ]);
+    // Cada subcuenta conserva su decisión anterior; la que no tenía sigue pendiente (no se inventa una decisión).
+    expect(s.sections.liability_current.lines.find((l) => l.line.id === 6)!.cents).toBe(150_000);
+    expect(s.sections.liability_current.lines.find((l) => l.line.id === 5)!.cents).toBe(200_000);
+    expect(s.unclassified.map((u) => [u.pucCode, u.cents])).toEqual([["2370", 300_000]]);
+    const check = checklist(s, s, [], [], 0).find((c) => c.id === "mappingConflicts")!;
+    expect(check.ok).toBe(false);
+    // Al resolver desde el grupo (la decisión del grupo reemplaza a las subcuentas) el conflicto desaparece.
+    const resolved = run({ mappings: [...MAPPINGS, map("2370", 6)], movements });
+    expect(resolved.mappingConflicts).toHaveLength(0);
+    expect(checklist(resolved, resolved, [], [], 0).find((c) => c.id === "mappingConflicts")!.ok).toBe(true);
+  });
+
+  it("un grupo con decisión propia y una subcuenta antigua distinta también es conflicto", () => {
+    const s = run({ mappings: [...MAPPINGS, map("2370", 6), map("237006", 5)], movements });
+    expect(s.mappingConflicts.map((c) => c.family)).toEqual(["2370"]);
+  });
+});
+
+describe("reclasificación automática corriente → no corriente", () => {
+  const grouped = [...MAPPINGS, map("2370", 6), map("1305", 37)];
+  const payable = (date: string, pesos: number, extra: Partial<Movement> = {}) => mv(date, "237005", pesos, extra);
+
+  it("pasivo originado en 2025 se presenta en «Cuentas por pagar» no corriente al generar 2026, sin tocar el PUC", () => {
+    const s = run({ mappings: grouped, movements: [payable("2025-11-10", 1_000, { documentNumber: "F-1", source: "purchases" })] });
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([0, 100_000]);
+    const target = s.sections.liability_noncurrent.lines.find((l) => l.cents !== 0)!;
+    expect(target.line.name).toBe("Cuentas por pagar"); // mismo nombre, solo cambia la sección
+    expect(target.line.id).toBe(35);
+    expect(target.contributions).toEqual([expect.objectContaining({ pucCode: "237005", cents: 100_000 })]);
+    expect(target.automatic).toContain("2026");
+    expect(s.reclassifications).toEqual([
+      expect.objectContaining({ lineId: 6, targetLineId: 35, pucCode: "237005", originDate: "2025-11-10", originYear: 2025, ageYears: 1, document: "F-1", originalCents: 100_000, appliedCents: 0, pendingCents: 100_000 }),
+    ]);
+    expect(reclassificationAges(s.reclassifications)).toEqual([{ originYear: 2025, ageYears: 1, cents: 100_000, count: 1 }]);
+    expect(isBalanced(s) || s.esf.assets === 0).toBe(true);
+    // La clasificación maestra no cambia: el mismo movimiento en un EEFF de 2025 sigue siendo corriente.
+    const in2025 = run({ mappings: grouped, start: "2025-01-01", end: "2025-12-31", movements: [payable("2025-11-10", 1_000)] });
+    expect([in2025.esf.currentLiabilities, in2025.esf.nonCurrentLiabilities]).toEqual([100_000, 0]);
+    expect(in2025.reclassifications).toHaveLength(0);
+  });
+
+  it("pasivo originado en el mismo año de los EEFF conserva la clasificación corriente", () => {
+    const s = run({ mappings: grouped, movements: [payable("2026-02-10", 1_000)] });
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([100_000, 0]);
+    expect(s.reclassifications).toHaveLength(0);
+  });
+
+  it("activo / deudor originado en 2025 se presenta en «Deudores» no corriente", () => {
+    const s = run({ mappings: grouped, movements: [mv("2025-12-15", "130505", 2_000), mv("2026-01-15", "130505", 500)] });
+    expect([s.esf.currentAssets, s.esf.nonCurrentAssets]).toEqual([50_000, 200_000]);
+    expect(s.sections.asset_noncurrent.lines.find((l) => l.cents !== 0)!.line.name).toBe("Deudores");
+    expect(s.reclassifications.map((r) => [r.lineName, r.targetLineName, r.pendingCents])).toEqual([["Deudores", "Deudores", 200_000]]);
+  });
+
+  it("aplica a cualquier línea corriente (proveedores, laborales…), sin una lista fija de PUC", () => {
+    const withLines = catalog.lines.concat(
+      { id: 40, section: "liability_noncurrent", name: "Proveedores", sortOrder: 40, role: null, isActive: true, hasHistory: false },
+      { id: 41, section: "liability_noncurrent", name: "Obligaciones laborales", sortOrder: 41, role: null, isActive: true, hasHistory: false },
+    );
+    const s = run({ catalog: { ...catalog, lines: withLines }, mappings: grouped, movements: [mv("2025-06-01", "220505", 3_000), mv("2025-12-31", "251010", 4_000), mv("2026-01-05", "251010", 1_000)] });
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([100_000, 700_000]);
+    expect(s.sections.liability_noncurrent.lines.filter((l) => l.cents !== 0).map((l) => [l.line.name, l.cents])).toEqual([["Proveedores", 300_000], ["Obligaciones laborales", 400_000]]);
+  });
+
+  it("saldo parcialmente pagado: conserva el origen y solo reclasifica lo pendiente", () => {
+    const s = run({
+      mappings: grouped,
+      movements: [payable("2025-11-10", 1_000, { documentNumber: "F-1" }), payable("2026-02-01", 400, { source: "bank", dc: "D" })],
+    });
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([0, 60_000]);
+    expect(s.reclassifications[0]).toMatchObject({ originalCents: 100_000, appliedCents: 40_000, pendingCents: 60_000, originYear: 2025, document: "F-1" });
+  });
+
+  it("el pago se aplica primero al documento al que hace referencia y, si no, al origen más antiguo (PEPS)", () => {
+    const origins = [payable("2025-11-10", 1_000, { documentNumber: "F-1" }), payable("2026-01-10", 500, { documentNumber: "F-2" })];
+    // Sin referencia: 1.200 consume los 1.000 de 2025 y 200 de 2026.
+    const fifo = run({ mappings: grouped, movements: [...origins, payable("2026-03-01", 1_200, { source: "bank", dc: "D" })] });
+    expect([fifo.esf.currentLiabilities, fifo.esf.nonCurrentLiabilities]).toEqual([30_000, 0]);
+    // Con referencia al documento de 2026: 300 reducen F-2 aunque F-1 sea más antiguo.
+    const byDoc = run({ mappings: grouped, movements: [...origins, payable("2026-03-01", 300, { source: "bank", dc: "D", documentNumber: "F-2" })] });
+    expect([byDoc.esf.currentLiabilities, byDoc.esf.nonCurrentLiabilities]).toEqual([20_000, 100_000]);
+  });
+
+  it("un pago sin saldo de origen no se asume: queda para revisión y no se reclasifica", () => {
+    const s = run({ mappings: grouped, movements: [payable("2026-03-01", 700, { source: "bank", dc: "D" })] });
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([-70_000, 0]);
+    expect(s.reclassifications).toHaveLength(0);
+    expect(s.reclassificationReviews).toEqual([expect.objectContaining({ pucCode: "237005", cents: -70_000, date: "2026-03-01" })]);
+  });
+
+  it("una línea ya definida como no corriente no se reclasifica ni se duplica", () => {
+    const s = run({ mappings: [...grouped, map("237099", 35)], movements: [payable("2025-11-10", 1_000), mv("2025-11-11", "237099", 2_000)] });
+    expect(s.esf.nonCurrentLiabilities).toBe(300_000);
+    expect(s.reclassifications.map((r) => r.pucCode)).toEqual(["237005"]);
+  });
+
+  it("el efectivo (clase 11) es una posición, no un saldo con origen: nunca se reclasifica", () => {
+    const s = run({ movements: [mv("2025-12-31", "110505", 5_000, { source: "opening" })] });
+    expect([s.esf.currentAssets, s.esf.nonCurrentAssets]).toEqual([500_000, 0]);
+    expect(s.reclassifications).toHaveLength(0);
+  });
+
+  it("sin la línea no corriente equivalente: bloqueo visible, el valor queda en su línea y se resuelve creándola", () => {
+    const without: FsCatalog = { ...catalog, lines: catalog.lines.filter((l) => l.id !== 35) };
+    const s = run({ catalog: without, mappings: grouped, movements: [payable("2025-11-10", 1_000)] });
+    expect(s.missingCounterparts).toEqual([{ lineId: 6, lineName: "Cuentas por pagar", section: "liability_current", targetSection: "liability_noncurrent", cents: 100_000 }]);
+    expect([s.esf.currentLiabilities, s.esf.nonCurrentLiabilities]).toEqual([100_000, 0]);
+    expect(s.reclassifications).toHaveLength(0);
+    const blocked = checklist(s, s, [], [], 0);
+    expect(blocked.find((c) => c.id === "counterparts")).toMatchObject({ ok: false });
+    expect(blocked.find((c) => c.id === "blocking")!.ok).toBe(false);
+    // Crear la línea con el mismo nombre en la sección no corriente lo resuelve.
+    const fixed = run({ catalog, mappings: grouped, movements: [payable("2025-11-10", 1_000)] });
+    expect(fixed.missingCounterparts).toHaveLength(0);
+    expect(checklist(fixed, fixed, [], [], 0).find((c) => c.id === "counterparts")!.ok).toBe(true);
+  });
+
+  it("una línea corriente sin saldos de años anteriores no exige contraparte", () => {
+    const without: FsCatalog = { ...catalog, lines: catalog.lines.filter((l) => l.id !== 35) };
+    expect(run({ catalog: without, mappings: grouped, movements: [payable("2026-02-10", 1_000)] }).missingCounterparts).toHaveLength(0);
   });
 });

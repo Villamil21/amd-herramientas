@@ -257,7 +257,7 @@ describe("cobertura de obligaciones tributarias", () => {
 });
 
 describe("Transacciones Cripto desactualizado bloquea el periodo", () => {
-  const clean = { esf: { differenceCents: 0 }, eerr: { beforeTax: 0 }, unclassified: [], bankBalances: [], tax: { issues: [] } } as never;
+  const clean = { esf: { differenceCents: 0 }, eerr: { beforeTax: 0 }, unclassified: [], mappingConflicts: [], missingCounterparts: [], bankBalances: [], tax: { issues: [] } } as never;
   it("sin efecto retirado todos los puntos se cumplen; con uno, el punto falla y cuenta como bloqueo", () => {
     const ok = checklist(clean, clean, [], [], 0, []);
     expect(ok.every((c) => c.ok)).toBe(true);

@@ -21,7 +21,6 @@ import {
   type Presentation,
 } from "../../../types/fs";
 import type { CertificateSigner } from "../../../types/models";
-import { formatInteger } from "../../../utils/format";
 import { areaFor } from "../payroll/calc";
 import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { CompanySelect } from "../shared/components/CompanySelect";
@@ -40,6 +39,7 @@ import { useCryptoOpsCoverage } from "../crypto/coverageSource";
 import { useEeffAutoSync } from "../crypto/useEeffAutoSync";
 import { ACCOUNTING_LABEL, ACCOUNTING_PRESENTATIONS, engineView, isAccountingPresentation, type AccountingPresentation } from "../shared/accountingPresentation";
 import { activeDuplicates, checklist, coverage, monthText, payrollAbsences, pendingBalanceText, taxCoverage } from "./checks";
+import { MappingConflicts, MissingCounterparts, ReclassificationAudit, UnclassifiedGroups } from "./GroupPanels";
 import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } from "./components";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
 import { withNoteNumbers } from "../notes/model";
@@ -504,44 +504,10 @@ export default function GeneratorPage() {
             </Card>
           </div>
 
-          {s.unclassified.length > 0 && !closed && (
-            <Card flush title="Códigos PUC sin clasificar" description="Bloquean el estado «Listo». Asígnalos a una línea del ESF / EERR o márcalos «No afecta Estados Financieros».">
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Código PUC</th>
-                      <th>Concepto</th>
-                      <th style={{ textAlign: "right" }}>Movimientos</th>
-                      <th style={{ textAlign: "right" }}>Valor</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.unclassified.map((u) => (
-                      <tr key={u.pucCode} className="row-attention--blocking">
-                        <td className="mono">
-                          {u.pucCode}
-                          {u.pucCode.length === 4 && <div className="table__secondary">Familia: se clasifica una vez para todas sus subcuentas</div>}
-                        </td>
-                        <td>
-                          {u.concept}
-                          {u.inactiveLine && <div className="table__secondary">Su línea «{u.inactiveLine}» está desactivada.</div>}
-                        </td>
-                        <td style={{ textAlign: "right" }}>{formatInteger(u.count)}</td>
-                        <td style={{ textAlign: "right" }}>{formatExactCents(u.cents)}</td>
-                        <td className="actions">
-                          <Button size="sm" variant="primary" onClick={() => setClassifying({ code: u.pucCode, concept: u.concept })}>
-                            Clasificar
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
+          {s.mappingConflicts.length > 0 && !closed && <MappingConflicts items={s.mappingConflicts} onResolve={(code, concept) => setClassifying({ code, concept })} />}
+          {s.unclassified.length > 0 && !closed && <UnclassifiedGroups items={s.unclassified} onClassify={(code, concept) => setClassifying({ code, concept })} />}
+          {s.missingCounterparts.length > 0 && !closed && <MissingCounterparts items={s.missingCounterparts} onChanged={data.reloadCatalog} />}
+          {!closed && <ReclassificationAudit items={s.reclassifications} reviews={s.reclassificationReviews} endYear={end.slice(0, 4)} />}
           {company && <PurchasesFsStrip nit={company.nit} start={start} end={end} onSynced={() => void loadLedger()} />}
           {pendingBankBalances(s).length > 0 && !closed && (
             <Alert

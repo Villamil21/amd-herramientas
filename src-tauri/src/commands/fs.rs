@@ -46,6 +46,11 @@ pub fn set_fs_puc_mapping(db: State<'_, Db>, puc_code: String, line_id: Option<i
 }
 
 #[tauri::command]
+pub fn set_fs_puc_group_mapping(db: State<'_, Db>, family: String, line_id: Option<i64>, excluded: bool) -> AppResult<()> {
+    db.with(|c| fs::set_group_mapping(c, family.trim(), line_id, excluded))
+}
+
+#[tauri::command]
 pub fn send_fs_batch(db: State<'_, Db>, input: BatchInput) -> AppResult<SendOutcome> {
     db.with(|c| fs::send_batch(c, &input))
 }

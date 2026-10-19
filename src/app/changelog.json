@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.40.0",
+    "date": "2026-10-19",
+    "notes": [
+      "Estados Financieros: los códigos PUC sin clasificar se agrupan por sus primeros cuatro dígitos (2370 reúne 237005, 237006, 237010…) con las subcuentas, movimientos y documentos como trazabilidad. Clasificar el grupo aplica a todas sus cuentas, también a las futuras.",
+      "Clasificaciones antiguas de seis dígitos: si coinciden valen como la del grupo; si difieren aparece un conflicto que bloquea y se resuelve desde el mismo flujo, sin sobrescribir nada (cada cambio queda en el historial con su origen).",
+      "Generador: los saldos pendientes originados en años anteriores se presentan como no corrientes (activos y pasivos de cualquier línea corriente), en la línea del mismo nombre. Pagos y cruces disminuyen su origen; si falta la línea no corriente equivalente se bloquea y se puede crear desde el Generador. Nueva auditoría por antigüedad con detalle."
+    ]
+  },
+  {
     "version": "1.39.0",
     "date": "2026-10-19",
     "notes": [

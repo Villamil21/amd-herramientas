@@ -66,6 +66,8 @@ export interface FsPucMapping {
   lineId: number | null;
   excluded: boolean;
   updatedAt: string;
+  /** `manual` (cuenta puntual), `group` (clasificación del grupo de cuatro dígitos). */
+  origin: string;
 }
 
 export type FsSource = "purchases" | "bank" | "payroll" | "sales_einvoice" | "sales_tpsv" | "crypto_ops" | "opening" | "adjustment";

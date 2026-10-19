@@ -1,3 +1,4 @@
+import { resolverOf } from "../shared/pucGroups";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Plus, Save, Trash2 } from "lucide-react";
 import { Alert, Button, Card, ConfirmDialog, DateInput, Field, Input, PageHeader, useToast } from "../../../components/ui";
@@ -70,10 +71,10 @@ export default function OpeningBalancesPage() {
   const parsed = useMemo(() => rows.map((r) => ({ ...r, cents: toCents(r.text) })), [rows]);
   const filled = parsed.filter((r) => r.pucCode || r.text.trim());
   const invalid = filled.filter((r) => !r.pucCode || r.cents === null);
-  const unclassified = [...new Set(filled.filter((r) => r.pucCode && !data.mappingMap.has(r.pucCode)).map((r) => r.pucCode))];
+  const unclassified = [...new Set(filled.filter((r) => r.pucCode && !resolverOf(data.mappingMap).resolve(r.pucCode)).map((r) => r.pucCode))];
   const duplicated = filled.filter((r, i) => r.pucCode && filled.findIndex((x) => x.pucCode === r.pucCode) !== i);
   const capitalLine = data.catalog?.lines.find((l) => l.role === "share_capital");
-  const toCapital = filled.filter((r) => capitalLine && data.mappingMap.get(r.pucCode)?.lineId === capitalLine.id);
+  const toCapital = filled.filter((r) => capitalLine && resolverOf(data.mappingMap).resolve(r.pucCode)?.mapping.lineId === capitalLine.id);
   const total = filled.reduce((s, r) => s + (r.cents ?? 0), 0);
 
   const blocked =
@@ -218,7 +219,7 @@ export default function OpeningBalancesPage() {
                 </thead>
                 <tbody>
                   {parsed.map((r, i) => {
-                    const m = data.mappingMap.get(r.pucCode);
+                    const m = resolverOf(data.mappingMap).resolve(r.pucCode)?.mapping;
                     const line = m?.lineId ? data.catalog?.lines.find((l) => l.id === m.lineId) : undefined;
                     return (
                       <tr key={i}>

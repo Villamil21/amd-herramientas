@@ -12,7 +12,7 @@ const CATALOG: FsCatalog = {
   lines: [line(1, "asset_current", "Disponible"), line(4, "liability_current", "Obligaciones financieras"), line(5, "liability_current", "Proveedores"), line(6, "liability_current", "Cuentas por pagar"), line(7, "liability_current", "Impuestos"), line(13, "liability_noncurrent", "Otros pasivos"), line(18, "income", "Ventas")],
   sections: [],
 };
-const mapping = (pucCode: string, lineId: number | null, excluded = false): FsPucMapping => ({ pucCode, lineId, excluded, updatedAt: "x" });
+const mapping = (pucCode: string, lineId: number | null, excluded = false): FsPucMapping => ({ pucCode, lineId, excluded, updatedAt: "x", origin: "manual" });
 const MAPPINGS = [mapping("220505", 5), mapping("233525", 6), mapping("210505", 4), mapping("236505", 7), mapping("237005", 6), mapping("410505", 18), mapping("111005", 1), mapping("2701", null, true)];
 
 let seq = 0;

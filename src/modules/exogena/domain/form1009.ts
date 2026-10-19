@@ -1,3 +1,4 @@
+import { buildMappingResolver } from "../../financial-statements/shared/pucGroups";
 import { bankAccountingCents } from "../../financial-statements/generator/engine";
 import type { Statements } from "../../financial-statements/generator/engine";
 import { taxEffects, type TaxInput, type TaxTrace } from "../../financial-statements/tax-obligations/services/effects";
@@ -171,11 +172,11 @@ export function thirdPartyFields(nit: string, fallbackName: string, supplier: Su
 /** Movimientos activos que son deuda al corte (misma regla del ESF: clasificados en una línea de pasivo y no pagados a esa fecha). */
 export function openLiabilityMovements(movements: Movement[], catalog: FsCatalog, mappings: FsPucMapping[], end: string): { movement: Movement; cents: number }[] {
   const lines = new Map(catalog.lines.map((l) => [l.id, l]));
-  const mapping = new Map(mappings.map((m) => [m.pucCode, m]));
+  const resolver = buildMappingResolver(mappings);
   const out: { movement: Movement; cents: number }[] = [];
   for (const mv of movements) {
     if (mv.status !== "active" || mv.source === "sales_tpsv" || mv.accountingDate > end) continue;
-    const m = mapping.get(mv.pucCode);
+    const m = resolver.resolve(mv.pucCode)?.mapping;
     if (!m || m.excluded || !m.lineId) continue;
     const line = lines.get(m.lineId);
     if (!line || !line.isActive || !LIABILITY_SECTIONS.includes(line.section)) continue;

@@ -44,6 +44,8 @@ export const fsService = {
   mappings: () => call<FsPucMapping[]>("list_fs_puc_mappings"),
   /** PUC → línea, o «No afecta Estados Financieros» (excluded). */
   setMapping: (pucCode: string, lineId: number | null, excluded: boolean) => call<void>("set_fs_puc_mapping", { pucCode, lineId, excluded }),
+  /** Clasifica un grupo de cuatro dígitos: cubre todas sus subcuentas y consolida (con historial) las clasificaciones antiguas. */
+  setGroupMapping: (family: string, lineId: number | null, excluded: boolean) => call<void>("set_fs_puc_group_mapping", { family, lineId, excluded }),
 
   // Movimientos
   send: (input: BatchInput) => call<SendOutcome>("send_fs_batch", { input }),

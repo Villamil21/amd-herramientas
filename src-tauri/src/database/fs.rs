@@ -137,8 +137,8 @@ pub fn set_representative(conn: &Connection, section: &str, line_id: i64) -> App
 
 pub fn list_mappings(conn: &Connection) -> AppResult<Vec<FsPucMapping>> {
     Ok(conn
-        .prepare("SELECT puc_code, line_id, excluded, updated_at FROM fs_puc_mappings ORDER BY puc_code")?
-        .query_map([], |r| Ok(FsPucMapping { puc_code: r.get(0)?, line_id: r.get(1)?, excluded: r.get(2)?, updated_at: r.get(3)? }))?
+        .prepare("SELECT puc_code, line_id, excluded, updated_at, origin FROM fs_puc_mappings ORDER BY puc_code")?
+        .query_map([], |r| Ok(FsPucMapping { puc_code: r.get(0)?, line_id: r.get(1)?, excluded: r.get(2)?, updated_at: r.get(3)?, origin: r.get(4)? }))?
         .collect::<Result<_, _>>()?)
 }
 
@@ -150,6 +150,15 @@ pub fn set_mapping(conn: &mut Connection, code: &str, line_id: Option<i64>, excl
     if !known {
         return Err(AppError::user(format!("El código {code} no existe en la Tabla de Códigos PUC.")));
     }
+    let line_id = checked_line(conn, line_id, excluded)?;
+    let tx = conn.transaction()?;
+    upsert_mapping(&tx, code, line_id, excluded, "manual", &now_iso())?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// La línea elegida existe y está activa (o el PUC se excluye).
+fn checked_line(conn: &Connection, line_id: Option<i64>, excluded: bool) -> AppResult<Option<i64>> {
     let line_id = if excluded { None } else { Some(line_id.ok_or_else(|| AppError::user("Elige la línea del estado financiero."))?) };
     if let Some(id) = line_id {
         let (_, _, active) = line_section(conn, id)?;
@@ -157,21 +166,59 @@ pub fn set_mapping(conn: &mut Connection, code: &str, line_id: Option<i64>, excl
             return Err(AppError::user("La línea está desactivada."));
         }
     }
-    let tx = conn.transaction()?;
+    Ok(line_id)
+}
+
+/// Guarda la clasificación de un código y deja el cambio en el historial; sin cambios no escribe nada.
+fn upsert_mapping(tx: &Connection, code: &str, line_id: Option<i64>, excluded: bool, origin: &str, now: &str) -> AppResult<()> {
     let old: Option<(Option<i64>, bool)> = tx.query_row("SELECT line_id, excluded FROM fs_puc_mappings WHERE puc_code = ?1", [code], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     if old == Some((line_id, excluded)) {
         return Ok(());
     }
+    tx.execute(
+        "INSERT INTO fs_puc_mappings (puc_code, line_id, excluded, updated_at, origin) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(puc_code) DO UPDATE SET line_id = excluded.line_id, excluded = excluded.excluded, updated_at = excluded.updated_at, origin = excluded.origin",
+        params![code, line_id, excluded, now, origin],
+    )?;
+    tx.execute(
+        "INSERT INTO fs_puc_mapping_history (puc_code, old_line_id, old_excluded, new_line_id, new_excluded, changed_at, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![code, old.and_then(|o| o.0), old.map(|o| o.1), line_id, excluded, now, origin],
+    )?;
+    Ok(())
+}
+
+/// Clasifica un GRUPO de cuatro dígitos (2370 → 237005, 237006, 237010…): la decisión aplica a todos los códigos
+/// que empiezan por esos cuatro dígitos, también a los futuros. Las clasificaciones antiguas de subcuentas del grupo
+/// se reemplazan en el mismo paso y cada una queda en el historial con su valor anterior (`consolidated:AAAA`);
+/// nada se borra sin rastro.
+pub fn set_group_mapping(conn: &mut Connection, family: &str, line_id: Option<i64>, excluded: bool) -> AppResult<()> {
+    if family.len() != 4 || !family.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::user("El grupo debe ser de exactamente cuatro dígitos."));
+    }
+    let known: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM puc_codes WHERE code LIKE ?1 || '%') OR EXISTS(SELECT 1 FROM puc_custom_codes WHERE code LIKE ?1 || '%')",
+        [family],
+        |r| r.get(0),
+    )?;
+    if !known {
+        return Err(AppError::user(format!("No hay códigos PUC que empiecen por {family}.")));
+    }
+    let line_id = checked_line(conn, line_id, excluded)?;
+    let tx = conn.transaction()?;
     let now = now_iso();
-    tx.execute(
-        "INSERT INTO fs_puc_mappings (puc_code, line_id, excluded, updated_at) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(puc_code) DO UPDATE SET line_id = excluded.line_id, excluded = excluded.excluded, updated_at = excluded.updated_at",
-        params![code, line_id, excluded, now],
-    )?;
-    tx.execute(
-        "INSERT INTO fs_puc_mapping_history (puc_code, old_line_id, old_excluded, new_line_id, new_excluded, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![code, old.and_then(|o| o.0), old.map(|o| o.1), line_id, excluded, now],
-    )?;
+    upsert_mapping(&tx, family, line_id, excluded, "group", &now)?;
+    let children: Vec<(String, Option<i64>, bool)> = tx
+        .prepare("SELECT puc_code, line_id, excluded FROM fs_puc_mappings WHERE length(puc_code) > 4 AND substr(puc_code, 1, 4) = ?1")?
+        .query_map([family], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    for (code, old_line, old_excluded) in children {
+        // Las subcuentas heredan el grupo: la fila propia desaparece y su valor anterior queda en el historial.
+        tx.execute(
+            "INSERT INTO fs_puc_mapping_history (puc_code, old_line_id, old_excluded, new_line_id, new_excluded, changed_at, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![code, old_line, old_excluded, line_id, excluded, now, format!("consolidated:{family}")],
+        )?;
+        tx.execute("DELETE FROM fs_puc_mappings WHERE puc_code = ?1", [&code])?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -1853,6 +1900,30 @@ mod tests {
         let history: i64 = conn.query_row("SELECT COUNT(*) FROM fs_puc_mapping_history WHERE puc_code = '110505'", [], |r| r.get(0)).unwrap();
         assert_eq!(history, 2);
         assert!(list_mappings(&conn).unwrap().iter().any(|m| m.puc_code == "110505" && m.excluded));
+    }
+
+    #[test]
+    fn group_mapping_covers_the_family_and_consolidates_old_subaccounts_with_history() {
+        let mut conn = db();
+        // Clasificaciones antiguas distintas de dos subcuentas del mismo grupo (el conflicto lo muestra la interfaz).
+        set_mapping(&mut conn, "237005", Some(1), false).unwrap();
+        set_mapping(&mut conn, "237006", Some(2), false).unwrap();
+        assert!(set_group_mapping(&mut conn, "23", Some(1), false).is_err(), "solo cuatro dígitos");
+        assert!(set_group_mapping(&mut conn, "9999", Some(1), false).is_err(), "grupo inexistente");
+        assert!(set_group_mapping(&mut conn, "2370", None, false).is_err(), "sin línea ni exclusión no hay decisión");
+        set_group_mapping(&mut conn, "2370", Some(2), false).unwrap();
+        let mappings = list_mappings(&conn).unwrap();
+        let group = mappings.iter().find(|m| m.puc_code == "2370").unwrap();
+        assert_eq!((group.line_id, group.origin.as_str()), (Some(2), "group"));
+        assert!(!mappings.iter().any(|m| m.puc_code.len() > 4 && m.puc_code.starts_with("2370")), "las subcuentas heredan el grupo");
+        // Lo anterior no se pierde: cada subcuenta conserva su valor anterior en el historial con su origen.
+        let consolidated: i64 = conn.query_row("SELECT COUNT(*) FROM fs_puc_mapping_history WHERE origin = 'consolidated:2370' AND old_line_id IS NOT NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(consolidated, 2);
+        // Repetir la misma decisión no escribe historial nuevo.
+        let before: i64 = conn.query_row("SELECT COUNT(*) FROM fs_puc_mapping_history", [], |r| r.get(0)).unwrap();
+        set_group_mapping(&mut conn, "2370", Some(2), false).unwrap();
+        let after: i64 = conn.query_row("SELECT COUNT(*) FROM fs_puc_mapping_history", [], |r| r.get(0)).unwrap();
+        assert_eq!(before, after);
     }
 
     #[test]

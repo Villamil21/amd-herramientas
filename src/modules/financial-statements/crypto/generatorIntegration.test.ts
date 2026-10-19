@@ -16,7 +16,7 @@ import { buildEeffBatch, cryptoOutsideRange, liveMovements, eeffSyncState, stale
  */
 const SEED: [number, FsSectionKey, string, FsLine["role"]][] = [[18, "income", "Ventas", "sales"], [19, "income", "Ingresos para terceros", "third_party_income"], [21, "costs", "Costo de Ventas", "cost_of_sales"], [22, "costs", "Costo de terceros", "third_party_cost"]];
 const catalog: FsCatalog = { lines: SEED.map(([id, section, name, role], i) => ({ id, section, name, role, sortOrder: i, isActive: true, hasHistory: false })), sections: [] };
-const map = (pucCode: string, lineId: number): FsPucMapping => ({ pucCode, lineId, excluded: false, updatedAt: "" });
+const map = (pucCode: string, lineId: number): FsPucMapping => ({ pucCode, lineId, excluded: false, updatedAt: "", origin: "manual" });
 const MAPPINGS = [map("41359501", 18), map("61359501", 21)];
 const PUC: Record<string, string> = { "crypto.sales": "41359501", "crypto.cost_of_sales": "61359501", "crypto.third_income": "413596", "crypto.third_cost": "613596" };
 const okPuc = (k: string) => ({ code: PUC[k], valid: true, located: true, location: "EERR" });

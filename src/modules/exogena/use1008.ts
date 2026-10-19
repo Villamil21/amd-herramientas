@@ -1,3 +1,4 @@
+import { resolverOf } from "../financial-statements/shared/pucGroups";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { paths } from "../../app/router";
 import { normalizeKey } from "../../utils/text";
@@ -56,7 +57,7 @@ export function use1008(companyId: number | null, year: number) {
       const lines = new Map(data.catalog.lines.map((l) => [l.id, l]));
       for (const e of taxEffects(tax, `${year}-12-31`).effects) {
         if ((e.kind !== "vat_favor" && e.kind !== "income_favor" && e.kind !== "excess_favor") || !e.pucCode) continue;
-        const line = lines.get((data.mappingMap.get(e.pucCode) ?? data.mappingMap.get(e.pucCode.slice(0, 4)))?.lineId ?? -1);
+        const line = lines.get(resolverOf(data.mappingMap).resolve(e.pucCode)?.mapping.lineId ?? -1);
         if (!line || normalizeKey(line.name) !== "deudores" || !["asset_current", "asset_noncurrent"].includes(line.section))
           problems.push({ level: "blocking", message: `La cuenta PUC ${e.pucCode} (${e.label}) no está mapeada a una línea «Deudores» del activo: el 1008 no puede conciliar con el ESF.`, action: { label: "Catálogo PUC → Estados Financieros", path: paths.submodule("estados-financieros", "generador") } });
       }
