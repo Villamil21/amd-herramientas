@@ -324,32 +324,31 @@ fn validate_batch(conn: &Connection, input: &BatchInput) -> AppResult<()> {
     Ok(())
 }
 
-/// Una misma persona no se contabiliza dos veces en un periodo: si un empleado ya fue enviado para ese periodo
-/// desde OTRO operador de planilla (Aportes en Línea, MiPlanilla…), el envío se rechaza (ni siquiera con «Reemplazar»).
-/// Operadores distintos pueden completar un mismo periodo con empleados distintos. Dentro del mismo operador
-/// rige el flujo normal de duplicados y reemplazo.
-fn ensure_no_employee_overlap_between_operators(conn: &Connection, input: &BatchInput) -> AppResult<()> {
+/// Una misma persona no se contabiliza dos veces en un periodo: si un empleado ya fue enviado para ese periodo en OTRA
+/// planilla activa (otro `dedupe_key`, del operador que sea), el envío se rechaza (ni siquiera con «Reemplazar»).
+/// Planillas distintas del mismo periodo conviven con empleados distintos. Con el mismo `dedupe_key` es la misma
+/// planilla y rige el flujo normal de duplicados y reemplazo.
+fn ensure_no_employee_overlap_between_planillas(conn: &Connection, input: &BatchInput) -> AppResult<()> {
     if input.source != "payroll" || input.payroll_rows.is_empty() {
         return Ok(());
     }
-    let provider = input.metadata.as_ref().and_then(|m| m.get("provider")).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let mut stmt = conn.prepare(
         "SELECT b.id, b.file_name, COALESCE(json_extract(b.metadata, '$.provider'), ''), e.name
          FROM fs_payroll_rows p
          JOIN fs_batches b ON b.id = p.batch_id
          JOIN fs_employees e ON e.id = p.employee_id
-         WHERE p.company_id = ?1 AND p.employee_id = ?2 AND p.period = ?3 AND b.status = 'active'
-           AND COALESCE(json_extract(b.metadata, '$.provider'), '') <> ?4
+         WHERE p.company_id = ?1 AND p.employee_id = ?2 AND p.period = ?3 AND b.status = 'active' AND b.source = 'payroll'
+           AND b.dedupe_key <> ?4
          ORDER BY b.id LIMIT 1",
     )?;
     for row in &input.payroll_rows {
         let found = stmt
-            .query_row(params![input.company_id, row.employee_id, row.period, provider], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))
+            .query_row(params![input.company_id, row.employee_id, row.period, input.dedupe_key], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))
             .optional()?;
         if let Some((batch_id, file_name, other, name)) = found {
-            let operator = if other.is_empty() { "otro operador".to_string() } else { other };
+            let operator = if other.is_empty() { "operador no identificado".to_string() } else { other };
             return Err(AppError::user(format!(
-                "{name} ya fue enviado para {} desde {operator} (lote #{batch_id}, «{file_name}»). Una persona no se contabiliza dos veces en el mismo periodo: quítala de esta planilla o anula ese lote primero.",
+                "{name} ya fue enviado para {} desde la planilla «{file_name}» (lote #{batch_id}, {operator}). Una persona no se contabiliza dos veces en el mismo período: quítala de esta planilla o anula ese lote primero.",
                 row.period
             )));
         }
@@ -375,7 +374,7 @@ pub fn send_batch(conn: &mut Connection, input: &BatchInput) -> AppResult<SendOu
     };
 
     let tx = conn.transaction()?;
-    ensure_no_employee_overlap_between_operators(&tx, input)?;
+    ensure_no_employee_overlap_between_planillas(&tx, input)?;
     // 1. Lo que ya existe: el mismo envío (dedupe_key) o documentos ya enviados.
     let mut previous: BTreeSet<i64> = BTreeSet::new();
     if !input.dedupe_key.is_empty() {
@@ -1126,11 +1125,22 @@ pub fn save_opening_draft(conn: &Connection, company_id: i64, date: &str, rows: 
 // Nómina
 // ---------------------------------------------------------------------------
 
+/// Decisiones guardadas con los lotes ACTIVOS de una empresa (opcionalmente de una sola fuente).
+pub fn list_decisions(conn: &Connection, company_id: i64, source: Option<&str>) -> AppResult<Vec<FsDecision>> {
+    Ok(conn
+        .prepare(
+            "SELECT d.id, d.batch_id, d.source, d.document_key, d.decision, d.detail, d.created_at FROM fs_decisions d JOIN fs_batches b ON b.id = d.batch_id
+             WHERE d.company_id = ?1 AND b.status = 'active' AND (?2 IS NULL OR d.source = ?2) ORDER BY d.id",
+        )?
+        .query_map(params![company_id, source], |r| Ok(FsDecision { id: r.get(0)?, batch_id: r.get(1)?, source: r.get(2)?, document_key: r.get(3)?, decision: r.get(4)?, detail: r.get(5)?, created_at: r.get(6)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
 pub fn list_employees(conn: &Connection, company_id: i64) -> AppResult<Vec<Employee>> {
     let mut employees: Vec<Employee> = conn
-        .prepare("SELECT id, company_id, doc_type, doc_number, name FROM fs_employees WHERE company_id = ?1 ORDER BY name COLLATE NOCASE")?
+        .prepare("SELECT id, company_id, doc_type, doc_number, name, first_surname, second_surname, first_name, other_names, name_parts_confirmed_at FROM fs_employees WHERE company_id = ?1 ORDER BY name COLLATE NOCASE")?
         .query_map([company_id], |r| {
-            Ok(Employee { id: r.get(0)?, company_id: r.get(1)?, doc_type: r.get(2)?, doc_number: r.get(3)?, name: r.get(4)?, areas: vec![], employments: vec![], liquidations: vec![], justifications: vec![], events: vec![] })
+            Ok(Employee { id: r.get(0)?, company_id: r.get(1)?, doc_type: r.get(2)?, doc_number: r.get(3)?, name: r.get(4)?, areas: vec![], employments: vec![], liquidations: vec![], justifications: vec![], events: vec![], name_parts: EmployeeNameParts { first_surname: r.get(5)?, second_surname: r.get(6)?, first_name: r.get(7)?, other_names: r.get(8)?, confirmed_at: r.get(9)? } })
         })?
         .collect::<Result<_, _>>()?;
     for e in &mut employees {
@@ -1174,6 +1184,16 @@ fn map_liquidation(r: &Row) -> rusqlite::Result<Liquidation> {
     })
 }
 
+/// Partes del nombre limpias (mayúsculas, espacios simples). Con `confirm` exige primer apellido y primer nombre.
+fn clean_name_parts(input: &EmployeeNamePartsInput) -> AppResult<EmployeeNamePartsInput> {
+    let up = |v: &str| crate::models::normalize::upper_text(v, 100);
+    let parts = EmployeeNamePartsInput { first_surname: up(&input.first_surname), second_surname: up(&input.second_surname), first_name: up(&input.first_name), other_names: up(&input.other_names), confirm: input.confirm };
+    if parts.confirm && (parts.first_surname.is_empty() || parts.first_name.is_empty()) {
+        return Err(AppError::user("Para confirmar la separación del nombre escribe al menos el primer apellido y el primer nombre."));
+    }
+    Ok(parts)
+}
+
 /// Ficha de un empleado nuevo: tipo + número de documento (la llave), nombre,
 /// fecha de ingreso (manual) y área contable. Abre la vinculación #1.
 pub fn create_employee(conn: &mut Connection, input: &EmployeeInput) -> AppResult<i64> {
@@ -1187,11 +1207,16 @@ pub fn create_employee(conn: &mut Connection, input: &EmployeeInput) -> AppResul
     validate_iso_date(&input.hire_date, "Fecha de ingreso")?;
     validate_area(&input.area)?;
     validate_period(&input.effective_from)?;
+    let parts = input.name_parts.as_ref().map(clean_name_parts).transpose()?;
     let tx = conn.transaction()?;
     let now = now_iso();
+    let (p1, p2, p3, p4, confirmed) = match &parts {
+        Some(p) => (p.first_surname.clone(), p.second_surname.clone(), p.first_name.clone(), p.other_names.clone(), p.confirm.then(|| now.clone())),
+        None => (String::new(), String::new(), String::new(), String::new(), None),
+    };
     tx.execute(
-        "INSERT INTO fs_employees (company_id, doc_type, doc_number, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        params![input.company_id, doc_type, doc_number, name, now],
+        "INSERT INTO fs_employees (company_id, doc_type, doc_number, name, first_surname, second_surname, first_name, other_names, name_parts_confirmed_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+        params![input.company_id, doc_type, doc_number, name, p1, p2, p3, p4, confirmed, now],
     )
     .map_err(|e| match &e {
         rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => AppError::user(format!("Ya existe un empleado con {doc_type} {doc_number} en esta empresa.")),
@@ -1238,8 +1263,10 @@ fn employee_event(conn: &Connection, employee_id: i64, action: &str, previous: V
 /// su área; una corrección real se hace reemplazando el envío). Cada edición
 /// queda en el historial con los valores anteriores.
 pub fn update_employee(conn: &mut Connection, input: &EmployeeUpdateInput) -> AppResult<()> {
-    let (old_type, old_number, old_name): (String, String, String) = conn
-        .query_row("SELECT doc_type, doc_number, name FROM fs_employees WHERE id = ?1", [input.employee_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    let (old_type, old_number, old_name, old_parts): (String, String, String, EmployeeNameParts) = conn
+        .query_row("SELECT doc_type, doc_number, name, first_surname, second_surname, first_name, other_names, name_parts_confirmed_at FROM fs_employees WHERE id = ?1", [input.employee_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, EmployeeNameParts { first_surname: r.get(3)?, second_surname: r.get(4)?, first_name: r.get(5)?, other_names: r.get(6)?, confirmed_at: r.get(7)? }))
+        })
         .optional()?
         .ok_or_else(|| AppError::user("El empleado no existe."))?;
     let doc_type = input.doc_type.trim().to_uppercase();
@@ -1249,6 +1276,7 @@ pub fn update_employee(conn: &mut Connection, input: &EmployeeUpdateInput) -> Ap
         return Err(AppError::user("Tipo de documento, número y nombre son obligatorios."));
     }
     validate_iso_date(&input.hire_date, "Fecha de ingreso")?;
+    let parts = input.name_parts.as_ref().map(clean_name_parts).transpose()?;
     // Vinculación vigente (la última): su fecha de ingreso es la editable.
     let (employment_id, old_hire, end): (i64, String, Option<String>) = conn.query_row(
         "SELECT id, hire_date, end_date FROM fs_employments WHERE employee_id = ?1 ORDER BY number DESC LIMIT 1",
@@ -1298,6 +1326,19 @@ pub fn update_employee(conn: &mut Connection, input: &EmployeeUpdateInput) -> Ap
         _ => e.into(),
     })?;
     tx.execute("UPDATE fs_employments SET hire_date = ?1, updated_at = ?2 WHERE id = ?3", params![input.hire_date, now, employment_id])?;
+    // Partes del nombre: lo que llega manda; si el nombre completo cambia sin confirmar nuevas partes, la confirmación se pierde.
+    let new_parts = match &parts {
+        Some(p) => EmployeeNameParts { first_surname: p.first_surname.clone(), second_surname: p.second_surname.clone(), first_name: p.first_name.clone(), other_names: p.other_names.clone(), confirmed_at: p.confirm.then(|| now.clone()) },
+        None => EmployeeNameParts { confirmed_at: if old_name == name { old_parts.confirmed_at.clone() } else { None }, ..old_parts.clone() },
+    };
+    if new_parts != old_parts {
+        tx.execute(
+            "UPDATE fs_employees SET first_surname = ?1, second_surname = ?2, first_name = ?3, other_names = ?4, name_parts_confirmed_at = ?5 WHERE id = ?6",
+            params![new_parts.first_surname, new_parts.second_surname, new_parts.first_name, new_parts.other_names, new_parts.confirmed_at, input.employee_id],
+        )?;
+        let shape = |p: &EmployeeNameParts| serde_json::json!({ "firstSurname": p.first_surname, "secondSurname": p.second_surname, "firstName": p.first_name, "otherNames": p.other_names, "confirmed": p.confirmed_at.is_some() });
+        employee_event(&tx, input.employee_id, "name_parts", shape(&old_parts), shape(&new_parts))?;
+    }
     let mut previous = serde_json::Map::new();
     let mut next = serde_json::Map::new();
     let mut diff = |key: &str, old: &str, new: &str| {
@@ -2056,7 +2097,7 @@ mod tests {
     fn payroll_employees_liquidation_and_rehire() {
         let mut conn = db();
         let a = company(&conn, "900111111");
-        let input = EmployeeInput { company_id: a, doc_type: "cc".into(), doc_number: "1.192.816.998".into(), name: "Carlos".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() };
+        let input = EmployeeInput { company_id: a, doc_type: "cc".into(), doc_number: "1.192.816.998".into(), name: "Carlos".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: None };
         let id = create_employee(&mut conn, &input).unwrap();
         assert!(create_employee(&mut conn, &input).unwrap_err().0.contains("CC 1192816998"), "la llave es tipo + número");
         set_employee_area(&conn, id, "sales", "2026-04").unwrap();
@@ -2102,7 +2143,7 @@ mod tests {
         let a = company(&conn, "900111111");
         let mut people = vec![];
         for (n, doc) in ["111", "222", "333"].iter().enumerate() {
-            let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: (*doc).into(), name: format!("Persona {n}"), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() }).unwrap();
+            let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: (*doc).into(), name: format!("Persona {n}"), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: None }).unwrap();
             people.push((id, list_employees(&conn, a).unwrap().into_iter().find(|e| e.id == id).unwrap().employments[0].id));
         }
         // Aportes en Línea envía a la primera persona y MiPlanilla a la segunda: el periodo se completa con dos lotes.
@@ -2132,6 +2173,88 @@ mod tests {
         assert_eq!(list_payroll_rows(&conn, a).unwrap().len(), 3);
         // Otro periodo del mismo empleado no se confunde con el anterior.
         assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-02:mi-planilla:1", "2026-02", &people[0..1])).unwrap(), SendOutcome::Sent { .. }));
+    }
+
+    fn two_people(conn: &mut Connection, a: i64) -> Vec<(i64, i64)> {
+        ["111", "222"]
+            .iter()
+            .enumerate()
+            .map(|(n, doc)| {
+                let id = create_employee(conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: (*doc).into(), name: format!("Persona {n}"), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: None }).unwrap();
+                (id, list_employees(conn, a).unwrap().into_iter().find(|e| e.id == id).unwrap().employments[0].id)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn same_operator_with_another_planilla_cannot_repeat_an_employee_but_a_voided_batch_does_not_count() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let people = two_people(&mut conn, a);
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:1", "2026-01", &people[0..1])).unwrap(), SendOutcome::Sent { .. }));
+        // Otra planilla del MISMO operador con la misma persona: rechazada, también con «Reemplazar».
+        let mut other = operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:2", "2026-01", &people[0..1]);
+        let err = send_batch(&mut conn, &other).unwrap_err().0;
+        assert!(err.contains("Persona 0") && err.contains("MiPlanilla") && err.contains("planilla «"), "{err}");
+        other.replace = true;
+        assert!(send_batch(&mut conn, &other).is_err());
+        // Otra persona en otra planilla del mismo período convive.
+        assert!(matches!(send_batch(&mut conn, &operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:2", "2026-01", &people[1..2])).unwrap(), SendOutcome::Sent { .. }));
+        // Un lote anulado o reemplazado ya no cuenta.
+        conn.execute("UPDATE fs_batches SET status = 'voided' WHERE dedupe_key = 'payroll:2026-01:mi-planilla:1'", []).unwrap();
+        conn.execute("UPDATE fs_movements SET status = 'voided' WHERE batch_id IN (SELECT id FROM fs_batches WHERE status = 'voided')", []).unwrap();
+        other.replace = false;
+        other.dedupe_key = "payroll:2026-01:mi-planilla:3".into();
+        assert!(matches!(send_batch(&mut conn, &other).unwrap(), SendOutcome::Sent { .. }));
+    }
+
+    #[test]
+    fn name_parts_are_proposed_confirmed_and_lose_confirmation_when_the_name_changes() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "123".into(), name: "PEREZ GOMEZ ANA MARIA".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: None }).unwrap();
+        let get = |conn: &Connection| list_employees(conn, a).unwrap().remove(0);
+        assert_eq!(get(&conn).name_parts, EmployeeNameParts::default());
+        let edit = |name: &str, parts: Option<EmployeeNamePartsInput>| EmployeeUpdateInput { employee_id: id, doc_type: "CC".into(), doc_number: "123".into(), name: name.into(), hire_date: "2026-01-01".into(), area: None, area_from: None, name_parts: parts };
+        let parts = |confirm: bool, surname: &str| EmployeeNamePartsInput { first_surname: surname.into(), second_surname: " gomez ".into(), first_name: "ana".into(), other_names: "maría".into(), confirm };
+        // Propuesta sin confirmar.
+        update_employee(&mut conn, &edit("PEREZ GOMEZ ANA MARIA", Some(parts(false, "perez")))).unwrap();
+        let e = get(&conn);
+        assert_eq!((e.name_parts.first_surname.as_str(), e.name_parts.second_surname.as_str(), e.name_parts.other_names.as_str()), ("PEREZ", "GOMEZ", "MARÍA"));
+        assert!(e.name_parts.confirmed_at.is_none());
+        // Confirmar exige primer apellido y primer nombre.
+        assert!(update_employee(&mut conn, &edit("PEREZ GOMEZ ANA MARIA", Some(parts(true, "  ")))).is_err());
+        update_employee(&mut conn, &edit("PEREZ GOMEZ ANA MARIA", Some(parts(true, "perez")))).unwrap();
+        assert!(get(&conn).name_parts.confirmed_at.is_some());
+        // Editar otra cosa conserva la confirmación; cambiar el nombre completo la borra.
+        update_employee(&mut conn, &edit("PEREZ GOMEZ ANA MARIA", None)).unwrap();
+        assert!(get(&conn).name_parts.confirmed_at.is_some());
+        update_employee(&mut conn, &edit("PEREZ GOMEZ ANA", None)).unwrap();
+        let e = get(&conn);
+        assert!(e.name_parts.confirmed_at.is_none() && e.name_parts.first_surname == "PEREZ");
+        assert!(e.events.iter().filter(|ev| ev.action == "name_parts").count() >= 3);
+        // Alta con partes confirmadas.
+        let other = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "456".into(), name: "Luis Diaz".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: Some(EmployeeNamePartsInput { first_surname: "diaz".into(), second_surname: String::new(), first_name: "luis".into(), other_names: String::new(), confirm: true }) }).unwrap();
+        let e = list_employees(&conn, a).unwrap().into_iter().find(|e| e.id == other).unwrap();
+        assert!(e.name_parts.confirmed_at.is_some() && e.name_parts.first_name == "LUIS");
+    }
+
+    #[test]
+    fn decisions_listing_only_includes_active_batches() {
+        let mut conn = db();
+        let a = company(&conn, "900111111");
+        let people = two_people(&mut conn, a);
+        let mut first = operator_batch(a, "MiPlanilla", "payroll:2026-01:mi-planilla:1", "2026-01", &people[0..1]);
+        first.decisions.push(DecisionInput { document_key: "entity:CC 111|2026-01".into(), decision: "entity_confirmed".into(), detail: "{\"eps\":\"EPS010\"}".into() });
+        send_batch(&mut conn, &first).unwrap();
+        let mut second = operator_batch(a, "MiPlanilla", "payroll:2026-02:mi-planilla:2", "2026-02", &people[1..2]);
+        second.decisions.push(DecisionInput { document_key: "entity:CC 222|2026-02".into(), decision: "entity_confirmed".into(), detail: String::new() });
+        send_batch(&mut conn, &second).unwrap();
+        let all = list_decisions(&conn, a, Some("payroll")).unwrap();
+        assert_eq!(all.iter().map(|d| d.document_key.as_str()).collect::<Vec<_>>(), ["entity:CC 111|2026-01", "entity:CC 222|2026-02"]);
+        assert!(list_decisions(&conn, a, Some("bank")).unwrap().is_empty());
+        conn.execute("UPDATE fs_batches SET status = 'voided' WHERE dedupe_key = 'payroll:2026-01:mi-planilla:1'", []).unwrap();
+        assert_eq!(list_decisions(&conn, a, None).unwrap().len(), 1);
     }
 
     #[test]
@@ -2250,12 +2373,12 @@ mod tests {
     fn employee_edit_keeps_area_history_and_audits() {
         let mut conn = db();
         let a = company(&conn, "900111111");
-        let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana".into(), hire_date: "2026-01-01".into(), area: "sales".into(), effective_from: "2026-01".into() }).unwrap();
+        let id = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana".into(), hire_date: "2026-01-01".into(), area: "sales".into(), effective_from: "2026-01".into(), name_parts: None }).unwrap();
         let employment = list_employees(&conn, a).unwrap()[0].employments[0].id;
         let mut b = batch(a, "payroll", "payroll:2026-06", vec![movement("2026-06-30", "510506", 100, "n1")]);
         b.payroll_rows.push(PayrollRowInput { employee_id: id, employment_id: employment, period: "2026-06".into(), payment_date: "2026-07-05".into(), detail: None });
         send_batch(&mut conn, &b).unwrap();
-        let edit = |area_from: &str| EmployeeUpdateInput { employee_id: id, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana María".into(), hire_date: "2026-01-02".into(), area: Some("admin".into()), area_from: Some(area_from.into()) };
+        let edit = |area_from: &str| EmployeeUpdateInput { employee_id: id, doc_type: "CC".into(), doc_number: "123".into(), name: "Ana María".into(), hire_date: "2026-01-02".into(), area: Some("admin".into()), area_from: Some(area_from.into()), name_parts: None };
         assert!(update_employee(&mut conn, &edit("2026-06")).unwrap_err().0.contains("2026-06"), "junio ya se envió con Ventas");
         update_employee(&mut conn, &edit("2026-07")).unwrap();
         let e = &list_employees(&conn, a).unwrap()[0];
@@ -2264,7 +2387,7 @@ mod tests {
         assert_eq!((e.events.len(), e.events[0].previous["name"].as_str(), e.events[0].previous["area"].as_str()), (1, Some("Ana"), Some("sales")));
         // La nómina de junio conserva su área (el detalle enviado no cambia).
         assert_eq!(list_payroll_rows(&conn, a).unwrap()[0].period, "2026-06");
-        let other = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "999".into(), name: "Luis".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into() }).unwrap();
+        let other = create_employee(&mut conn, &EmployeeInput { company_id: a, doc_type: "CC".into(), doc_number: "999".into(), name: "Luis".into(), hire_date: "2026-01-01".into(), area: "admin".into(), effective_from: "2026-01".into(), name_parts: None }).unwrap();
         let dup = EmployeeUpdateInput { employee_id: other, doc_number: "123".into(), area: None, area_from: None, ..edit("2026-08") };
         assert!(update_employee(&mut conn, &dup).unwrap_err().0.contains("CC 123"));
     }

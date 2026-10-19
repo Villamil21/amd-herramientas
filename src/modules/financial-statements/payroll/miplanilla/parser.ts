@@ -231,6 +231,14 @@ function parseTotals(pages: PdfPageText[]): { totals: MiPlanillaTotals; administ
 
 interface Columns {
   ibcPension: number;
+  /** Centros de las columnas IBC de salud, riesgos y CCF (no siempre se encuentran: los datos quedan sin leer). */
+  ibcOthers?: { health?: number; risk?: number; ccf?: number };
+  /** Centros de las columnas de código de AFP, EPS, ARL y CCF. */
+  codes?: { afp?: number; eps?: number; arl?: number; ccf?: number };
+  /** Columnas de novedad (rótulos girados) con el centro de cada una. */
+  novelties?: { code: string; center: number }[];
+  /** Columnas de aportes voluntarios y FSP de pensión, con su centro. */
+  extrasColumns?: { voluntaryAffiliate?: number; voluntaryEmployer?: number; fspSolidarity?: number; fspSubsistence?: number };
   days: number[];
   contribution: number[];
   ccf: number;
@@ -258,8 +266,29 @@ function readColumns(header: PdfTextItem[]): Columns | string {
   if (contribution.length < 3) return `Se esperaban 3 columnas «Cotización» (pensión, salud y riesgos) y se encontraron ${contribution.length}.`;
   if (ccfColumns.length < 2) return "No se encontró la columna de aporte CCF del detalle por cotizante.";
   if (!epsCode) return "No se encontró la columna Cód. EPS del detalle por cotizante.";
+  const center = (i: PdfTextItem | undefined) => (i ? cx(i) : undefined);
+  const novelties = header
+    .filter((i) => i.rotated && NOVELTY_CODES.has(i.text.trim().toLowerCase()))
+    .map((i) => ({ code: i.text.trim().toLowerCase(), center: cx(i) }));
+  // Rótulos de la zona de pensión extra: «Aporte Voluntario Afiliado / Aportante» y «Aporte FSP — Solidaridad / Subsistencia».
+  const zone = header.filter((i) => !i.rotated && cx(i) > cx(contribution[0]) + 8 && cx(i) < epsCode.x - 4);
+  const byLabel = (re: RegExp) => zone.find((i) => re.test(i.text.trim()));
   return {
     ibcPension: cx(ibc),
+    ibcOthers: { health: center(find(header, /^IBC EPS$/)), risk: center(find(header, /^IBC ARL$/)), ccf: center(find(header, /^IBC CCF$/)) },
+    codes: {
+      afp: center(header.find((i) => /^AFP$/.test(i.text.trim()) && cx(i) < epsCode.x - 30 && cx(i) > 200)),
+      eps: cx(epsCode),
+      arl: center(header.find((i) => /^ARL$/.test(i.text.trim()) && cx(i) > 480 && cx(i) < 560)),
+      ccf: center(find(header, /^C[óo]digo$/)),
+    },
+    novelties,
+    extrasColumns: {
+      voluntaryAffiliate: center(byLabel(/^Afiliado$/i)),
+      voluntaryEmployer: center(byLabel(/^Aportante$/i)),
+      fspSolidarity: center(byLabel(/^solidaridad$/i)),
+      fspSubsistence: center(byLabel(/^subsistencia$/i)),
+    },
     days: days.slice(0, 4).map(cx),
     contribution: contribution.slice(0, 3).map(cx),
     ccf: cx(ccfColumns[ccfColumns.length - 1]),
@@ -269,6 +298,7 @@ function readColumns(header: PdfTextItem[]): Columns | string {
 }
 
 const DOC_TYPE = /^[A-Z]{2,4}$/;
+const NOVELTY_CODES = new Set(["ing", "ret", "tde", "tae", "tdp", "tap", "vsp", "vst", "sln", "ige", "lma", "vac", "avp", "vct", "irl", "cor"]);
 
 function parseDetailPage(page: PdfPageText, cached?: Columns): { employees: MiPlanillaEmployee[]; issues: MiPlanillaIssue[]; detected: number; columns?: Columns } {
   const title = find(page.items, /^DETALLE POR COTIZANTE$/);
@@ -328,7 +358,36 @@ function parseDetailPage(page: PdfPageText, cached?: Columns): { employees: MiPl
       issues.push({ page: page.pageNumber, text: `Fila ${rowNumber}${name ? ` · ${name}` : ""}`, reason: `No se pudo leer: ${missing.join(", ")}.` });
       continue;
     }
-    const extras = numeric.filter((i) => cx(i) > cols.extras[0] && cx(i) < cols.extras[1]).reduce((sum, i) => sum + toPesos(i.text), 0);
+    const extraCells = numeric.filter((i) => cx(i) > cols.extras[0] && cx(i) < cols.extras[1]);
+    const extras = extraCells.reduce((sum, i) => sum + toPesos(i.text), 0);
+    // Desglose: cada cifra va a la columna de rótulo más cercana. Sin rótulos confiables solo queda el total.
+    const labelled = Object.entries(cols.extrasColumns ?? {}).filter((e): e is [string, number] => e[1] !== undefined);
+    const split = { voluntaryAffiliate: 0, voluntaryEmployer: 0, fspSolidarity: 0, fspSubsistence: 0 } as Record<string, number>;
+    let breakdown = labelled.length === 4;
+    if (breakdown) {
+      for (const cell of extraCells) {
+        const [key] = labelled.reduce((best, cur) => (Math.abs(cur[1] - cx(cell)) < Math.abs(best[1] - cx(cell)) ? cur : best));
+        split[key] += toPesos(cell.text);
+      }
+    }
+    const anyOf = (center: number | undefined) => (center === undefined ? undefined : numeric.find((i) => Math.abs(cx(i) - center) <= 11));
+    const integer = (center: number | undefined) => {
+      const c = anyOf(center);
+      return c ? toPesos(c.text) : undefined;
+    };
+    const codeAt = (center: number | undefined) => {
+      if (center === undefined) return undefined;
+      const hits = page.items.filter((i) => Math.abs(i.y - anchor.y) <= 2.6 && i.x >= 118 && Math.abs(cx(i) - center) <= 14 && !i.rotated && /^[A-Z0-9-]{2,12}$/i.test(i.text.trim()));
+      const hit = hits.sort((a, b) => Math.abs(cx(a) - center) - Math.abs(cx(b) - center))[0];
+      return hit ? hit.text.trim().toUpperCase() : undefined;
+    };
+    // Novedades: una «X» (o marca) en la zona de rótulos girados → el rótulo de su columna.
+    const noveltyZone = cols.novelties?.length ? [Math.min(...cols.novelties.map((n) => n.center)) - 6, Math.max(...cols.novelties.map((n) => n.center)) + 6] : null;
+    const novelties = noveltyZone
+      ? page.items
+          .filter((i) => Math.abs(i.y - anchor.y) <= 2.6 && !i.rotated && /^[Xx]$/.test(i.text.trim()) && cx(i) >= noveltyZone[0] && cx(i) <= noveltyZone[1])
+          .map((i) => cols.novelties!.reduce((best, n) => (Math.abs(n.center - cx(i)) < Math.abs(best.center - cx(i)) ? n : best)).code)
+      : [];
     const parafiscales = Object.fromEntries(PARAFISCALS.map((p) => [p, value(cols.parafiscales[p]) ?? 0])) as Record<Parafiscal, number>;
     employees.push({
       rowNumber,
@@ -341,6 +400,15 @@ function parseDetailPage(page: PdfPageText, cached?: Columns): { employees: MiPl
       riskContribution: risk!,
       ccfContribution: ccf!,
       pensionExtras: extras,
+      ...(breakdown ? { voluntaryPension: split.voluntaryAffiliate + split.voluntaryEmployer, fspSolidarity: split.fspSolidarity, fspSubsistence: split.fspSubsistence } : {}),
+      healthDays: integer(cols.days[1]),
+      healthIbc: integer(cols.ibcOthers?.health),
+      riskDays: integer(cols.days[2]),
+      riskIbc: integer(cols.ibcOthers?.risk),
+      ccfDays: integer(cols.days[3]),
+      ccfIbc: integer(cols.ibcOthers?.ccf),
+      entityCodes: { afp: codeAt(cols.codes?.afp), eps: codeAt(cols.codes?.eps), arl: codeAt(cols.codes?.arl), ccf: codeAt(cols.codes?.ccf) },
+      novelties: [...new Set(novelties)],
       parafiscales,
       page: page.pageNumber,
     });

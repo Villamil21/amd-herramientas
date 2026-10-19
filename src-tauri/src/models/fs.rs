@@ -440,6 +440,47 @@ pub struct Employee {
     pub liquidations: Vec<Liquidation>,
     pub justifications: Vec<AbsenceJustification>,
     pub events: Vec<EmployeeEvent>,
+    /// Nombre separado en apellidos y nombres (2276). Solo vale con `confirmed_at`.
+    pub name_parts: EmployeeNameParts,
+}
+
+#[derive(Debug, Serialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeNameParts {
+    pub first_surname: String,
+    pub second_surname: String,
+    pub first_name: String,
+    pub other_names: String,
+    pub confirmed_at: Option<String>,
+}
+
+/// Separación del nombre propuesta o confirmada por el usuario. `confirm: false` solo guarda la propuesta.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeNamePartsInput {
+    #[serde(default)]
+    pub first_surname: String,
+    #[serde(default)]
+    pub second_surname: String,
+    #[serde(default)]
+    pub first_name: String,
+    #[serde(default)]
+    pub other_names: String,
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// Decisión guardada con un lote (p. ej. entidades de la planilla confirmadas por el usuario).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FsDecision {
+    pub id: i64,
+    pub batch_id: i64,
+    pub source: String,
+    pub document_key: String,
+    pub decision: String,
+    pub detail: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -468,6 +509,8 @@ pub struct EmployeeInput {
     pub area: String,
     /// AAAA-MM desde el que rige el área.
     pub effective_from: String,
+    #[serde(default)]
+    pub name_parts: Option<EmployeeNamePartsInput>,
 }
 
 /// Edición de la ficha. El área nueva rige desde `area_from` (AAAA-MM) y nunca
@@ -484,6 +527,8 @@ pub struct EmployeeUpdateInput {
     pub area: Option<String>,
     #[serde(default)]
     pub area_from: Option<String>,
+    #[serde(default)]
+    pub name_parts: Option<EmployeeNamePartsInput>,
 }
 
 #[derive(Debug, Serialize, Clone)]

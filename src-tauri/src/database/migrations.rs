@@ -73,6 +73,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 27, name: "purchases_costs_exogena", sql: include_str!("../../migrations/027_purchases_costs_exogena.sql"), rebuilds_tables: false },
     Migration { version: 28, name: "rate_versions_aliases", sql: include_str!("../../migrations/028_rate_versions_aliases.sql"), rebuilds_tables: false },
     Migration { version: 29, name: "document_type_aliases", sql: include_str!("../../migrations/029_document_type_aliases.sql"), rebuilds_tables: false },
+    Migration { version: 30, name: "payroll_social_security", sql: include_str!("../../migrations/030_payroll_social_security.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
@@ -233,7 +234,7 @@ mod tests {
         conn.execute("INSERT INTO suppliers (id, nit, business_name, vat_type, created_at, updated_at) VALUES (7, '900319753', 'PRICESMART', 'purchase', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (1, 'E', '1', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO shareholders (id, company_id, name, identity_document, percentage, sort_order, created_at, updated_at) VALUES (3, 1, 'ANA', 'CC 1020', 100, 0, 'x', 'x')", []).unwrap();
-        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string(), "025_tax_adjustments_excess".to_string(), "026_crypto_operations".to_string(), "027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string()]);
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string(), "025_tax_adjustments_excess".to_string(), "026_crypto_operations".to_string(), "027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string(), "030_payroll_social_security".to_string()]);
         let (id, nit, status, dv): (i64, String, String, String) = conn
             .query_row("SELECT id, nit, data_status, dv FROM suppliers", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .unwrap();
@@ -242,5 +243,37 @@ mod tests {
             .query_row("SELECT id, identity_document, rut_status FROM shareholders", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap();
         assert_eq!((sid, doc.as_str(), rut.as_str()), (3, "CC 1020", "pendiente"));
+    }
+
+    /// 030: el domicilio de la empresa y la separación del nombre del empleado son solo adiciones (vacías), los conceptos del 1011
+    /// quedan sembrados sin tocar lo que el usuario ya tenga, y volver a correr las migraciones no cambia nada.
+    #[test]
+    fn payroll_social_security_migration_only_adds_and_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 29) {
+            if m.rebuilds_tables {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+            }
+            ensure_migrations_table(&conn).unwrap();
+            apply(&mut conn, m).unwrap();
+        }
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (1, 'E', '900', 'x', 'x')", []).unwrap();
+        conn.execute("INSERT INTO fs_employees (id, company_id, doc_type, doc_number, name, created_at, updated_at) VALUES (5, 1, 'CC', '1', 'PEREZ GOMEZ JUAN', 'x', 'x')", []).unwrap();
+        // Un concepto 1011 personalizado que coincide con uno oficial: la siembra no lo pisa.
+        conn.execute("INSERT OR REPLACE INTO exo_format_concepts (format_code, code, description, is_system, is_active, updated_at) VALUES ('1011', '8207', 'MI DESCRIPCIÓN', 0, 1, 'x')", []).unwrap();
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["030_payroll_social_security".to_string()]);
+        let (country, dept, muni): (String, String, String) = conn.query_row("SELECT country_code, dept_code, muni_code FROM companies WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((country.as_str(), dept.as_str(), muni.as_str()), ("", "", ""));
+        let (first, confirmed): (String, Option<String>) = conn.query_row("SELECT first_surname, name_parts_confirmed_at FROM fs_employees WHERE id = 5", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((first.as_str(), confirmed), ("", None));
+        let has = |code: &str| -> i64 { conn.query_row("SELECT COUNT(*) FROM exo_format_concepts WHERE format_code = '1011' AND code = ?1", [code], |r| r.get(0)).unwrap() };
+        for code in ["8207", "8241", "8242", "8243", "8244", "8245", "8295"] {
+            assert_eq!(has(code), 1, "falta el concepto 1011 {code}");
+        }
+        let desc: String = conn.query_row("SELECT description FROM exo_format_concepts WHERE format_code = '1011' AND code = '8207'", [], |r| r.get(0)).unwrap();
+        assert_eq!(desc, "MI DESCRIPCIÓN");
+        // Sin migraciones pendientes no hay nada que repetir.
+        assert!(run_pending(&mut conn).unwrap().is_empty());
     }
 }

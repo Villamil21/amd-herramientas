@@ -1,6 +1,6 @@
 import type { CompanyInput } from "../../types/models";
 
-/** Datos registrales vacíos (empresas nuevas y anteriores a la migración 024). */
+/** Datos registrales vacíos (empresas nuevas y anteriores a la migración 024) y domicilio de Exógena sin definir (migración 030). */
 export const EMPTY_REGISTRAL = {
   entityNarrative: "",
   corporatePurpose: "",
@@ -12,6 +12,9 @@ export const EMPTY_REGISTRAL = {
   registryDate: "",
   registryBook: "",
   registralReview: [] as string[],
+  countryCode: "",
+  deptCode: "",
+  muniCode: "",
 };
 
 export const EMPTY_COMPANY_INPUT: CompanyInput = {

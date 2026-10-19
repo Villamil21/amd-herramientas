@@ -12,7 +12,7 @@ import { CompanyFormModal } from "./companies/CompanyFormModal";
 import type { CompanyTab } from "./companies/companyTabs";
 import { COMPANY_STATE_LABEL, companyStatus } from "./companies/companyStatus";
 
-export function CompaniesPage() {
+export function CompaniesPage({ initialNit = "" }: { /** NIT cuya ficha se abre al llegar (enlace desde un pendiente de Nómina o Exógena). */ initialNit?: string }) {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const query = useDebounced(search);
@@ -43,14 +43,15 @@ export function CompaniesPage() {
   // Llegada desde el panel de pendientes de Compras: abre la ficha exacta (pestaña fiscal) y deja la ruta de regreso.
   useEffect(() => {
     const ctx = getPendingReturn();
-    if (opened.current || !ctx?.openCompanyNit || !list.data || query) return;
+    const nit = ctx?.openCompanyNit ?? initialNit;
+    if (opened.current || !nit || !list.data || query) return;
     opened.current = true;
-    const target = findCompanyByNit(list.data, ctx.openCompanyNit);
-    patchPendingReturn({ openCompanyNit: undefined });
+    const target = findCompanyByNit(list.data, nit);
+    if (ctx?.openCompanyNit) patchPendingReturn({ openCompanyNit: undefined });
     if (!target) return;
-    setStartTab(ctx.companyTab);
+    setStartTab(ctx?.openCompanyNit ? ctx.companyTab : undefined);
     setEditing(target);
-  }, [list.data, query]);
+  }, [list.data, query, initialNit]);
 
   return (
     <>

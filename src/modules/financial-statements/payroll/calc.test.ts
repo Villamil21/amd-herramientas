@@ -16,6 +16,7 @@ const employee = (id: number, doc: string, extra: Partial<Employee> = {}): Emplo
   liquidations: [],
   justifications: [],
   events: [],
+  nameParts: { firstSurname: "", secondSurname: "", firstName: "", otherNames: "", confirmedAt: null },
   ...extra,
 });
 
@@ -54,7 +55,7 @@ describe("movimientos", () => {
     employmentId: 10,
     area: "admin",
     calc: computeMonth(SMMLV, 30, SMMLV, AUX),
-    social: { pension: 28_020_000, health: 0, arl: 920_000, ccf: 7_010_000 },
+    social: { pension: 28_020_000, health: 0, arl: 920_000, ccf: 7_010_000, sena: 0, icbf: 0 },
     parafiscalesCents: 0,
   };
   const puc = new Map(requiredKeys([row], 0).map((k) => [k, k.includes("payable") ? "251010" : "510506"]));

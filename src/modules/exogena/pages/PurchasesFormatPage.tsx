@@ -19,7 +19,7 @@ import { useExogenaSelection } from "../state";
 import { usePurchasesFormat } from "../usePurchasesFormat";
 
 const DESCRIPTION: Record<PurchasesExoFormat, string> = {
-  "1001": "Pagos o abonos en cuenta por tercero y concepto, con IVA como mayor valor del costo o gasto y retenciones practicadas o asumidas, desde Compras, costos y exógena.",
+  "1001": "Pagos o abonos en cuenta por tercero y concepto, con IVA como mayor valor del costo o gasto y retenciones practicadas o asumidas, desde Compras, costos y exógena, más los aportes a entidades de seguridad social de Nómina (por entidad y concepto).",
   "1005": "IVA descontable por tercero de las compras. Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
   "1006": "IVA recuperado en devoluciones de compras por tercero. Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
 };
@@ -56,7 +56,7 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
         proposals: state.proposals,
         removeMissing: true,
         overwriteManual: overwrite,
-        summary: { sources: ["Compras, costos y exógena"], documents: model.totals.documents, lines: model.totals.lines },
+        summary: { sources: code === "1001" ? ["Compras, costos y exógena", "Nómina y seguridad social"] : ["Compras, costos y exógena"], documents: model.totals.documents, lines: model.totals.lines },
       });
       await format.reload();
       toast(`${outcome.created} nuevos · ${outcome.updated} actualizados · ${outcome.unchanged} sin cambios · ${outcome.removed} retirados.`);
@@ -104,7 +104,7 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
               Auditoría PDF
             </Button>
             <Button variant="primary" icon={<RefreshCcw size={15} />} loading={syncing} disabled={!m.ready || !!state?.notApplicableReason} onClick={() => void sync()}>
-              Actualizar desde Compras
+              {code === "1001" ? "Actualizar desde Compras y Nómina" : "Actualizar desde Compras"}
             </Button>
           </>
         }

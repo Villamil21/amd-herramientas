@@ -38,6 +38,10 @@ export interface Company {
   registryBook: string;
   /** Campos registrales que la lectura del certificado no confirmó con certeza («Revisar»). */
   registralReview: string[];
+  /** Domicilio para Exógena (códigos DIAN como texto: país «169», departamento «08», municipio «001»). Vacío = sin definir. */
+  countryCode: string;
+  deptCode: string;
+  muniCode: string;
   shareholders: Shareholder[];
   /** Historial de RUT y Cámara de Comercio (más antiguo primero). */
   documents: CompanyDocument[];

@@ -1,5 +1,24 @@
 [
   {
+    "version": "1.39.0",
+    "date": "2026-10-19",
+    "notes": [
+      "Nómina y seguridad social: un solo submódulo con una acción «Importar planilla PDF». El operador (Aportes en Línea o MiPlanilla) se detecta solo y cada uno se normaliza a un modelo común; SOI queda preparado sin soporte. La empresa se toma del NIT del aportante (si no existe, se bloquea con acceso a Empresas) y el periodo contable es el de pensión.",
+      "Nómina: detección de duplicados (mantener o reemplazar con confirmación), varias planillas por periodo si no comparten empleados, cobertura mensual con «Periodo sin nómina», historial de EPS/AFP/ARL/CCF por periodo con propuesta confirmable al importar, y estados unificados (Bloquea, Requiere revisión, Pendiente de confirmar, Listo, No aplica) con enlace a la pantalla que resuelve cada alerta. Los lotes anteriores sin detalle requieren reimportar el PDF para alimentar 1001, 1011 y 2276.",
+      "Exógena: 1001 con aportes a AFP (5012), EPS y ARL (5011) y CCF, SENA e ICBF (5010) por entidad y concepto, mezclado con Compras; nuevo formato 1011 (conceptos 8207, 8241–8245, 8295) y nuevo formato 2276 anual con las 45 columnas de la plantilla DIAN, separación de nombres confirmable en la ficha del empleado y domicilio de la empresa. 1011 y 2276 solo se exportan con los 12 meses cubiertos.",
+      "SENA e ICBF: se reconocen por separado y se pueden clasificar por PUC. Al identificarlos una planilla se crea sola la ficha mínima de proveedor con su NIT oficial (sin razón social ni domicilio, sin nombres provisionales); los datos faltantes bloquean solo el 1001. Si Aportes en Línea los trae en una sola cifra no separable, queda bloqueado sin inventar el reparto.",
+      "Fondo de Solidaridad Pensional de Aportes en Línea: cuando solo viene por administradora, la alerta bloqueante del 2276 indica que no puede asignarse al empleado y muestra administradora, periodo y valor.",
+      "Empresas: domicilio (país, departamento y municipio) en Generales. Migración 030, aditiva e idempotente, incluida en copia y restauración."
+    ]
+  },
+  {
+    "version": "1.39.0",
+    "date": "2026-10-19",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.38.9",
     "date": "2026-10-19",
     "notes": [

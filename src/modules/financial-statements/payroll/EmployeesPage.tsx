@@ -3,7 +3,7 @@ import { Pencil, UsersRound } from "lucide-react";
 import { Badge, Button, Card, EmptyState, MetricBar, Modal, PageHeader, useToast } from "../../../components/ui";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
-import { AREA_LABEL, type Employee, type PayrollRow } from "../../../types/fs";
+import { AREA_LABEL, type BatchSummary, type Employee, type FsDecision, type PayrollRow } from "../../../types/fs";
 import { formatDateForDisplay } from "../../../utils/dates";
 import { formatInteger } from "../../../utils/format";
 import { normalizeKey } from "../../../utils/text";
@@ -13,6 +13,9 @@ import { describeMonths, formatExactCents, periodLabel, todayIso } from "../shar
 import { useFsData } from "../shared/useFsData";
 import { areaFor } from "./calc";
 import { EmployeeEditModal } from "./PayrollModals";
+import { ENTITY_SLOTS, SLOT_LABEL, entityHistory } from "./social/entities";
+import { takeEmployeeFocus } from "./social/focus";
+import { personKey, storedPlanillas } from "./social/store";
 
 type StatusFilter = "all" | "active" | "retired";
 
@@ -65,6 +68,8 @@ export default function EmployeesPage() {
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [batches, setBatches] = useState<BatchSummary[]>([]);
+  const [decisions, setDecisions] = useState<FsDecision[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<number | null>(null);
@@ -73,9 +78,11 @@ export default function EmployeesPage() {
   const load = useCallback(async () => {
     if (companyId === null) return;
     try {
-      const [e, r] = await Promise.all([fsService.employees(companyId), fsService.payrollRows(companyId)]);
+      const [e, r, b, d] = await Promise.all([fsService.employees(companyId), fsService.payrollRows(companyId), fsService.batches(companyId), fsService.decisions(companyId, "payroll")]);
       setEmployees(e);
       setRows(r);
+      setBatches(b);
+      setDecisions(d);
     } catch (err) {
       toast(errorMessage(err), "error");
     }
@@ -87,9 +94,24 @@ export default function EmployeesPage() {
     void load();
   }, [load]);
 
+  // Llegada desde un pendiente de Nómina o Exógena: abre la empresa y el empleado exactos (una sola vez).
+  const [focus] = useState(() => takeEmployeeFocus());
+  useEffect(() => {
+    if (focus) setCompanyId(focus.companyId);
+  }, [focus]);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focus || focused || employees.length === 0) return;
+    const found = employees.find((e) => e.docType === focus.docType && e.docNumber === focus.docNumber);
+    setFocused(true);
+    if (found) setOpen(found.id);
+  }, [focus, focused, employees]);
+
   const views = useMemo(() => employeeViews(employees, rows), [employees, rows]);
   const visible = views.filter((v) => (filter === "all" || (filter === "active") === v.active) && (!query || normalizeKey(`${v.employee.name} ${v.employee.docNumber}`).includes(normalizeKey(query))));
   const current = views.find((v) => v.employee.id === open) ?? null;
+  const history = useMemo(() => (current ? entityHistory(storedPlanillas(batches), current.employee.docType, current.employee.docNumber) : []), [current, batches]);
+  const confirmed = useMemo(() => new Set(decisions.filter((d) => d.decision === "entities_confirmed").map((d) => d.documentKey)), [decisions]);
 
   return (
     <>
@@ -201,6 +223,54 @@ export default function EmployeesPage() {
                   );
                 })}
               </ul>
+            </div>
+            <div className="stack stack--sm">
+              <strong>Apellidos y nombres (formato 2276)</strong>
+              {current.employee.nameParts.confirmedAt ? (
+                <p style={{ margin: 0 }}>
+                  <Badge tone="success">Confirmado</Badge> {[current.employee.nameParts.firstSurname, current.employee.nameParts.secondSurname].filter(Boolean).join(" ")} / {[current.employee.nameParts.firstName, current.employee.nameParts.otherNames].filter(Boolean).join(" ")}
+                </p>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  <Badge tone="info">Pendiente de confirmar</Badge> La planilla trae el nombre en un solo texto. Abre «Editar datos maestros» para revisar la propuesta de apellidos y nombres y confirmarla.
+                </p>
+              )}
+            </div>
+            <div className="stack stack--sm">
+              <strong>Entidades de seguridad social por periodo</strong>
+              {history.length === 0 ? (
+                <p className="muted" style={{ margin: 0 }}>Aún no hay planillas con detalle de entidades (los lotes anteriores no las guardaban).</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table table--dense">
+                    <thead>
+                      <tr>
+                        <th>Periodo</th>
+                        {ENTITY_SLOTS.map((s) => (
+                          <th key={s}>{SLOT_LABEL[s]}</th>
+                        ))}
+                        <th>Planilla</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((h) => (
+                        <tr key={`${h.period}-${h.batchId}`}>
+                          <td className="nowrap">{periodLabel(h.period)}</td>
+                          {ENTITY_SLOTS.map((s) => (
+                            <td key={s} title={h.names[s]}>
+                              {h.codes[s] ?? "—"} {h.changed.includes(s) && <Badge tone="warning">Cambió</Badge>}
+                            </td>
+                          ))}
+                          <td className="muted">#{h.batchId} · {h.operatorLabel}</td>
+                          <td>{confirmed.has(`entity:${personKey(current.employee.docType, current.employee.docNumber)}|${h.period}`) ? <Badge tone="success">Confirmado</Badge> : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <span className="field__hint">Cada periodo conserva las entidades de su planilla: una planilla nueva no cambia los periodos anteriores.</span>
             </div>
             <div className="stack stack--sm">
               <strong>Periodos procesados {current.periods.length > 0 && <span className="muted">· {describeMonths(current.periods)}</span>}</strong>

@@ -40,3 +40,18 @@ pub fn save_supplier_tax_data(db: State<'_, Db>, id: i64, tax: SupplierTaxInput)
     let tax = tax.validated()?;
     db.with(|c| suppliers::save_tax_data(c, id, &tax))
 }
+
+/// Crea la ficha mínima de SENA / ICBF identificados por una planilla (idempotente). Devuelve los NIT creados.
+#[tauri::command]
+pub fn ensure_payroll_suppliers(db: State<'_, Db>, nits: Vec<String>) -> AppResult<Vec<String>> {
+    db.with(|c| {
+        let mut created = Vec::new();
+        for nit in nits {
+            let (_, new) = suppliers::ensure_payroll_supplier(c, &nit)?;
+            if new {
+                created.push(crate::models::supplier::normalize_nit(&nit));
+            }
+        }
+        Ok(created)
+    })
+}

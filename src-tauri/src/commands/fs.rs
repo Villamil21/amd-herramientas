@@ -154,6 +154,11 @@ pub fn list_fs_employees(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<Em
 }
 
 #[tauri::command]
+pub fn list_fs_decisions(db: State<'_, Db>, company_id: i64, source: Option<String>) -> AppResult<Vec<FsDecision>> {
+    db.with(|c| fs::list_decisions(c, company_id, source.as_deref()))
+}
+
+#[tauri::command]
 pub fn create_fs_employee(db: State<'_, Db>, input: EmployeeInput) -> AppResult<i64> {
     db.with(|c| fs::create_employee(c, &input))
 }

@@ -3,6 +3,8 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { Alert, Button, Field, Input, Textarea } from "../../components/ui";
 import { LogoThumb } from "../../components/LogoThumb";
 import { companyService } from "../../services/companyService";
+import { LocationFields } from "../../modules/exogena/components/ThirdPartyForm";
+import { useCatalogs } from "../../modules/exogena/hooks";
 import { originMark } from "./OriginMark";
 import { splitNitAndDv } from "./normalize";
 import type { TabProps } from "./tabs";
@@ -14,6 +16,7 @@ interface Props extends TabProps {
 
 /** Datos generales: logo, identificación, ubicación y contacto. El CIIU no se edita aquí (vive en Fiscal y registral). */
 export function GeneralesTab({ values, setValues, errors, imports, logoPreview, setLogoPreview }: Props) {
+  const { catalogs } = useCatalogs();
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (key: "razonSocial" | "nit" | "dv" | "ciudad" | "direccion" | "telefono" | "correo" | "infoAdicional") => (e: { target: { value: string } }) => setValues((v) => ({ ...v, [key]: e.target.value }));
@@ -87,9 +90,6 @@ export function GeneralesTab({ values, setValues, errors, imports, logoPreview, 
           <Field label="Ciudad" labelAdornment={mark("ciudad")} hint="«Consignado en» de los certificados.">
             {(id) => <Input id={id} value={values.ciudad} onChange={set("ciudad")} />}
           </Field>
-          <Field label="Dirección" labelAdornment={mark("direccion")} className="span-3">
-            {(id) => <Input id={id} value={values.direccion} onChange={set("direccion")} />}
-          </Field>
           <Field label="Teléfono" labelAdornment={mark("telefono")} hint="Sin espacios ni separadores.">
             {(id) => <Input id={id} value={values.telefono} onChange={set("telefono")} />}
           </Field>
@@ -100,6 +100,15 @@ export function GeneralesTab({ values, setValues, errors, imports, logoPreview, 
             {(id) => <Textarea id={id} value={values.infoAdicional} onChange={set("infoAdicional")} rows={2} />}
           </Field>
         </div>
+      </div>
+      <div className="stack stack--sm">
+        <strong>Domicilio {mark("direccion")}</strong>
+        <span className="field__hint">Es el domicilio que Información Exógena copia al beneficiario del formato 2276. Los códigos de país, departamento y municipio son los del catálogo de la DIAN.</span>
+        <LocationFields
+          value={{ address: values.direccion, countryCode: values.countryCode, deptCode: values.deptCode, muniCode: values.muniCode }}
+          onChange={(p) => setValues((v) => ({ ...v, ...(p.address !== undefined ? { direccion: p.address } : {}), ...(p.countryCode !== undefined ? { countryCode: p.countryCode } : {}), ...(p.deptCode !== undefined ? { deptCode: p.deptCode } : {}), ...(p.muniCode !== undefined ? { muniCode: p.muniCode } : {}) }))}
+          catalogs={catalogs}
+        />
       </div>
       <span className="field__hint">Los textos se guardan en MAYÚSCULAS; NIT, documentos y teléfonos, sin separadores.</span>
     </div>

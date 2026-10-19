@@ -1,5 +1,5 @@
 /**
- * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008, 1007 y 1647 (Transacciones Cripto) y 1001, 1005 y 1006 (Compras, costos y exógena); el resto queda
+ * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008, 1007 y 1647 (Transacciones Cripto), 1001, 1005 y 1006 (Compras, costos y exógena) y 1011 y 2276 (Nómina y seguridad social); el resto queda
  * registrado (con su código y nombre confirmados) para agregarlo después sin cambiar la infraestructura: una pantalla
  * "no disponible" nunca se presenta como terminada.
  *
@@ -179,6 +179,61 @@ export const FORMAT_1006_COLUMNS: FormatColumn[] = [
   { key: "consumption", header: "Impuesto al consumo", kind: "integer" },
 ];
 
+/** 1011 · Información de las declaraciones tributarias: una cifra anual por concepto (sin terceros). Fase inicial: 8207, 8241, 8242, 8243, 8244, 8245 y 8295 desde Nómina. */
+export const FORMAT_1011_COLUMNS: FormatColumn[] = [
+  { key: "concept", header: "Concepto", kind: "text" },
+  { key: "balance", header: "Saldo a dic. 31", kind: "integer" },
+];
+
+/** 2276 · Rentas de trabajo y pensiones: un registro anual por empleado (versión 4, AG 2024). Los encabezados son los de la plantilla DIAN. */
+export const FORMAT_2276_COLUMNS: FormatColumn[] = [
+  { key: "entity", header: "Entidad informante", kind: "text" },
+  { key: "docTypeCode", header: "Tipo de documento del beneficiario", kind: "text" },
+  { key: "docNumber", header: "Número de identificación del beneficiario", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido del beneficiario", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido del beneficiario", kind: "text" },
+  { key: "firstName", header: "Primer nombre del beneficiario", kind: "text" },
+  { key: "otherNames", header: "Otros nombres del beneficiario", kind: "text" },
+  { key: "address", header: "Dirección del beneficiario", kind: "text" },
+  { key: "deptCode", header: "Departamento del beneficiario", kind: "text" },
+  { key: "muniCode", header: "Municipio del beneficiario", kind: "text" },
+  { key: "countryCode", header: "País del beneficiario", kind: "text" },
+  { key: "salaries", header: "Pagos por salarios", kind: "integer" },
+  { key: "ecclesiastical", header: "Pagos por emolumentos eclesiásticos", kind: "integer" },
+  { key: "vouchers", header: "Pagos realizados con bonos electrónicos o de papel de servicio, cheques, tarjetas, vales, etc.", kind: "integer" },
+  { key: "foodExcess", header: "Valor del exceso de los pagos por alimentación mayores a 41 UVT, artículo 387-1 E.T.", kind: "integer" },
+  { key: "fees", header: "Pagos por honorarios", kind: "integer" },
+  { key: "services", header: "Pagos por servicios", kind: "integer" },
+  { key: "commissions", header: "Pagos por comisiones", kind: "integer" },
+  { key: "benefits", header: "Pagos por prestaciones sociales", kind: "integer" },
+  { key: "perDiem", header: "Pagos por viáticos", kind: "integer" },
+  { key: "representation", header: "Pagos por gastos de representación", kind: "integer" },
+  { key: "cooperative", header: "Pagos por compensacionales trabajo asociado cooperativo", kind: "integer" },
+  { key: "educationSupport", header: "Valor apoyos económicos no reembolsables o condonados, entregados por el Estado o financiados con recursos públicos, para financiar programas educativos.", kind: "integer" },
+  { key: "otherPayments", header: "Otros pagos", kind: "integer" },
+  { key: "severanceAndInterest", header: "Cesantías e intereses de cesantías efectivamente pagadas al empleado", kind: "integer" },
+  { key: "severanceFund", header: "Cesantías consignadas al fondo de cesantías", kind: "integer" },
+  { key: "severanceAid", header: "Auxilio de cesantías reconocido a trabajadores del régimen tradicional del Código Sustantivo del Trabajo, capítulo VII, título VIII, parte primera", kind: "integer" },
+  { key: "pensions", header: "Pensiones de jubilación, vejez o invalidez", kind: "integer" },
+  { key: "grossTotal", header: "Total ingresos brutos de rentas de trabajo y pensión", kind: "integer" },
+  { key: "healthContribution", header: "Aportes obligatorios por salud a cargo del trabajador", kind: "integer" },
+  { key: "pensionContribution", header: "Aportes obligatorios a fondos de pensiones y solidaridad pensional a cargo del trabajador", kind: "integer" },
+  { key: "voluntaryRais", header: "Aportes voluntarios al régimen de ahorro individual con solidaridad –RAIS–", kind: "integer" },
+  { key: "voluntaryFunds", header: "Aportes voluntarios a fondos de pensiones voluntarias", kind: "integer" },
+  { key: "afc", header: "Aportes a cuentas AFC", kind: "integer" },
+  { key: "avc", header: "Aportes a cuentas AVC", kind: "integer" },
+  { key: "withholding", header: "Valor de las retenciones en la fuente por pagos de rentas de trabajo o pensiones", kind: "integer" },
+  { key: "ivaHigher", header: "Impuesto sobre las ventas –IVA–, mayor valor del costo o gasto", kind: "integer" },
+  { key: "ivaWithholding", header: "Retención en la fuente a título de impuesto sobre las ventas –IVA–", kind: "integer" },
+  { key: "foodUpTo", header: "Pagos por alimentación hasta 41 UVT", kind: "integer" },
+  { key: "avgIncome6m", header: "Valor ingreso laboral promedio de los últimos seis meses", kind: "integer" },
+  { key: "dependentDocType", header: "Tipo de documento del dependiente económico", kind: "text" },
+  { key: "dependentDocNumber", header: "Número de identificación del dependiente económico", kind: "text" },
+  { key: "trustId", header: "Identificación del fideicomiso", kind: "text" },
+  { key: "collabDocType", header: "Tipo de documento participante en contrato de colaboración", kind: "text" },
+  { key: "collabId", header: "Identificación participante en contrato colaboración", kind: "text" },
+];
+
 export const FORMATS: FormatDef[] = [
   { code: "1001", name: "Pagos o abonos en cuenta y retenciones practicadas", sheetTitle: "Pagos o abonos en cuenta y retenciones practicadas", implemented: true, columns: FORMAT_1001_COLUMNS },
   { code: "1003", name: "Retenciones en la fuente que le practicaron", sheetTitle: "Retenciones en la fuente que le practicaron", implemented: false },
@@ -189,12 +244,12 @@ export const FORMATS: FormatDef[] = [
   { code: "1008", name: "Saldo de cuentas por cobrar al 31 de diciembre", sheetTitle: "Saldo de cuentas por cobrar al 31 de diciembre", implemented: true, columns: FORMAT_1008_COLUMNS },
   { code: "1009", name: "Saldos de cuentas por pagar al 31 de diciembre", sheetTitle: "Saldo de cuentas por pagar al 31 de diciembre", implemented: true, columns: FORMAT_1009_COLUMNS },
   { code: "1010", name: "Socios, accionistas y similares", sheetTitle: "Información de socios, accionistas, comuneros y/o cooperados", implemented: true, columns: FORMAT_1010_COLUMNS },
-  { code: "1011", name: "Información de las declaraciones tributarias", sheetTitle: "Información de las declaraciones tributarias", implemented: false },
+  { code: "1011", name: "Información de las declaraciones tributarias", sheetTitle: "Información de las declaraciones tributarias", implemented: true, columns: FORMAT_1011_COLUMNS },
   { code: "1012", name: "Información de declaraciones tributarias, acciones y aportes, inversiones y cuentas", sheetTitle: "Información de declaraciones tributarias, acciones y aportes, inversiones en bonos títulos valores y cuentas de ahorro y cuentas corrientes", implemented: false },
   { code: "1056", name: "Pagos o abonos en cuenta y retenciones por secretarios generales que administran recursos del tesoro", sheetTitle: "Pagos o abonos en cuenta y retenciones por secretarios generales que administran recursos del tesoro", implemented: false },
   { code: "1647", name: "Ingresos recibidos para terceros", sheetTitle: "Ingresos recibidos para terceros", implemented: true, columns: FORMAT_1647_COLUMNS },
   { code: "2275", name: "Ingresos no constitutivos de renta ni ganancia ocasional", sheetTitle: "Ingresos no constitutivos de renta ni ganancia ocasional", implemented: false },
-  { code: "2276", name: "Información de rentas de trabajo y pensiones", sheetTitle: "Información de rentas de trabajo y pensiones", implemented: false },
+  { code: "2276", name: "Información de rentas de trabajo y pensiones", sheetTitle: "Información de rentas de trabajo y pensiones", implemented: true, columns: FORMAT_2276_COLUMNS },
 ];
 
 /** Formatos con pantalla en esta fase, en el orden de las tarjetas. */

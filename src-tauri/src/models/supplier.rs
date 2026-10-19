@@ -134,6 +134,15 @@ impl SupplierInput {
 
     /// Igual que `validated`, pero el número respeta el tipo de documento: un pasaporte conserva sus letras.
     pub fn validated_for(self, doc_type: Option<&str>) -> AppResult<Self> {
+        self.validated_with(doc_type, false)
+    }
+
+    /// Respaldo y restauración: la ficha mínima creada desde una planilla (SENA / ICBF) no tiene razón social todavía.
+    pub fn validated_pending_name(self) -> AppResult<Self> {
+        self.validated_with(None, true)
+    }
+
+    fn validated_with(self, doc_type: Option<&str>, allow_empty_name: bool) -> AppResult<Self> {
         let v = SupplierInput {
             nit: if third_party::allows_letters(doc_type) { third_party::document_number(&self.nit, doc_type) } else { normalize_nit(&self.nit) },
             business_name: clean(&self.business_name, 250),
@@ -142,7 +151,7 @@ impl SupplierInput {
         if v.nit.is_empty() || v.nit.len() > 20 {
             return Err(AppError::user("Escribe un NIT válido (solo números, sin dígito de verificación)."));
         }
-        if v.business_name.is_empty() {
+        if v.business_name.is_empty() && !allow_empty_name {
             return Err(AppError::user("La razón social es obligatoria."));
         }
         if v.vat_type.as_deref().is_some_and(|t| !VAT_TYPES.contains(&t)) {

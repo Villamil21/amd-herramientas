@@ -9,6 +9,7 @@ import { findModule } from "./modules";
 import { navigate, paths, useRoute } from "./router";
 import { UpdateNotice } from "./UpdateNotice";
 import { WhatsNewModal } from "./WhatsNewModal";
+import { parseEmployeeFocus, setEmployeeFocus } from "../modules/financial-statements/payroll/social/focus";
 import { PendingReturnBar } from "../modules/financial-statements/purchases/ui/PendingReturnBar";
 import { ToolsPage } from "../pages/ToolsPage";
 import { ModulePage } from "../pages/ModulePage";
@@ -41,6 +42,17 @@ function resolve(segments: string[]) {
         queueMicrotask(() => navigate(["/herramientas/estados-financieros/extractos-bancarios", subId].filter(Boolean).join("/")));
         return { active: "tools", crumbs: [tools], page: <Loader /> };
       }
+      // Empleados: un enlace desde un pendiente de Nómina o Exógena abre la ficha exacta (empresa~tipo~número).
+      if (moduleId === "estados-financieros" && subId === "empleados" && providerId) {
+        setEmployeeFocus(parseEmployeeFocus(providerId));
+        queueMicrotask(() => navigate(paths.submodule("estados-financieros", "empleados")));
+        return { active: "tools", crumbs: [tools], page: <Loader /> };
+      }
+      // Nómina: los enlaces por operador (Aportes en Línea, MiPlanilla, SOI) llevan al único submódulo.
+      if (moduleId === "estados-financieros" && subId === "nomina" && providerId) {
+        queueMicrotask(() => navigate(paths.submodule("estados-financieros", "nomina")));
+        return { active: "tools", crumbs: [tools], page: <Loader /> };
+      }
       const mod = findModule(moduleId);
       if (!mod) break;
       const modCrumb: Crumb = { label: mod.name, onClick: () => navigate(paths.module(mod.id)) };
@@ -70,7 +82,7 @@ function resolve(segments: string[]) {
       };
     }
     case "empresas":
-      return { active: "companies", crumbs: [{ label: "Datos" }, { label: "Empresas" }], page: <CompaniesPage /> };
+      return { active: "companies", crumbs: [{ label: "Datos" }, { label: "Empresas" }], page: <CompaniesPage initialNit={/^\d+$/.test(moduleId ?? "") ? moduleId : ""} /> };
     case "conceptos":
       return { active: "concepts", crumbs: [{ label: "Datos" }, { label: "Conceptos de retención" }], page: <ConceptsPage /> };
     case "firmas":

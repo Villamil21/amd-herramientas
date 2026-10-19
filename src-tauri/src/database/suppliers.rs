@@ -104,6 +104,30 @@ pub fn insert(conn: &Connection, s: &SupplierInput) -> AppResult<i64> {
     Ok(id)
 }
 
+/// NIT oficiales de SENA e ICBF: las planillas no los traen, y son los únicos que se crean solos.
+pub const PARAFISCAL_NITS: [&str; 2] = ["899999034", "899999239"];
+
+/// Ficha mínima de un parafiscal que identificó una planilla: tipo NIT, número y origen «planilla». Sin razón social ni
+/// domicilio (nada se inventa): quedan vacíos y «requiere datos». Si el proveedor ya existe no se toca. Devuelve (id, creado).
+pub fn ensure_payroll_supplier(conn: &Connection, nit: &str) -> AppResult<(i64, bool)> {
+    let nit = crate::models::supplier::normalize_nit(nit);
+    if !PARAFISCAL_NITS.contains(&nit.as_str()) {
+        return Err(AppError::user("Solo se crea automáticamente el proveedor de SENA e ICBF con su NIT oficial."));
+    }
+    if let Some(id) = conn.query_row("SELECT id FROM suppliers WHERE nit = ?1", [&nit], |r| r.get::<_, i64>(0)).optional()? {
+        return Ok((id, false));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at, doc_type_code, data_origin) VALUES (?1, '', NULL, ?2, ?2, '31', 'planilla')",
+        params![nit, now],
+    )
+    .map_err(|e| duplicate_nit(e, &nit))?;
+    let id = conn.last_insert_rowid();
+    refresh_status(conn, id)?;
+    Ok((id, true))
+}
+
 /// Escribe los datos tributarios de un proveedor ya guardado. Valida los códigos contra los catálogos Exógena y
 /// completa los nombres de país, departamento y municipio.
 fn write_tax(conn: &Connection, id: i64, tax: &SupplierTaxInput) -> AppResult<()> {
@@ -494,5 +518,24 @@ mod tests {
         save_tax_data(&mut conn, id, &tax("31", "PJ")).unwrap();
         assert_eq!(record(&conn), before);
         assert_eq!(get(&conn, id).unwrap().vat_type.as_deref(), Some("service"));
+    }
+
+    #[test]
+    fn payroll_supplier_is_minimal_idempotent_and_only_for_official_nits() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        let (id, created) = ensure_payroll_supplier(&conn, "899.999.034-1").unwrap();
+        assert!(created);
+        let s = get(&conn, id).unwrap();
+        assert_eq!((s.nit.as_str(), s.business_name.as_str(), s.doc_type_code.as_deref(), s.data_origin.as_str(), s.data_status.as_str()), ("899999034", "", Some("31"), "planilla", "requiere_datos"));
+        assert!(s.address.is_empty() && s.country_code.is_empty() && s.dept_code.is_empty() && s.muni_code.is_empty());
+        // Persiste y no se duplica ni se pisa lo que el usuario complete.
+        conn.execute("UPDATE suppliers SET business_name = 'SERVICIO NACIONAL DE APRENDIZAJE' WHERE id = ?1", [id]).unwrap();
+        assert_eq!(ensure_payroll_supplier(&conn, "899999034").unwrap(), (id, false));
+        assert_eq!(get(&conn, id).unwrap().business_name, "SERVICIO NACIONAL DE APRENDIZAJE");
+        assert_eq!(list(&conn, None).unwrap().len(), 1);
+        // Solo SENA e ICBF.
+        assert!(ensure_payroll_supplier(&conn, "900319753").is_err());
     }
 }

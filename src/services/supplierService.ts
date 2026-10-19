@@ -9,5 +9,7 @@ export const supplierService = {
   /** Crea (`id` null) o actualiza el proveedor junto con sus datos tributarios de Exógena, todo o nada. Devuelve el id. */
   saveWithTax: (id: number | null, input: SupplierInput, tax: SupplierTaxInput) => call<number>("save_supplier_with_tax", { id, input, tax }),
   /** Datos tributarios de un proveedor existente (por ejemplo, tomados de una factura ya revisada). */
+  /** Crea la ficha mínima (NIT, origen «planilla», sin razón social ni domicilio) de SENA / ICBF. Idempotente; devuelve los NIT creados. */
+  ensurePayroll: (nits: string[]) => call<string[]>("ensure_payroll_suppliers", { nits }),
   saveTaxData: (id: number, tax: SupplierTaxInput) => call<void>("save_supplier_tax_data", { id, tax }),
 };

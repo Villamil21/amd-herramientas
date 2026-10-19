@@ -17,10 +17,11 @@ import { lastDayOfMonth } from "../shared/money";
  *   cuenta por pagar. La prima se paga en junio y diciembre; cesantías,
  *   intereses y vacaciones quedan por pagar hasta la liquidación.
  * - Intereses de mora de la planilla: concepto propio con una cuenta global.
- * - Parafiscales > 0: alerta bloqueante (sin tratamiento contable todavía).
+ * - SENA e ICBF se reconocen por separado (gasto + cuenta por pagar). ESAP, MEN o un parafiscal combinado que la
+ *   planilla no separa siguen como «pendiente» (`parafiscalesCents`) y bloquean el envío con el nombre exacto.
  */
 
-export type SocialKind = "pension" | "health" | "arl" | "ccf";
+export type SocialKind = "pension" | "health" | "arl" | "ccf" | "sena" | "icbf";
 export type BenefitKind = "prima" | "cesantias" | "intereses" | "vacaciones";
 export type PayrollKind = "salary" | "transport" | SocialKind | BenefitKind;
 
@@ -31,6 +32,8 @@ export const KIND_LABEL: Record<PayrollKind | "mora", string> = {
   health: "EPS / Salud",
   arl: "ARL",
   ccf: "CCF",
+  sena: "SENA",
+  icbf: "ICBF",
   prima: "Prima",
   cesantias: "Cesantías",
   intereses: "Intereses sobre cesantías",
@@ -38,7 +41,7 @@ export const KIND_LABEL: Record<PayrollKind | "mora", string> = {
   mora: "Intereses de mora de planilla",
 };
 
-export const SOCIAL_KINDS: SocialKind[] = ["pension", "health", "arl", "ccf"];
+export const SOCIAL_KINDS: SocialKind[] = ["pension", "health", "arl", "ccf", "sena", "icbf"];
 export const BENEFIT_KINDS: BenefitKind[] = ["prima", "cesantias", "intereses", "vacaciones"];
 /** Conceptos que se causan con gasto + cuenta por pagar. */
 export const WITH_PAYABLE: PayrollKind[] = [...SOCIAL_KINDS, ...BENEFIT_KINDS];
@@ -146,9 +149,12 @@ export interface PlanillaEmployee {
   healthContribution: number;
   riskContribution: number;
   ccfContribution: number;
-  /** Parafiscales (SENA, ICBF, ESAP, MEN) sumados. Mayor que cero bloquea el envío: no tienen tratamiento contable. */
+  /** Parafiscales SIN tratamiento contable (ESAP, MEN o un SENA+ICBF combinado) sumados. Mayor que cero bloquea el envío. SENA e ICBF ya se causan aparte (`sena`, `icbf`). */
   otherContribution?: number;
-  /** Detalle de los parafiscales por tipo, para decir cuáles son (operadores que los separan). */
+  /** Aporte SENA e ICBF separados (solo operadores que los separan). */
+  sena?: number;
+  icbf?: number;
+  /** Detalle de los parafiscales pendientes por tipo, para decir cuáles son. */
   parafiscales?: Record<string, number>;
 }
 
@@ -163,6 +169,9 @@ export interface EmployeeMonth {
   social: Record<SocialKind, number>;
   parafiscalesCents: number;
 }
+
+/** Suma de la seguridad social y parafiscales reconocidos de un empleado-mes. */
+export const socialSum = (m: Pick<EmployeeMonth, "social">) => SOCIAL_KINDS.reduce((n, k) => n + m.social[k], 0);
 
 /** Movimientos de un empleado en un periodo. Requiere su ficha, vinculación, área y las cuentas configuradas. */
 export function employeeMovements(row: EmployeeMonth, period: string, paymentDate: string, puc: Map<string, string>): MovementInput[] {
@@ -253,13 +262,15 @@ export interface OperatorOverlap {
 }
 
 /**
- * Empleados que ya fueron enviados para el periodo desde OTRO operador de planilla. Operadores distintos pueden
- * completar un mismo periodo con empleados distintos, pero una persona nunca se contabiliza dos veces.
+ * Empleados que ya fueron enviados para el periodo desde OTRA planilla (otro operador, u otra del mismo operador).
+ * Planillas distintas pueden completar un mismo periodo con empleados distintos, pero una persona nunca se contabiliza dos veces.
  * (El backend aplica la misma regla; aquí se avisa antes de intentar enviar.)
  */
-export function findOperatorOverlaps(people: Employee[], rows: PayrollRow[], period: string, provider: string): OperatorOverlap[] {
+export function findOperatorOverlaps(people: Employee[], rows: PayrollRow[], period: string, same: string | ((row: PayrollRow) => boolean)): OperatorOverlap[] {
+  // Con un texto se compara el operador; con una función, quien decide si la fila es de «esta misma planilla» (misma llave de envío).
+  const isSame = typeof same === "string" ? (r: PayrollRow) => r.provider === same : same;
   return people.flatMap((person) => {
-    const other = rows.find((r) => r.period === period && r.employeeId === person.id && r.provider !== provider);
+    const other = rows.find((r) => r.period === period && r.employeeId === person.id && !isSame(r));
     return other ? [{ employeeId: person.id, name: person.name, provider: other.provider, batchId: other.batchId, fileName: other.batchFileName }] : [];
   });
 }

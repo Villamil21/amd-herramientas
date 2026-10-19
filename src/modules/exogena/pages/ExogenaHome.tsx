@@ -1,4 +1,4 @@
-import { ArrowRight, Bitcoin, FileSpreadsheet, Landmark, Receipt, ReceiptText, ShieldCheck, ShoppingBag, Users, HandCoins } from "lucide-react";
+import { ArrowRight, Bitcoin, FileSpreadsheet, Landmark, Receipt, ReceiptText, ShieldCheck, ShoppingBag, Users, HandCoins, UserRoundCheck, UsersRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { navigate, paths } from "../../../app/router";
 import { Badge, Card, EmptyState, PageHeader } from "../../../components/ui";
@@ -77,7 +77,9 @@ export default function ExogenaHome() {
         <FormatCard title="1001 · Pagos o abonos en cuenta y retenciones practicadas" description="Pagos por tercero y concepto con IVA mayor valor del costo y retenciones, desde Compras, costos y exógena." icon={<ShoppingBag size={18} />} onOpen={() => open("1001")} footer={records("1001")} />
         <FormatCard title="1005 · Impuesto a las ventas descontable" description="IVA descontable por tercero. Solo aplica a empresas responsables de IVA." icon={<Receipt size={18} />} onOpen={() => open("1005")} footer={records("1005")} />
         <FormatCard title="1006 · Impuesto a las ventas generado e impuesto al consumo" description="IVA recuperado en devoluciones de compras por tercero. Solo aplica a empresas responsables de IVA." icon={<ReceiptText size={18} />} onOpen={() => open("1006")} footer={records("1006")} />
-        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1001, 1005, 1006, 1007, 1008, 1009, 1010 y 1647" : "Selecciona una empresa"}</span>} />
+        <FormatCard title="1011 · Información de las declaraciones tributarias" description="Cifras anuales de nómina y seguridad social: salarios (8207), ICBF, CCF, SENA, pensión, cesantías y EPS + ARL." icon={<UsersRound size={18} />} onOpen={() => open("1011")} footer={records("1011")} />
+        <FormatCard title="2276 · Información de rentas de trabajo y pensiones" description="Ingresos laborales anuales por empleado, con nombres confirmados y domicilio de la empresa." icon={<UserRoundCheck size={18} />} onOpen={() => open("2276")} footer={records("2276")} />
+        <FormatCard title="Control y exportación" description="Auditoría de los formatos de la empresa y el año, y exportación a un único Excel." icon={<ShieldCheck size={18} />} onOpen={() => open("control")} footer={<span className="muted">{hasCompany ? "Estado de 1001, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1647 y 2276" : "Selecciona una empresa"}</span>} />
       </div>
       <Card title="Formatos previstos para fases posteriores" description="Están registrados para agregarlos sin cambiar la infraestructura, pero todavía no tienen pantalla.">
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>

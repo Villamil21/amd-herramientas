@@ -39,7 +39,7 @@ import { StatementError } from "../../../../bank-analysis/shared/types";
 import { center, joinWords, splitWords, type Word } from "../../../../bank-analysis/shared/pdf/rows";
 import type { PdfDocumentText, PdfPageText, PdfTextItem } from "../../../../bank-analysis/shared/pdf/pdfTypes";
 import { isPesoAmount, parsePesoAmount } from "../../shared/money";
-import type { PaymentEntity, PaymentEntityType, PaymentSummary, PayrollDetailTotals, PayrollEmployee, PayrollIssue, PayrollSummary } from "../../shared/types";
+import type { PaymentEntity, PaymentEntityType, PaymentSummary, PayrollDetailTotals, PayrollEmployee, PayrollEmployer, PayrollIssue, PayrollSummary, SubsystemBase } from "../../shared/types";
 
 export const MESSAGES = {
   format: "El archivo no coincide con el formato de Aportes en Línea soportado.",
@@ -141,8 +141,11 @@ function nearest<T>(list: T[], x: number, pos: (t: T) => number): T | undefined 
 
 interface GeneralData {
   period?: string;
+  healthPeriod?: string;
   paymentDate?: string;
   paymentAmount?: number;
+  planillaNumber?: string;
+  planillaType?: string;
 }
 
 const PERIOD = /^\d{4}-\d{2}$/;
@@ -169,9 +172,41 @@ function parseGeneralData(rows: Row[]): GeneralData | undefined {
   const amount = read("PAGO", "VALOR", isPesoAmount);
   return {
     period: read("PERIODO", "PENSION", (t) => PERIOD.test(t)),
+    healthPeriod: read("PERIODO", "SALUD", (t) => PERIOD.test(t)),
     paymentDate: read("FECHA", "PAGO", (t) => DATE.test(t)),
     paymentAmount: amount === undefined ? undefined : (parsePesoAmount(amount) ?? undefined),
+    // «Clave → Planilla»: número de la planilla (10 dígitos); «Tipo → Planilla»: E, I, N…
+    planillaNumber: read("CLAVE", "PLANILLA", (t) => /^\d{6,}$/.test(t)),
+    planillaType: read("TIPO", "PLANILLA", (t) => /^[A-Z]{1,2}$/.test(t)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Datos generales del aportante
+// ---------------------------------------------------------------------------
+
+/**
+ * Fila bajo «DATOS GENERALES DEL APORTANTE»: «NIT 901741186 | 9 | RAZON SOCIAL …». El NIT identifica a la empresa;
+ * el dígito de verificación y la razón social son datos auxiliares (la razón social nunca se usa para asignar empresa).
+ */
+function parseContributor(rows: Row[]): PayrollEmployer | undefined {
+  const title = findHeading(rows, HEADINGS.contributor);
+  if (title < 0) return undefined;
+  for (let i = title + 1; i < rows.length && i <= title + 4; i++) {
+    const words = rows[i].words;
+    const nit = words.findIndex((w, k) => norm(w.text) === "NIT" && /^\d{5,}$/.test(words[k + 1]?.text ?? ""));
+    if (nit < 0) continue;
+    const dv = /^\d$/.test(words[nit + 2]?.text ?? "") ? words[nit + 2].text : undefined;
+    const nameWords: string[] = [];
+    const rest = words.slice(nit + (dv ? 3 : 2));
+    for (let k = 0; k < rest.length; k++) {
+      // La razón social termina donde empieza la «Clase Aportante» («B - MENOS DE 200 COTIZANTES»).
+      if (nameWords.length && (/^[A-Z]$/.test(rest[k].text) ? rest[k + 1]?.text === "-" : /^[A-Z]-$/.test(rest[k].text))) break;
+      nameWords.push(rest[k].text);
+    }
+    return { nit: words[nit + 1].text, dv, name: nameWords.join(" ").replace(/\s+/g, " ").trim() || undefined };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +223,8 @@ interface Column {
 }
 
 interface DetailLayout {
+  /** Columnas de novedad (ing, ret, vsp…) con el centro de su rótulo; vacío si no se pudieron reconstruir. */
+  novelties: { code: string; center: number }[];
   /** Inicio del encabezado «Identificación»: lo que queda a su izquierda es la columna No. */
   identificationLeft: number;
   /** Inicio de las NOVEDADES: el nombre termina antes. */
@@ -283,7 +320,44 @@ function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined
   }
   if (!Number.isFinite(noveltyLeft)) noveltyLeft = noveltyTitle ? (name.right + noveltyTitle.x) / 2 : dataLeft;
 
-  return { identificationLeft: identification.x, noveltyLeft, dataLeft, columns };
+  return { novelties: noveltyColumns(rows, headerIndex, name.right, dataLeft), identificationLeft: identification.x, noveltyLeft, dataLeft, columns };
+}
+
+/** Códigos de novedad de la PILA (Aportes en Línea los rotula en minúscula). */
+const NOVELTY_CODES = new Set(["ing", "ret", "tde", "tae", "tdp", "tap", "vsp", "cor", "vst", "sln", "ige", "lma", "vac", "avp", "vct", "irl", "vip"]);
+
+/**
+ * Rótulos de las columnas de novedad. Algunas planillas los imprimen completos («ing», «vsp») y otras los parten en dos
+ * líneas de pocas letras («in» + «g»): se unen los pedazos que, juntos, forman un código conocido.
+ */
+function noveltyColumns(rows: Row[], headerIndex: number, from: number, to: number): { code: string; center: number }[] {
+  const lines: Word[][] = [];
+  for (let i = headerIndex; i < rows.length && i <= headerIndex + 3; i++) lines.push(rows[i].words.filter((w) => w.x > from && w.right <= to));
+  const out: { code: string; center: number }[] = [];
+  const used = new Set<Word>();
+  for (const line of lines) {
+    for (const w of line) {
+      const key = w.text.trim().toLowerCase();
+      if (NOVELTY_CODES.has(key) && !out.some((o) => o.code === key && Math.abs(o.center - center(w)) < 2)) {
+        out.push({ code: key, center: center(w) });
+        used.add(w);
+      }
+    }
+  }
+  for (const top of lines.flat()) {
+    if (used.has(top)) continue;
+    for (const below of lines.flat()) {
+      if (below === top || used.has(below) || below.y >= top.y || Math.abs(center(below) - center(top)) > 5) continue;
+      const code = (top.text + below.text).trim().toLowerCase();
+      if (NOVELTY_CODES.has(code) && !out.some((o) => o.code === code)) {
+        out.push({ code, center: (center(top) + center(below)) / 2 });
+        used.add(top);
+        used.add(below);
+        break;
+      }
+    }
+  }
+  return out.sort((a, b) => a.center - b.center);
 }
 
 /** Columna de valores de una palabra (la de encabezado más cercano a su izquierda). */
@@ -319,6 +393,8 @@ interface RawEmployee {
   y: number;
   row: Row;
   nameLines: { y: number; words: Word[] }[];
+  /** Final de un código partido en dos líneas («23030» / «1»), por columna de código. */
+  codeTails: Map<string, string>;
 }
 
 interface DetailResult {
@@ -391,7 +467,7 @@ function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult 
       }
       const first = row.words[0];
       if (first && /^\d+$/.test(first.text) && center(first) < current.identificationLeft) {
-        raws.push({ page: page.pageNumber, y: row.y, row, nameLines: [] });
+        raws.push({ page: page.pageNumber, y: row.y, row, nameLines: [], codeTails: new Map() });
         continue;
       }
       // Filas antes del primer empleado: rótulos de novedades y parafiscales.
@@ -399,11 +475,13 @@ function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult 
       const last = raws[raws.length - 1];
       const nameWords = row.words.filter((w) => center(w) < current.noveltyLeft);
       if (nameWords.length) last.nameLines.push({ y: row.y, words: nameWords });
-      // Final de un código partido en dos líneas («23030» / «1»): no es un valor nuevo.
+      // Final de un código partido en dos líneas («23030» / «1»): no es un valor nuevo, completa el código.
       const lastCols = byColumn(last.row.words, current);
       const unexpected = row.words.filter((w) => {
         const key = columnOf(w, current);
-        return key !== undefined && !(key.endsWith(".codigo") && lastCols.has(key));
+        const tail = key !== undefined && key.endsWith(".codigo") && lastCols.has(key);
+        if (tail) last.codeTails.set(key, (last.codeTails.get(key) ?? "") + w.text);
+        return key !== undefined && !tail;
       });
       if (unexpected.length) issue(row.text, "Texto inesperado entre las filas de empleados; no se asignó a ningún empleado.");
     }
@@ -463,6 +541,31 @@ function parseEmployee(raw: RawEmployee, layout: DetailLayout, issue: (text: str
     else problems.push(`Pensión Días: ${daysText === undefined ? "sin valor" : `«${daysText}» no es un número de días válido`}`);
   }
 
+  const amountOf = (key: string): number | undefined => {
+    const w = cols.get(key)?.find((x) => isPesoAmount(x.text));
+    return w ? (parsePesoAmount(w.text) ?? undefined) : undefined;
+  };
+  const daysOf = (key: string): number | undefined => {
+    const t = cellText(cols, key);
+    return t !== undefined && /^\d{1,2}$/.test(t) && Number(t) <= 31 ? Number(t) : undefined;
+  };
+  const baseOf = (section: Section): SubsystemBase | undefined => (sectionBlank(section) ? undefined : { days: daysOf(`${section}.dias`), ibc: amountOf(`${section}.ibc`) });
+  const unreadCodes: string[] = [];
+  const codeOf = (section: Section, label: string): string | undefined => {
+    const key = `${section}.codigo`;
+    const text = `${cellText(cols, key) ?? ""}${raw.codeTails.get(key) ?? ""}`.replace(/\s+/g, "").toUpperCase();
+    if (!text) return undefined;
+    if (/^[A-Z0-9-]{2,12}$/.test(text)) return text;
+    unreadCodes.push(label);
+    return undefined;
+  };
+  const novelties = row.words
+    .filter((w) => /^X$/i.test(w.text) && center(w) < layout.dataLeft && center(w) >= layout.noveltyLeft)
+    .map((w) => layout.novelties.reduce<{ code: string; center: number } | undefined>((best, n) => (!best || Math.abs(n.center - center(w)) < Math.abs(best.center - center(w)) ? n : best), undefined))
+    .filter((n): n is { code: string; center: number } => n !== undefined)
+    .map((n) => n.code);
+  const parafiscalExonerated = cellText(cols, "PARAFISCALES.exonerado");
+
   const employee: PayrollEmployee = {
     rowNumber: Number(no.text),
     identification: `${docType.text} ${docNumber.text}`,
@@ -482,6 +585,14 @@ function parseEmployee(raw: RawEmployee, layout: DetailLayout, issue: (text: str
   employee.totalContribution = totalValue ?? 0;
   const other = cellText(cols, "PARAFISCALES.aporte");
   if (other !== undefined) employee.otherContribution = parsePesoAmount(other) ?? undefined;
+  employee.health = baseOf("SALUD");
+  employee.risk = baseOf("RIESGOS");
+  employee.ccf = baseOf("CCF");
+  const parafiscal = baseOf("PARAFISCALES");
+  if (parafiscal) employee.parafiscal = { ...parafiscal, exonerated: parafiscalExonerated === undefined ? undefined : /^S[IÍ]$/i.test(parafiscalExonerated) };
+  employee.entityCodes = { afp: codeOf("PENSION", "AFP"), eps: codeOf("SALUD", "EPS"), arl: codeOf("RIESGOS", "ARL"), ccf: codeOf("CCF", "CCF") };
+  employee.novelties = novelties;
+  if (unreadCodes.length) employee.unreadCodes = unreadCodes;
 
   if (problems.length) {
     issue(`${employee.identification} ${name}`, `No se pudo leer: ${problems.join("; ")}.`);
@@ -505,6 +616,7 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
   const header = rows.findIndex((r, i) => i > title && r.cells.some((c) => c.key === "VALOR LIQUIDADO") && r.cells.some((c) => c.key === "VALOR A PAGAR"));
   if (header < 0) return undefined;
   const headers = rows[header].cells;
+  const extra = summaryColumns(rows, header, headers);
   const summary: PaymentSummary = { liquidatedByRisk: {}, entities: [] };
   let entityType: PaymentEntityType = "OTRO";
 
@@ -517,7 +629,7 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
     if (risk) entityType = ENTITY_TYPES[risk] ?? "OTRO";
     if (!isTotal && !risk) {
       // Administradoras individuales (y rótulos de varias líneas, que no traen NIT y se ignoran).
-      const entity = parseEntityRow(row, headers, entityType);
+      const entity = parseEntityRow(row, headers, entityType, extra);
       if (entity) summary.entities!.push(entity);
       continue;
     }
@@ -539,11 +651,37 @@ function parsePaymentSummary(rows: Row[]): PaymentSummary | undefined {
   return summary;
 }
 
+/** Rol de cada encabezado de columna del resumen de pago, por orden de izquierda a derecha y con su subtítulo. */
+type SummaryColumn = "lateInterest" | "fspSolidarity" | "fspSolidarityLate" | "fspSubsistence" | "fspSubsistenceLate" | "incapacities" | "toPay";
+
+/**
+ * Columnas opcionales del resumen de pago. «Fondo» e «Intereses de» se repiten (solidaridad y subsistencia): se distinguen por
+ * orden y se comprueban con el subtítulo de debajo («Solidaridad», «Subsistencia»); si no se pueden confirmar, no se asignan.
+ */
+function summaryColumns(rows: Row[], header: number, headers: Cell[]): Map<Cell, SummaryColumn> {
+  const out = new Map<Cell, SummaryColumn>();
+  const sorted = [...headers].sort((a, b) => a.x - b.x);
+  const below = rows.slice(header + 1, header + 4).flatMap((r) => r.cells);
+  const sub = (c: Cell, word: string) => below.some((b) => norm(b.item.text).includes(word) && Math.abs(b.center - c.center) <= 40);
+  const funds = sorted.filter((c) => c.key === "FONDO");
+  const lates = sorted.filter((c) => c.key.startsWith("INTERESES DE"));
+  for (const c of sorted) {
+    if (c.key === "INTERESES MORA") out.set(c, "lateInterest");
+    else if (c.key === "VALOR A PAGAR") out.set(c, "toPay");
+    else if (c.key.startsWith("SALDOS")) out.set(c, "incapacities");
+  }
+  if (funds[0] && sub(funds[0], "SOLIDARIDAD")) out.set(funds[0], "fspSolidarity");
+  if (funds[1] && sub(funds[1], "SUBSISTENCIA")) out.set(funds[1], "fspSubsistence");
+  if (lates[0] && funds[0] && sub(funds[0], "SOLIDARIDAD")) out.set(lates[0], "fspSolidarityLate");
+  if (lates[1] && funds[1] && sub(funds[1], "SUBSISTENCIA")) out.set(lates[1], "fspSubsistenceLate");
+  return out;
+}
+
 /**
  * Fila de una administradora: nombre | código | NIT | DV | afiliados | valor liquidado | intereses de mora | …
  * Cada dato se toma de la columna de su encabezado; solo cuenta como administradora una fila con NIT, DV y valor liquidado.
  */
-function parseEntityRow(row: Row, headers: Cell[], type: PaymentEntityType): PaymentEntity | undefined {
+function parseEntityRow(row: Row, headers: Cell[], type: PaymentEntityType, extra: Map<Cell, SummaryColumn> = new Map()): PaymentEntity | undefined {
   const byColumn = new Map<string, Word[]>();
   for (const w of row.words) {
     const column = nearest(headers, center(w), (h) => h.center)?.key;
@@ -555,7 +693,15 @@ function parseEntityRow(row: Row, headers: Cell[], type: PaymentEntityType): Pay
   const first = row.cells[0];
   if (!nit || dv === undefined || liquidated === undefined || liquidated === null || !first) return undefined;
   const code = (byColumn.get("CODIGO") ?? []).map((w) => w.text.trim()).join("");
-  return { type, name: first.item.text.replace(/\s+/g, " ").trim(), code, nit: nit.replace(/\D/g, ""), dv, liquidated };
+  const entity: PaymentEntity = { type, name: first.item.text.replace(/\s+/g, " ").trim(), code, nit: nit.replace(/\D/g, ""), dv, liquidated };
+  // Columnas sin valor liquidado: mora, fondos de solidaridad y subsistencia, incapacidades y «valor a pagar».
+  const numeric = row.words.flatMap((w) => {
+    const value = parsePesoAmount(w.text);
+    const header = nearest(headers, center(w), (h) => h.center);
+    return value !== null && header && extra.has(header) ? [{ role: extra.get(header)!, value }] : [];
+  });
+  for (const { role, value } of numeric) if (entity[role] === undefined) entity[role] = value;
+  return entity;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,9 +746,19 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
   }
   devLog("datos generales:", general, "resumen de pago:", paymentSummary);
 
+  let employer: PayrollEmployer | undefined;
+  for (const { rows } of pages) {
+    employer = parseContributor(rows);
+    if (employer) break;
+  }
+
   return {
     provider: "aportes-en-linea",
     pageCount: doc.pageCount,
+    employer,
+    healthPeriod: general.healthPeriod,
+    planillaNumber: general.planillaNumber,
+    planillaType: general.planillaType,
     period: general.period,
     paymentDate: general.paymentDate,
     paymentAmount: general.paymentAmount,

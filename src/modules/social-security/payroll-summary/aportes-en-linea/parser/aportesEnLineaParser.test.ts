@@ -294,7 +294,7 @@ describe("parser Aportes en Línea", () => {
     expect(s.totalContributions).toBe(1_260_500);
     expect(s.lateInterest).toBe(8_000);
     expect(s.employeeCount).toBe(3);
-    expect(s.employees[0]).toEqual({
+    expect(s.employees[0]).toMatchObject({
       rowNumber: 1,
       identification: "CC 1192816998",
       name: "ANGARITA LOPEZ RONALDO",
@@ -535,7 +535,7 @@ describe("exportación", () => {
 describe("resumen de pago por administradora", () => {
   it("lee nombre, código, NIT, DV y SOLO el valor liquidado de cada administradora, bajo el tipo de su grupo", () => {
     const { entities } = parseAportesEnLinea(planilla(EMPS)).paymentSummary!;
-    expect(entities).toEqual([{ type: "AFP", name: "PORVENIR", code: "230301", nit: "800224808", dv: "8", liquidated: 831_300 }]);
+    expect(entities).toMatchObject([{ type: "AFP", name: "PORVENIR", code: "230301", nit: "800224808", dv: "8", liquidated: 831_300 }]);
   });
 
   it("los intereses de mora de la planilla no cambian el valor de la entidad", () => {

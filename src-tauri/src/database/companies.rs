@@ -6,7 +6,7 @@ use crate::models::company::{Company, CompanyInput, Shareholder};
 use crate::models::third_party::ThirdPartyData;
 use crate::services::time::now_iso;
 
-const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review";
+const COLUMNS: &str = "id, razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review, country_code, dept_code, muni_code";
 
 fn map(r: &Row) -> rusqlite::Result<Company> {
     Ok(Company {
@@ -41,6 +41,9 @@ fn map(r: &Row) -> rusqlite::Result<Company> {
         registry_date: r.get(30)?,
         registry_book: r.get(31)?,
         registral_review: serde_json::from_str(&r.get::<_, String>(32)?).unwrap_or_default(),
+        country_code: r.get(33)?,
+        dept_code: r.get(34)?,
+        muni_code: r.get(35)?,
         shareholders: Vec::new(),
         documents: Vec::new(),
         created_at: r.get(14)?,
@@ -176,9 +179,9 @@ fn replace_shareholders(conn: &Connection, company_id: i64, rows: &[Shareholder]
 pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
     let now = now_iso();
     conn.execute(
-        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
+        "INSERT INTO companies (razon_social, nit, direccion, ciudad, telefono, correo, info_adicional, logo_file, dv, subscribed_total_shares, subscribed_nominal_value, paid_total_shares, paid_nominal_value, created_at, updated_at, ciiu_code, legal_rep_name, legal_rep_document, legal_rep_alt_name, legal_rep_alt_document, legal_rep_manual, legal_rep_alt_manual, entity_narrative, corporate_purpose, registry_chamber, registry_city, constitution_doc_type, constitution_date, registry_number, registry_date, registry_book, registral_review, country_code, dept_code, muni_code)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into()), c.country_code, c.dept_code, c.muni_code],
     )?;
     let id = conn.last_insert_rowid();
     replace_shareholders(conn, id, &c.shareholders, &c.document_sizes)?;
@@ -189,8 +192,8 @@ pub fn insert(conn: &Connection, c: &CompanyInput) -> AppResult<i64> {
 /// Inserta conservando id y fechas (restauración de backups).
 pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
     conn.execute(
-        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)"),
-        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
+        &format!("INSERT INTO companies ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)"),
+        params![c.id, c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, c.created_at, c.updated_at, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into()), c.country_code, c.dept_code, c.muni_code],
     )?;
     replace_shareholders(conn, c.id, &c.shareholders, &Default::default())?;
     Ok(())
@@ -199,9 +202,9 @@ pub fn insert_full(conn: &Connection, c: &Company) -> AppResult<()> {
 pub fn update(conn: &Connection, id: i64, c: &CompanyInput) -> AppResult<()> {
     let n = conn.execute(
         "UPDATE companies SET razon_social = ?1, nit = ?2, direccion = ?3, ciudad = ?4, telefono = ?5,
-                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16, legal_rep_name = ?17, legal_rep_document = ?18, legal_rep_alt_name = ?19, legal_rep_alt_document = ?20, legal_rep_manual = ?21, legal_rep_alt_manual = ?22, entity_narrative = ?23, corporate_purpose = ?24, registry_chamber = ?25, registry_city = ?26, constitution_doc_type = ?27, constitution_date = ?28, registry_number = ?29, registry_date = ?30, registry_book = ?31, registral_review = ?32
+                correo = ?6, info_adicional = ?7, logo_file = ?8, dv = ?9, subscribed_total_shares = ?10, subscribed_nominal_value = ?11, paid_total_shares = ?12, paid_nominal_value = ?13, updated_at = ?14, ciiu_code = ?16, legal_rep_name = ?17, legal_rep_document = ?18, legal_rep_alt_name = ?19, legal_rep_alt_document = ?20, legal_rep_manual = ?21, legal_rep_alt_manual = ?22, entity_narrative = ?23, corporate_purpose = ?24, registry_chamber = ?25, registry_city = ?26, constitution_doc_type = ?27, constitution_date = ?28, registry_number = ?29, registry_date = ?30, registry_book = ?31, registral_review = ?32, country_code = ?33, dept_code = ?34, muni_code = ?35
          WHERE id = ?15",
-        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into())],
+        params![c.razon_social, c.nit, c.direccion, c.ciudad, c.telefono, c.correo, c.info_adicional, c.logo_file, c.dv, c.subscribed_total_shares, c.subscribed_nominal_value, c.paid_total_shares, c.paid_nominal_value, now_iso(), id, c.ciiu_code, c.legal_rep_name, c.legal_rep_document, c.legal_rep_alt_name, c.legal_rep_alt_document, c.legal_rep_manual, c.legal_rep_alt_manual, c.entity_narrative, c.corporate_purpose, c.registry_chamber, c.registry_city, c.constitution_doc_type, c.constitution_date, c.registry_number, c.registry_date, c.registry_book, serde_json::to_string(&c.registral_review).unwrap_or_else(|_| "[]".into()), c.country_code, c.dept_code, c.muni_code],
     )?;
     if n == 0 {
         return Err(AppError::user("La empresa no existe o fue eliminada."));
@@ -286,6 +289,9 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            country_code: String::new(),
+            dept_code: String::new(),
+            muni_code: String::new(),
             entity_narrative: String::new(),
             corporate_purpose: String::new(),
             registry_chamber: String::new(),

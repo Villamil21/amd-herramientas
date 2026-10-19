@@ -21,6 +21,21 @@ export interface MiPlanillaEmployee {
   ccfContribution: number;
   /** Aportes voluntarios y al FSP de pensión: no tienen tratamiento contable (se informan, no se suman). */
   pensionExtras: number;
+  /** Desglose de `pensionExtras`: aportes voluntarios (afiliado + aportante) y Fondo de Solidaridad / Subsistencia pensional. */
+  voluntaryPension?: number;
+  fspSolidarity?: number;
+  fspSubsistence?: number;
+  /** Días e IBC de los demás subsistemas (salud, riesgos y CCF); pensión es `pensionDays` / `pensionIbc`. */
+  healthDays?: number;
+  healthIbc?: number;
+  riskDays?: number;
+  riskIbc?: number;
+  ccfDays?: number;
+  ccfIbc?: number;
+  /** Código de la administradora de cada subsistema tal como lo imprime la fila. */
+  entityCodes?: { afp?: string; eps?: string; arl?: string; ccf?: string };
+  /** Códigos de novedad marcados en la fila (ING, RET, VSP, SLN, IGE, LMA, VAC…), en minúscula. */
+  novelties?: string[];
   parafiscales: Record<Parafiscal, number>;
   page: number;
 }

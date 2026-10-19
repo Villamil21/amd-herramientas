@@ -1,9 +1,14 @@
 import type { PdfDocumentText } from "../../bank-analysis/shared/pdf/pdfTypes";
 import type { PlanillaEntity } from "../../exogena/domain/planillaEntities";
 import type { PlanillaEmployee } from "./calc";
+import type { NormalizedPlanilla } from "./social/types";
 
 /** Lo que el flujo de Nómina necesita de una planilla, venga del operador que venga. Importes en pesos enteros. */
 export interface PlanillaView {
+  /** Operador detectado en el PDF («Aportes en Línea», «MiPlanilla»…): se guarda en el lote. */
+  provider: string;
+  /** Planilla normalizada completa (se guarda en los metadatos del lote v2 para los formatos de Exógena). */
+  planilla?: NormalizedPlanilla;
   /** Período de PENSIÓN (AAAA-MM): el único período de nómina. */
   period: string;
   /** Fecha de pago en ISO; `null` si no se identificó. */
@@ -31,8 +36,6 @@ export interface PlanillaView {
  */
 export interface PayrollOperator<A> {
   id: string;
-  /** Nombre del operador tal como se guarda en el lote y se muestra al usuario. */
-  provider: string;
   title: string;
   description: string;
   labels: { pick: string; pickAnother: string; analyzing: string };

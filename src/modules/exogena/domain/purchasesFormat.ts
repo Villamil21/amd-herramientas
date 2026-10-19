@@ -1,6 +1,7 @@
 import type { ExoRecord, FormatStatus, SyncProposal } from "../../../types/exogena";
 import type { PurchasesModel } from "../../financial-statements/purchases/domain/model";
 import type { Alert } from "../../financial-statements/purchases/domain/status";
+import { mergePayroll1001 } from "../../financial-statements/payroll/social/exo1001";
 import { pendingChanges, type PendingChange } from "./pending";
 import { blocking, type Problem } from "./problems";
 
@@ -39,6 +40,12 @@ export function problemsFromAlerts(alerts: readonly Alert[], format: PurchasesEx
   return out;
 }
 
+/** Lo que Nómina y seguridad social aporta al 1001: filas por entidad + concepto y sus pendientes (solo bloquean el 1001). */
+export interface PayrollContribution {
+  proposals: SyncProposal[];
+  problems: Problem[];
+}
+
 export interface PurchasesFormatState {
   proposals: SyncProposal[];
   changes: PendingChange[];
@@ -52,13 +59,13 @@ export interface PurchasesFormatState {
  * «desactualizado» cuando lo que Compras propone hoy difiere de lo sincronizado. Un bloqueo de otro destino (p. ej. EEFF) no
  * detiene este formato. Si el formato no aplica, no se exige nada más que la justificación.
  */
-export function purchasesFormatState(model: PurchasesModel, format: PurchasesExoFormat, stored: ExoRecord[]): PurchasesFormatState {
+export function purchasesFormatState(model: PurchasesModel, format: PurchasesExoFormat, stored: ExoRecord[], payroll?: PayrollContribution): PurchasesFormatState {
   const notApplicableReason = model.notApplicable[format] ?? null;
-  const proposals = notApplicableReason ? [] : model.proposals[format];
+  const proposals = notApplicableReason ? [] : payroll ? mergePayroll1001(model.proposals[format], payroll.proposals) : model.proposals[format];
   const changes = notApplicableReason ? [] : pendingChanges(stored, proposals);
   if (notApplicableReason) return { proposals, changes, problems: [], notApplicableReason };
-  const problems = problemsFromAlerts(model.alerts, format);
-  if (changes.length) problems.push({ level: "blocking", message: `${changes.length} ${changes.length === 1 ? "registro está desactualizado" : "registros están desactualizados"} frente a Compras: actualiza el formato.` });
+  const problems = [...problemsFromAlerts(model.alerts, format), ...(payroll?.problems ?? [])];
+  if (changes.length) problems.push({ level: "blocking", message: `${changes.length} ${changes.length === 1 ? "registro está desactualizado" : "registros están desactualizados"} frente a ${payroll ? "Compras o Nómina" : "Compras"}: actualiza el formato.` });
   return { proposals, changes, problems, notApplicableReason };
 }
 

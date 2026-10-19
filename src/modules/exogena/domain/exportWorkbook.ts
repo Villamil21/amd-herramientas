@@ -56,7 +56,7 @@ const textOf = (v: unknown): string | null => {
 
 /** Orden estable de los registros dentro de la hoja. */
 function sortRecords(code: string, records: ExoRecord[]): ExoRecord[] {
-  const key = (r: ExoRecord) => ((code === "1009" || code === "1008" || code === "1001") ? `${String(r.data.concept ?? "")}|${String(r.data.docNumber ?? "")}` : `${String(r.data.docNumber ?? "")}`);
+  const key = (r: ExoRecord) => ((code === "1009" || code === "1008" || code === "1001" || code === "1011") ? `${String(r.data.concept ?? "")}|${String(r.data.docNumber ?? "")}` : `${String(r.data.docNumber ?? "")}`);
   return [...records].sort((a, b) => key(a).localeCompare(key(b)) || a.id - b.id);
 }
 

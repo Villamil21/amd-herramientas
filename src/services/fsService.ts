@@ -11,7 +11,9 @@ import type {
   EmptyPeriodOutcome,
   EmptyPeriodSource,
   Employee,
+  EmployeeNamePartsInput,
   EmployeeUpdateInput,
+  FsDecision,
   FsCatalog,
   FsPucMapping,
   FsSectionKey,
@@ -80,13 +82,15 @@ export const fsService = {
 
   // Nómina
   employees: (companyId: number) => call<Employee[]>("list_fs_employees", { companyId }),
-  createEmployee: (input: { companyId: number; docType: string; docNumber: string; name: string; hireDate: string; area: string; effectiveFrom: string }) =>
+  createEmployee: (input: { companyId: number; docType: string; docNumber: string; name: string; hireDate: string; area: string; effectiveFrom: string; nameParts?: EmployeeNamePartsInput }) =>
     call<number>("create_fs_employee", { input }),
   updateEmployee: (input: EmployeeUpdateInput) => call<void>("update_fs_employee", { input }),
   setEmployeeArea: (employeeId: number, area: string, effectiveFrom: string) => call<void>("set_fs_employee_area", { employeeId, area, effectiveFrom }),
   addEmployment: (employeeId: number, hireDate: string) => call<number>("add_fs_employment", { employeeId, hireDate }),
   registerLiquidation: (input: { employmentId: number; liquidationDate: string; lastPeriod: string; notes: string }) => call<Liquidation>("register_fs_liquidation", { input }),
   justifyAbsence: (employeeId: number, period: string, justification: string) => call<void>("justify_fs_absence", { employeeId, period, justification }),
+  /** Decisiones guardadas con los lotes ACTIVOS de la empresa (opcionalmente de una sola fuente). */
+  decisions: (companyId: number, source?: string) => call<FsDecision[]>("list_fs_decisions", { companyId, source: source ?? null }),
   payrollRows: (companyId: number) => call<PayrollRow[]>("list_fs_payroll_rows", { companyId }),
 
   // Ajustes

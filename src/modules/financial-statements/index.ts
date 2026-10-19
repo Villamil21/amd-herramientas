@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BookCheck, Bitcoin, ChartNoAxesCombined, ClipboardList, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, Bitcoin, ChartNoAxesCombined, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
 
@@ -48,17 +48,12 @@ export const financialStatementsModule: ModuleDef = {
       providersDescription: "Selecciona el banco del extracto.",
     },
     {
+      // Un solo submódulo visible: el operador (Aportes en Línea, MiPlanilla…) se detecta desde el PDF.
       id: "nomina",
-      name: "Nómina",
-      description: "Importa la planilla de seguridad social y causa salarios, aportes y prestaciones por empleado.",
+      name: "Nómina y seguridad social",
+      description: "Importa la planilla PDF una sola vez: causa la nómina en Estados Financieros y alimenta los formatos 1001, 1011 y 2276 de Exógena.",
       icon: UsersRound,
-      providersDescription: "Selecciona el operador de la planilla.",
-      providers: [
-        { id: "aportes-en-linea", name: "Aportes en Línea", description: "Planilla de Aportes en Línea.", icon: ClipboardList, logo: "Aportes.png", component: lazy(() => import("./payroll/PayrollPage")) },
-        // Sin componente = no disponible (punto gris). La arquitectura queda lista para otros operadores.
-        { id: "soi", name: "SOI", description: "", icon: ClipboardList },
-        { id: "mi-planilla", name: "MiPlanilla", description: "Planilla de MiPlanilla (período de pensión).", icon: ClipboardList, logo: "miplanilla.png", component: lazy(() => import("./payroll/MiPlanillaPage")) },
-      ],
+      component: lazy(() => import("./payroll/NominaPage")),
     },
     {
       id: "empleados",

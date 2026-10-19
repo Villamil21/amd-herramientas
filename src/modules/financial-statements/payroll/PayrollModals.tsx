@@ -4,6 +4,7 @@ import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
 import { AREA_LABEL, type Area, type Employee } from "../../../types/fs";
 import { areaFor } from "./calc";
+import { NamePartsFields, emptyParts, proposedParts, type NamePartsDraft } from "./social/NamePartsFields";
 import { formatExactCents, lastDayOfMonth, periodLabel, todayIso } from "../shared/money";
 import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../utils/dates";
 
@@ -41,12 +42,16 @@ const footer = (saving: boolean, onClose: () => void, onSave: () => void, label:
 /** Ficha obligatoria de un empleado que aparece por primera vez. La fecha de ingreso puede venir sugerida, pero siempre es editable. */
 export function EmployeeFormModal({ open, companyId, docType, docNumber, name, period, suggestedHireDate = "", onClose, onSaved }: { open: boolean; companyId: number; docType: string; docNumber: string; name: string; period: string; suggestedHireDate?: string; onClose: () => void; onSaved: () => void | Promise<unknown> }) {
   const [values, setValues] = useState({ name: "", hireDate: "", area: "" });
+  const [parts, setParts] = useState<NamePartsDraft>(emptyParts());
   const { saving, error, run } = useSave(onSaved);
   useEffect(() => {
-    if (open) setValues({ name, hireDate: suggestedHireDate, area: "" });
+    if (open) {
+      setValues({ name, hireDate: suggestedHireDate, area: "" });
+      setParts(proposedParts(name));
+    }
   }, [open, name, suggestedHireDate]);
   const ready = values.name.trim() && /^\d{4}-\d{2}-\d{2}$/.test(values.hireDate) && values.area;
-  const save = () => void run(() => fsService.createEmployee({ companyId, docType, docNumber, name: values.name, hireDate: values.hireDate, area: values.area, effectiveFrom: period }), "Ficha del empleado creada.");
+  const save = () => void run(() => fsService.createEmployee({ companyId, docType, docNumber, name: values.name, hireDate: values.hireDate, area: values.area, effectiveFrom: period, nameParts: parts.firstSurname || parts.firstName ? parts : undefined }), "Ficha del empleado creada.");
   return (
     <Modal open={open} title="Empleado nuevo" description={`${docType} ${docNumber} aparece por primera vez. Completa su ficha.`} onClose={onClose} locked={saving} footer={footer(saving, onClose, save, "Guardar ficha", !ready)}>
       <div className="stack">
@@ -70,6 +75,7 @@ export function EmployeeFormModal({ open, companyId, docType, docNumber, name, p
             )}
           </Field>
         </div>
+        <NamePartsFields fullName={values.name} value={parts} onChange={setParts} savedConfirmed={false} />
       </div>
     </Modal>
   );
@@ -193,10 +199,15 @@ const fieldValue = (key: string, value: unknown) =>
  */
 export function EmployeeEditModal({ employee, period, onClose, onSaved }: { employee: Employee | null; period: string; onClose: () => void; onSaved: () => void | Promise<unknown> }) {
   const [values, setValues] = useState({ docType: "", docNumber: "", name: "", hireDate: "", area: "" as Area | "", areaFrom: "" });
+  const [parts, setParts] = useState<NamePartsDraft>(emptyParts());
+  const [partsDirty, setPartsDirty] = useState(false);
   const { saving, error, run } = useSave(onSaved);
   const employment = employee?.employments[employee.employments.length - 1];
   useEffect(() => {
     if (!employee) return;
+    const saved = employee.nameParts;
+    setParts(saved.firstSurname || saved.firstName ? { firstSurname: saved.firstSurname, secondSurname: saved.secondSurname, firstName: saved.firstName, otherNames: saved.otherNames, confirm: saved.confirmedAt !== null } : proposedParts(employee.name));
+    setPartsDirty(false);
     const from = period || todayIso().slice(0, 7);
     setValues({ docType: employee.docType, docNumber: employee.docNumber, name: employee.name, hireDate: employment?.hireDate ?? "", area: areaFor(employee, from) ?? "", areaFrom: from });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,6 +228,7 @@ export function EmployeeEditModal({ employee, period, onClose, onSaved }: { empl
           hireDate: values.hireDate,
           area: areaChanged ? (values.area as Area) : null,
           areaFrom: areaChanged ? values.areaFrom : null,
+          ...(partsDirty ? { nameParts: parts } : {}),
         }),
       "Ficha del empleado actualizada.",
     );
@@ -258,6 +270,15 @@ export function EmployeeEditModal({ employee, period, onClose, onSaved }: { empl
             {(id) => <Input id={id} type="month" value={values.areaFrom} onChange={set("areaFrom")} />}
           </Field>
         </div>
+        <NamePartsFields
+          fullName={values.name}
+          value={parts}
+          onChange={(next) => {
+            setParts(next);
+            setPartsDirty(true);
+          }}
+          savedConfirmed={employee?.nameParts.confirmedAt != null}
+        />
         {areaChanged && currentArea && (
           <Alert tone="info">
             Desde {periodLabel(values.areaFrom)}: {AREA_LABEL[values.area as Area]}. Los meses anteriores conservan {AREA_LABEL[currentArea]}. Para corregir meses ya enviados, reemplaza el envío de

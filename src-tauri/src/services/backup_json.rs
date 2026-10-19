@@ -423,6 +423,16 @@ fn restore_tables(tx: &Connection, tables: &[&str], data: &FsDump, damaged: &str
     Ok(())
 }
 
+/// Valida un proveedor del respaldo: solo la ficha mínima de planilla puede venir sin razón social.
+fn validated_supplier(s: &Supplier) -> AppResult<SupplierInput> {
+    let input = supplier_input(s);
+    if s.data_origin == "planilla" && s.business_name.trim().is_empty() {
+        input.validated_pending_name()
+    } else {
+        input.validated()
+    }
+}
+
 fn supplier_input(s: &Supplier) -> SupplierInput {
     SupplierInput { nit: s.nit.clone(), business_name: s.business_name.clone(), vat_type: s.vat_type.clone() }
 }
@@ -511,8 +521,7 @@ pub fn parse(bytes: &[u8]) -> AppResult<BackupFile> {
     }
     let mut nits = std::collections::HashSet::new();
     for s in file.suppliers.iter().flatten() {
-        let v = supplier_input(s)
-            .validated()
+        let v = validated_supplier(s)
             .map_err(|e| AppError::user(format!("Proveedor «{}» del backup: {}", s.business_name, e.0)))?;
         if !nits.insert(v.nit.clone()) {
             return Err(AppError::user(format!("El backup tiene dos proveedores con el NIT {}.", v.nit)));
@@ -649,6 +658,9 @@ fn company_input(c: &Company) -> CompanyInput {
         legal_rep_alt_document: c.legal_rep_alt_document.clone(),
         legal_rep_manual: manual,
         legal_rep_alt_manual: c.legal_rep_alt_manual,
+        country_code: c.country_code.clone(),
+        dept_code: c.dept_code.clone(),
+        muni_code: c.muni_code.clone(),
         entity_narrative: c.entity_narrative.clone(),
         corporate_purpose: c.corporate_purpose.clone(),
         registry_chamber: c.registry_chamber.clone(),
@@ -831,6 +843,9 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                     legal_rep_alt_document: v.legal_rep_alt_document,
                     legal_rep_manual: v.legal_rep_manual,
                     legal_rep_alt_manual: v.legal_rep_alt_manual,
+                    country_code: v.country_code,
+                    dept_code: v.dept_code,
+                    muni_code: v.muni_code,
                     entity_narrative: v.entity_narrative,
                     corporate_purpose: v.corporate_purpose,
                     registry_chamber: v.registry_chamber,
@@ -900,7 +915,7 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
             tx.execute("DELETE FROM supplier_puc_codes", [])?;
             tx.execute("DELETE FROM suppliers", [])?;
             for s in list {
-                let v = supplier_input(s).validated()?;
+                let v = validated_supplier(s)?;
                 let profile = supplier_profile(s).validated()?;
                 suppliers::insert_full(
                     &tx,
@@ -1250,6 +1265,9 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            country_code: String::new(),
+            dept_code: String::new(),
+            muni_code: String::new(),
             entity_narrative: String::new(),
             corporate_purpose: String::new(),
             registry_chamber: String::new(),
@@ -1351,6 +1369,9 @@ mod tests {
                 legal_rep_alt_document: String::new(),
                 legal_rep_manual: false,
                 legal_rep_alt_manual: false,
+                country_code: String::new(),
+                dept_code: String::new(),
+                muni_code: String::new(),
                 entity_narrative: String::new(),
                 corporate_purpose: String::new(),
                 registry_chamber: String::new(),
@@ -1529,6 +1550,70 @@ mod tests {
             "las claves internas se conservan"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn company_domicile_and_employee_name_parts_survive_backup_and_old_backups_restore() {
+        use crate::database::fs;
+        use crate::models::fs::{EmployeeInput, EmployeeNamePartsInput};
+        let dir = std::env::temp_dir().join(format!("amd-json-bk-payroll-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at, country_code, dept_code, muni_code) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x', '169', '08', '001')", []).unwrap();
+        fs::create_employee(
+            &mut conn,
+            &EmployeeInput {
+                company_id: 5,
+                doc_type: "CC".into(),
+                doc_number: "123".into(),
+                name: "PEREZ GOMEZ ANA MARIA".into(),
+                hire_date: "2026-01-01".into(),
+                area: "admin".into(),
+                effective_from: "2026-01".into(),
+                name_parts: Some(EmployeeNamePartsInput { first_surname: "perez".into(), second_surname: "gomez".into(), first_name: "ana".into(), other_names: "maria".into(), confirm: true }),
+            },
+        )
+        .unwrap();
+        let file = build(&conn, &dir, &dir, &dir, "9.9.9").unwrap();
+        let json = serde_json::to_vec(&file).unwrap();
+        let parsed = parse(&json).unwrap();
+        let mut other = Connection::open_in_memory().unwrap();
+        other.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut other).unwrap();
+        restore(&mut other, &dir, &dir, &dir, &parsed).unwrap();
+        let code: (String, String, String) = other.query_row("SELECT country_code, dept_code, muni_code FROM companies WHERE id = 5", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(code, ("169".into(), "08".into(), "001".into()));
+        let e = fs::list_employees(&other, 5).unwrap().remove(0);
+        assert_eq!((e.name_parts.first_surname.as_str(), e.name_parts.first_name.as_str()), ("PEREZ", "ANA"));
+        assert!(e.name_parts.confirmed_at.is_some());
+
+        // Un backup anterior (sin los campos nuevos) restaura sin error y los deja vacíos.
+        let mut value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        for c in value["companies"].as_array_mut().unwrap() {
+            let o = c.as_object_mut().unwrap();
+            for k in ["countryCode", "deptCode", "muniCode"] {
+                o.remove(k);
+            }
+        }
+        for row in value["financialStatements"]["fs_employees"].as_array_mut().unwrap() {
+            let o = row.as_object_mut().unwrap();
+            for k in ["first_surname", "second_surname", "first_name", "other_names", "name_parts_confirmed_at"] {
+                o.remove(k);
+            }
+        }
+        let old = parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        let mut third = Connection::open_in_memory().unwrap();
+        third.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut third).unwrap();
+        restore(&mut third, &dir, &dir, &dir, &old).unwrap();
+        let code: (String, String, String) = third.query_row("SELECT country_code, dept_code, muni_code FROM companies WHERE id = 5", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(code, (String::new(), String::new(), String::new()));
+        let e = fs::list_employees(&third, 5).unwrap().remove(0);
+        assert!(e.name_parts.first_surname.is_empty() && e.name_parts.confirmed_at.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1729,5 +1814,16 @@ mod tests {
         assert_eq!(purchases::state(&target, "901748281", None).unwrap().documents.len(), 1, "se conserva");
         assert_eq!(tax_profiles::list_vat_history(&target, None).unwrap().len(), 1, "el historial de IVA de la empresa devuelta se conserva");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn backup_accepts_the_minimal_payroll_supplier_without_legal_name() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+        suppliers::ensure_payroll_supplier(&conn, "899999239").unwrap();
+        let s = suppliers::list(&conn, None).unwrap().remove(0);
+        assert!(validated_supplier(&s).is_ok());
+        let manual = Supplier { data_origin: "manual".into(), ..s };
+        assert!(validated_supplier(&manual).is_err());
     }
 }

@@ -46,6 +46,13 @@ pub struct Company {
     pub legal_rep_manual: bool,
     #[serde(default)]
     pub legal_rep_alt_manual: bool,
+    /// Domicilio para Exógena (códigos DIAN como texto). Vacío = sin definir; ausentes en backups anteriores.
+    #[serde(default)]
+    pub country_code: String,
+    #[serde(default)]
+    pub dept_code: String,
+    #[serde(default)]
+    pub muni_code: String,
     /// Datos registrales de la Cámara de Comercio (siempre editables). Ausentes en backups anteriores.
     #[serde(default)]
     pub entity_narrative: String,
@@ -192,6 +199,13 @@ pub struct CompanyInput {
     pub legal_rep_manual: bool,
     #[serde(default)]
     pub legal_rep_alt_manual: bool,
+    /// Domicilio para Exógena (códigos DIAN como texto). Vacío = sin definir; ausentes en backups anteriores.
+    #[serde(default)]
+    pub country_code: String,
+    #[serde(default)]
+    pub dept_code: String,
+    #[serde(default)]
+    pub muni_code: String,
     /// Datos registrales de la Cámara de Comercio (siempre editables). Ausentes en backups anteriores.
     #[serde(default)]
     pub entity_narrative: String,
@@ -269,11 +283,35 @@ fn total_milli_percent(list: &[Shareholder]) -> i64 {
     list.iter().map(|s| (s.percentage * 1000.0).round() as i64).sum()
 }
 
+/// País (3 dígitos), departamento (2) y municipio (3) de la empresa, o vacíos. Municipio exige departamento y departamento exige país.
+pub fn validate_location(country: &str, dept: &str, muni: &str) -> AppResult<(String, String, String)> {
+    let clean = |v: &str| v.split_whitespace().collect::<String>();
+    let (country, dept, muni) = (clean(country), clean(dept), clean(muni));
+    let digits = |v: &str, n: usize| v.is_empty() || (v.len() == n && v.chars().all(|c| c.is_ascii_digit()));
+    if !digits(&country, 3) {
+        return Err(AppError::user("El código de país debe tener 3 dígitos."));
+    }
+    if !digits(&dept, 2) {
+        return Err(AppError::user("El código de departamento debe tener 2 dígitos."));
+    }
+    if !digits(&muni, 3) {
+        return Err(AppError::user("El código de municipio debe tener 3 dígitos."));
+    }
+    if !muni.is_empty() && dept.is_empty() {
+        return Err(AppError::user("Elige el departamento del municipio."));
+    }
+    if !dept.is_empty() && country.is_empty() {
+        return Err(AppError::user("Elige el país del departamento."));
+    }
+    Ok((country, dept, muni))
+}
+
 impl CompanyInput {
     /// Valida y normaliza en Rust aunque React ya lo haya hecho: el backend es la última barrera
     /// (guardado, restauración de respaldos y llamadas internas pasan por aquí).
     pub fn validated(self) -> AppResult<Self> {
         let (nit, dv) = normalize::nit_and_dv(&self.nit, &self.dv).map_err(AppError::user)?;
+        let location = validate_location(&self.country_code, &self.dept_code, &self.muni_code)?;
         let mut v = CompanyInput {
             razon_social: normalize::upper_text(&self.razon_social, 200),
             nit: nit.chars().take(30).collect(),
@@ -295,6 +333,9 @@ impl CompanyInput {
             legal_rep_alt_document: normalize::document(&self.legal_rep_alt_document, 60),
             legal_rep_manual: self.legal_rep_manual,
             legal_rep_alt_manual: self.legal_rep_alt_manual,
+            country_code: location.0,
+            dept_code: location.1,
+            muni_code: location.2,
             entity_narrative: normalize::free_text(&self.entity_narrative, 4000),
             corporate_purpose: normalize::free_text(&self.corporate_purpose, 8000),
             registry_chamber: normalize::free_text(&self.registry_chamber, 150),
@@ -450,6 +491,9 @@ mod tests {
             legal_rep_alt_document: String::new(),
             legal_rep_manual: false,
             legal_rep_alt_manual: false,
+            country_code: String::new(),
+            dept_code: String::new(),
+            muni_code: String::new(),
             entity_narrative: String::new(),
             corporate_purpose: String::new(),
             registry_chamber: String::new(),
@@ -543,6 +587,20 @@ mod tests {
         let mut alt_only = input();
         alt_only.shareholders = vec![shareholder("ana", "1", 100.0, Some(ROLE_ALTERNATE))];
         assert!(alt_only.validated().is_err());
+    }
+
+    #[test]
+    fn validates_company_location_codes() {
+        let ok = validate_location(" 169 ", "08", "001").unwrap();
+        assert_eq!(ok, ("169".into(), "08".into(), "001".into()));
+        assert_eq!(validate_location("", "", "").unwrap(), (String::new(), String::new(), String::new()));
+        assert_eq!(validate_location("169", "", "").unwrap().1, "");
+        assert!(validate_location("16", "08", "001").is_err());
+        assert!(validate_location("169", "8", "001").is_err());
+        assert!(validate_location("169", "08", "01").is_err());
+        assert!(validate_location("169", "", "001").is_err(), "municipio sin departamento");
+        assert!(validate_location("", "08", "").is_err(), "departamento sin país");
+        assert!(validate_location("1a9", "", "").is_err());
     }
 
     #[test]

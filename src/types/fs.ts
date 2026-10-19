@@ -344,6 +344,36 @@ export interface Employee {
   justifications: { employeeId: number; period: string; justification: string; createdAt: string }[];
   /** Historial de ediciones de la ficha (valores anteriores y nuevos). */
   events: { action: string; previous: Record<string, unknown> | null; next: Record<string, unknown> | null; createdAt: string }[];
+  /** Nombre separado en apellidos y nombres (2276). Solo vale cuando `confirmedAt` no es nulo. */
+  nameParts: EmployeeNameParts;
+}
+
+export interface EmployeeNameParts {
+  firstSurname: string;
+  secondSurname: string;
+  firstName: string;
+  otherNames: string;
+  confirmedAt: string | null;
+}
+
+/** Separación del nombre que se guarda: `confirm: false` solo guarda la propuesta; `true` la confirma. */
+export interface EmployeeNamePartsInput {
+  firstSurname: string;
+  secondSurname: string;
+  firstName: string;
+  otherNames: string;
+  confirm: boolean;
+}
+
+/** Decisión guardada con un lote activo (p. ej. entidades de una planilla confirmadas). */
+export interface FsDecision {
+  id: number;
+  batchId: number;
+  source: string;
+  documentKey: string;
+  decision: string;
+  detail: string;
+  createdAt: string;
 }
 
 export interface EmployeeUpdateInput {
@@ -356,6 +386,8 @@ export interface EmployeeUpdateInput {
   /** Área nueva y el mes (AAAA-MM) desde el que rige; los meses anteriores conservan la suya. */
   area?: Area | null;
   areaFrom?: string | null;
+  /** Si el nombre completo cambia sin confirmar nuevas partes, la confirmación anterior se pierde. */
+  nameParts?: EmployeeNamePartsInput;
 }
 
 export interface PayrollRow {

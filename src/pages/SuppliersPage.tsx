@@ -124,7 +124,7 @@ export function SuppliersPage({ initialNit = "" }: { /** NIT que se quiere crear
                 {suppliers.map((s) => (
                   <tr key={s.id} className="is-clickable" onClick={() => setEditing(s)}>
                     <td className="selectable">{s.nit}</td>
-                    <td className="table__primary">{s.businessName}</td>
+                    <td className="table__primary">{s.businessName || <span className="muted">Sin razón social (pendiente)</span>}</td>
                     <td>
                       {s.vatType ? <Badge tone={s.vatType === "service" ? "gold" : "dark"}>{VAT_TYPE_LABEL[s.vatType] ?? s.vatType}</Badge> : <span className="muted">Sin configurar</span>}
                     </td>

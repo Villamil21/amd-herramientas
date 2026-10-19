@@ -11,13 +11,11 @@ import { useStatementImport } from "../../bank-analysis/shared/useStatementImpor
 import { fsService } from "../../../services/fsService";
 import { minimumWageService } from "../../../services/minimumWageService";
 import { errorMessage } from "../../../services/tauri";
-import { AREA_LABEL, type BatchInput, type Employee, type MovementInput, type PayrollRow } from "../../../types/fs";
+import { AREA_LABEL, type BatchInput, type BatchSummary, type Employee, type MovementInput, type PayrollRow } from "../../../types/fs";
 import type { MinimumWage } from "../../../types/models";
 import { formatInteger } from "../../../utils/format";
 import { findCompanyByNit, namesMatch } from "../shared/companyMatch";
-import { CompanySelect } from "../shared/components/CompanySelect";
 import { PucSettingsModal, type PucSettingItem } from "../shared/components/PucSettingsModal";
-import { SourceCoverage } from "../shared/components/SourceCoverage";
 import { SendToFs } from "../shared/components/SendToFs";
 import { formatExactCents, lastDayOfMonth, periodLabel } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
@@ -31,6 +29,7 @@ import {
   findOperatorOverlaps,
   findAbsences,
   KIND_LABEL,
+  socialSum,
   MORA_KEY,
   openEmployment,
   parseIdentification,
@@ -43,6 +42,8 @@ import {
 import { AreaChangeModal, EmployeeEditModal, EmployeeFormModal, JustifyAbsenceModal, LiquidationModal, RehireModal } from "./PayrollModals";
 import { formatDateForDisplay } from "../../../utils/dates";
 import type { PayrollOperator } from "./operators";
+import { proposeEntityChanges, SLOT_LABEL } from "./social/entities";
+import { legacyDedupeKeyFor, personKey, planillaMetadata, storedPlanillas } from "./social/store";
 
 const PAYROLL_ITEMS: PucSettingItem[] = allPayrollKeys().map((k) => ({
   key: k.key,
@@ -55,7 +56,7 @@ const PAYROLL_ITEMS: PucSettingItem[] = allPayrollKeys().map((k) => ({
  * lee la planilla con el lector del operador y causa por empleado salario, auxilio, seguridad social y
  * prestaciones, con sus cuentas por pagar. Cada operador solo aporta su lector del PDF y sus textos.
  */
-export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
+export function PayrollFlow<A>({ operator, onContext, onSent }: { operator: PayrollOperator<A>; /** Empresa (por el NIT del aportante) y año de la planilla abierta, para el panel de estado. */ onContext?: (ctx: { companyId: number | null; year: number | null }) => void; /** Se envió una planilla o un periodo sin nómina: el panel de estado vuelve a leer. */ onSent?: () => void }) {
   const toast = useToast();
   const data = useFsData();
   const [exportingSheets, setExportingSheets] = useState(false);
@@ -71,6 +72,7 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [batches, setBatches] = useState<BatchSummary[]>([]);
   const [wages, setWages] = useState<MinimumWage[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [creating, setCreating] = useState<{ docType: string; docNumber: string; name: string; suggestedHireDate?: string } | null>(null);
@@ -85,7 +87,6 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
   const [query, setQuery] = useState("");
   /** Empleado abierto en el detalle (tipo + número de documento). */
   const [detailKey, setDetailKey] = useState<string | null>(null);
-  const [sentKey, setSentKey] = useState(0);
 
   useEffect(() => {
     minimumWageService.list().then(setWages, (e) => toast(errorMessage(e), "error"));
@@ -97,13 +98,17 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
     const found = findCompanyByNit(data.companies, summary?.employerNit);
     setCompanyId(found?.id ?? null);
   }, [summary, data.companies]);
+  useEffect(() => {
+    onContext?.({ companyId, year: summary ? Number(summary.period.slice(0, 4)) : null });
+  }, [companyId, summary, onContext]);
 
   const reloadPayroll = useCallback(async () => {
     if (companyId === null) return;
     try {
-      const [e, r] = await Promise.all([fsService.employees(companyId), fsService.payrollRows(companyId)]);
+      const [e, r, b] = await Promise.all([fsService.employees(companyId), fsService.payrollRows(companyId), fsService.batches(companyId)]);
       setEmployees(e);
       setRows(r);
+      setBatches(b);
     } catch (err) {
       toast(errorMessage(err), "error");
     }
@@ -112,6 +117,7 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
   useEffect(() => {
     setEmployees([]);
     setRows([]);
+    setBatches([]);
     void reloadPayroll();
   }, [reloadPayroll]);
 
@@ -134,12 +140,24 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
         employmentId: employment?.id,
         area: employee ? areaFor(employee, summary.period) : undefined,
         calc: computeMonth(e.pensionIbc, e.pensionDays, yearWages?.smmlv ?? 0, yearWages?.transport ?? 0),
-        social: { pension: e.pensionContribution * 100, health: e.healthContribution * 100, arl: e.riskContribution * 100, ccf: e.ccfContribution * 100 },
+        social: { pension: e.pensionContribution * 100, health: e.healthContribution * 100, arl: e.riskContribution * 100, ccf: e.ccfContribution * 100, sena: (e.sena ?? 0) * 100, icbf: (e.icbf ?? 0) * 100 },
         parafiscalesCents: (e.otherContribution ?? 0) * 100,
       };
     });
   }, [summary, employees, yearWages]);
 
+  const batchKeys = useMemo(() => new Map(batches.map((b) => [b.id, b.dedupeKey])), [batches]);
+  // Llave de la planilla: un lote legado de la misma planilla (mismo operador, periodo y empleados) conserva su llave para
+  // entrar al flujo de duplicado/reemplazo en vez de chocar como «persona repetida». Si no hay, la llave v2.
+  const dedupeKey = useMemo(() => {
+    if (!summary) return "";
+    const legacy = summary.planilla ? legacyDedupeKeyFor(summary.planilla, batches, rows, new Map(employees.map((e) => [personKey(e.docType, e.docNumber), e.id]))) : undefined;
+    return legacy ?? operator.dedupeKey(summary);
+  }, [summary, batches, rows, employees, operator]);
+  /** Propuestas de entidades (primera aparición o código distinto): se confirman antes de enviar y se guardan con el lote. */
+  const entityProposals = useMemo(() => (summary?.planilla ? proposeEntityChanges(summary.planilla, storedPlanillas(batches), dedupeKey) : []), [summary, batches, dedupeKey]);
+  const [entitiesConfirmed, setEntitiesConfirmed] = useState(false);
+  useEffect(() => setEntitiesConfirmed(false), [summary]);
   const lateInterestCents = Math.max(0, (summary?.lateInterest ?? 0) * 100);
   // Quien ya fue enviado en este periodo (por esta u otra planilla/operador) no es una ausencia de esta planilla.
   const present = useMemo(() => {
@@ -149,8 +167,8 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
   }, [months, rows, employees, period]);
   /** Empleados de esta planilla que ya fueron enviados para el periodo desde OTRO operador: no se contabilizan dos veces. */
   const operatorOverlaps = useMemo(
-    () => findOperatorOverlaps(months.flatMap((m) => (m.employee ? [m.employee] : [])), rows, period, operator.provider),
-    [months, rows, period, operator.provider],
+    () => findOperatorOverlaps(months.flatMap((m) => (m.employee ? [m.employee] : [])), rows, period, (r) => batchKeys.get(r.batchId) === dedupeKey),
+    [months, rows, period, batchKeys, dedupeKey],
   );
   const absences = useMemo(() => (period ? findAbsences(period, present, employees, rows) : []), [period, present, employees, rows]);
   const keys = useMemo(() => requiredKeys(months, lateInterestCents), [months, lateInterestCents]);
@@ -168,14 +186,14 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
     const sent = operatorOverlaps.find((o) => o.employeeId === m.employee!.id);
     return sent ? `Ya enviado por ${sent.provider || "otro operador"}` : null;
   };
-  const socialOf = (m: EmployeeMonth) => m.social.pension + m.social.health + m.social.arl + m.social.ccf;
+  const socialOf = socialSum;
   const benefitsOf = (m: EmployeeMonth) => m.calc.primaCents + m.calc.cesantiasCents + m.calc.interesesCents + m.calc.vacacionesCents;
   const totals = useMemo(
     () => ({
       days: months.reduce((n, m) => n + m.calc.days, 0),
       salaries: months.reduce((n, m) => n + m.calc.salaryCents, 0),
       transport: months.reduce((n, m) => n + m.calc.transportCents, 0),
-      social: months.reduce((n, m) => n + m.social.pension + m.social.health + m.social.arl + m.social.ccf, 0),
+      social: months.reduce((n, m) => n + socialSum(m), 0),
       benefits: months.reduce((n, m) => n + m.calc.primaCents + m.calc.cesantiasCents + m.calc.interesesCents + m.calc.vacacionesCents, 0),
     }),
     [months],
@@ -196,11 +214,12 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
   const detail = months.find((m) => `${m.docType}${m.docNumber}` === detailKey) ?? null;
 
   const blocking = [
-    companyId === null && "Selecciona la empresa",
+    companyId === null && (summary?.employerNit ? `No existe una empresa con el NIT ${summary.employerNit}` : "La planilla no trae el NIT del aportante"),
     summary && summary.issues.length > 0 && operator.issuesBlocking,
     !paymentDate && "No se identificó la fecha de pago",
-    parafiscales.length > 0 && "Se detectaron aportes parafiscales",
-    operatorOverlaps.length > 0 && `${operatorOverlaps.length} ${operatorOverlaps.length === 1 ? "empleado ya enviado" : "empleados ya enviados"} desde otro operador`,
+    parafiscales.length > 0 && "Hay aportes parafiscales sin tratamiento contable",
+    operatorOverlaps.length > 0 && `${operatorOverlaps.length} ${operatorOverlaps.length === 1 ? "empleado ya enviado" : "empleados ya enviados"} en otra planilla del periodo`,
+    entityProposals.length > 0 && !entitiesConfirmed && `${entityProposals.length} ${entityProposals.length === 1 ? "empleado con entidades por confirmar" : "empleados con entidades por confirmar"}`,
     !yearWages && `Falta el SMMLV o el auxilio de transporte de ${period.slice(0, 4)}`,
     newEmployees.length > 0 && `${newEmployees.length} empleados sin ficha`,
     rehires.length > 0 && `${rehires.length} reingresos sin registrar`,
@@ -209,7 +228,7 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
     missingKeys.length > 0 && "Faltan cuentas PUC de nómina",
   ].filter(Boolean) as string[];
   // Solo faltan cuentas PUC: es una clasificación pendiente; lo demás requiere revisión.
-  const blockedStatus = blocking.length === 1 && missingKeys.length > 0 ? "Pendiente de clasificación" : "Requiere revisión";
+  const blockedStatus = blocking.length === 1 && missingKeys.length > 0 ? "Pendiente de clasificación" : blocking.length === 1 && entityProposals.length > 0 && !entitiesConfirmed ? "Pendiente de confirmar" : "Requiere revisión";
 
   function buildBatch(): BatchInput | null {
     if (!summary || companyId === null || !paymentDate) return null;
@@ -224,10 +243,14 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
       periodLabel: `Nómina ${periodLabel(period)}`,
       periodStart: `${period}-01`,
       periodEnd: lastDayOfMonth(period),
-      dedupeKey: operator.dedupeKey(summary),
+      dedupeKey,
       // `entities`: resumen de pago por administradora (valor liquidado, sin mora) para el 1009 de Información Exógena.
-      metadata: { provider: operator.provider, period, paymentDate, employees: months.length, ...(summary.planillaId ? { planillaId: summary.planillaId } : {}), ...(summary.entities.length ? { entities: summary.entities } : {}) },
+      metadata: (() => {
+        const base = { provider: summary.provider, period, paymentDate, employees: months.length, ...(summary.planillaId ? { planillaId: summary.planillaId } : {}), ...(summary.entities.length ? { entities: summary.entities } : {}) };
+        return summary.planilla ? planillaMetadata({ ...summary.planilla, fileName: state.status === "done" ? state.fileName : undefined }, base) : base;
+      })(),
       movements,
+      decisions: entityProposals.map((p) => ({ documentKey: p.documentKey, decision: "entities_confirmed", detail: p.changes.map((c) => `${SLOT_LABEL[c.slot]} ${c.from || "—"} → ${c.to}`).join("; ") })),
       payrollRows: months.map((m) => ({
         employeeId: m.employee!.id,
         employmentId: m.employmentId!,
@@ -247,8 +270,8 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
         [
           {
             name: "Nómina",
-            columns: ["Tipo doc.", "Documento", "Nombre", "Área", "Días", "Sueldo base", "Sueldo del mes", "Auxilio transporte", "Pensión", "EPS", "ARL", "CCF", ...(operator.cotizacionColumn ? ["Cotización"] : []), "Prima", "Cesantías", "Intereses cesantías", "Vacaciones"].map((header, i) => ({ header, kind: i < 4 ? ("text" as const) : i === 4 ? ("integer" as const) : ("money" as const) })),
-            rows: months.map((m) => [m.docType, m.docNumber, m.employee?.name ?? m.source.name, m.area ? AREA_LABEL[m.area] : "", m.calc.days, pesos(m.calc.baseSalaryCents), pesos(m.calc.salaryCents), pesos(m.calc.transportCents), pesos(m.social.pension), pesos(m.social.health), pesos(m.social.arl), pesos(m.social.ccf), ...(operator.cotizacionColumn ? [pesos(socialOf(m))] : []), pesos(m.calc.primaCents), pesos(m.calc.cesantiasCents), pesos(m.calc.interesesCents), pesos(m.calc.vacacionesCents)]),
+            columns: ["Tipo doc.", "Documento", "Nombre", "Área", "Días", "Sueldo base", "Sueldo del mes", "Auxilio transporte", "Pensión", "EPS", "ARL", "CCF", "SENA", "ICBF", ...(operator.cotizacionColumn ? ["Cotización"] : []), "Prima", "Cesantías", "Intereses cesantías", "Vacaciones"].map((header, i) => ({ header, kind: i < 4 ? ("text" as const) : i === 4 ? ("integer" as const) : ("money" as const) })),
+            rows: months.map((m) => [m.docType, m.docNumber, m.employee?.name ?? m.source.name, m.area ? AREA_LABEL[m.area] : "", m.calc.days, pesos(m.calc.baseSalaryCents), pesos(m.calc.salaryCents), pesos(m.calc.transportCents), pesos(m.social.pension), pesos(m.social.health), pesos(m.social.arl), pesos(m.social.ccf), pesos(m.social.sena), pesos(m.social.icbf), ...(operator.cotizacionColumn ? [pesos(socialOf(m))] : []), pesos(m.calc.primaCents), pesos(m.calc.cesantiasCents), pesos(m.calc.interesesCents), pesos(m.calc.vacacionesCents)]),
           },
         ],
         `${operator.exportPrefix}_${period}`,
@@ -300,8 +323,14 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
             actions={<StatementFileActions picking={picking} busy={busy} exportedPath={exportedPath} onPick={() => void pick()} label={operator.labels.pickAnother} />}
           >
             <div className="bank-head__fields">
-              <CompanySelect companies={data.companies} value={companyId} onChange={setCompanyId} hint={summary?.employerNit ? `NIT del aportante en la planilla: ${summary.employerNit}` : undefined} />
-              {company && summary?.employerNit && findCompanyByNit([company], summary.employerNit) === undefined && <Badge tone="warning">El NIT de la planilla no es el de esta empresa</Badge>}
+              {company ? (
+                <span>
+                  <strong>{company.razonSocial}</strong> · NIT {company.nit} <Badge tone="success">Identificada por el NIT del aportante</Badge> · {summary.provider}
+                  {summary.planillaId ? ` · Planilla ${summary.planillaId}` : ""}
+                </span>
+              ) : (
+                <Badge tone="danger">Sin empresa con el NIT {summary.employerNit ?? "del aportante"}</Badge>
+              )}
             </div>
           </ContextBar>
           <SendToFs
@@ -314,10 +343,9 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
             duplicateTitle="Esta planilla ya fue enviada."
             onSent={() => {
               void reloadPayroll();
-              setSentKey((k) => k + 1);
+              onSent?.();
             }}
           />
-          <SourceCoverage companyId={companyId} source="payroll" year={Number(period.slice(0, 4))} refreshKey={sentKey} />
           <MetricBar
             label="Resumen de la planilla"
             metrics={[
@@ -330,9 +358,35 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
             ]}
           />
 
+          {companyId === null && (
+            <Alert tone="danger" title={`No existe una empresa con el NIT ${summary.employerNit ?? "del aportante"}`}>
+              La empresa se identifica solo por el NIT del aportante de la planilla (nunca por el nombre). Crea la empresa con ese NIT o corrige su identificación para continuar.
+              <div className="row" style={{ marginTop: 8 }}>
+                <Button size="sm" onClick={() => navigate(paths.companies)}>
+                  Ir a Empresas
+                </Button>
+              </div>
+            </Alert>
+          )}
+          {entityProposals.length > 0 && (
+            <Alert tone="info" title={`${entityProposals.length} ${entityProposals.length === 1 ? "empleado con entidades por confirmar" : "empleados con entidades por confirmar"}`}>
+              La planilla trae entidades (EPS, AFP, ARL, CCF) nuevas o distintas a las del último periodo. Se guardan por periodo y no cambian los periodos anteriores, pero requieren tu confirmación.
+              <ul className="history-list" style={{ marginTop: 8 }}>
+                {entityProposals.map((p) => (
+                  <li key={p.documentKey}>
+                    <strong>{p.name}</strong> ({p.person}) · {p.kind === "new" ? "primera planilla" : "cambio"}: {p.changes.map((c) => `${SLOT_LABEL[c.slot]} ${c.from ? `${c.from} → ` : ""}${c.to}`).join(" · ")}
+                  </li>
+                ))}
+              </ul>
+              <label className="checkbox" style={{ marginTop: 8 }}>
+                <input type="checkbox" checked={entitiesConfirmed} onChange={(e) => setEntitiesConfirmed(e.target.checked)} />
+                <span>Confirmo estas entidades para el periodo {periodLabel(period)}</span>
+              </label>
+            </Alert>
+          )}
           {parafiscales.length > 0 && (
-            <Alert tone="danger" title="Se detectaron aportes parafiscales.">
-              Esta versión todavía no tiene definido su tratamiento contable. (
+            <Alert tone="danger" title="Hay aportes parafiscales sin tratamiento contable.">
+              SENA e ICBF se causan por separado; estos valores no se reconocen ni se inventa su clasificación y deben resolverse antes de enviar. (
               {parafiscales
                 .map((m) => {
                   const detail = Object.entries(m.source.parafiscales ?? {}).filter(([, v]) => v > 0).map(([k, v]) => `${k.toUpperCase()} ${formatInteger(v)}`).join(", ");
@@ -356,8 +410,8 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
           )}
           {summary.warnings.length > 0 && <Alert tone="warning" title="Hay datos de la planilla que no se pudieron verificar" items={summary.warnings} />}
           {operatorOverlaps.map((o) => (
-            <Alert key={o.employeeId} tone="danger" title="Empleado ya enviado desde otro operador">
-              {o.name} ya fue enviado para {periodLabel(period)} desde {o.provider || "otro operador"} (lote #{o.batchId}, «{o.fileName}»). Una persona no se contabiliza dos veces en el mismo periodo: quítala de esta planilla o anula ese lote primero.
+            <Alert key={o.employeeId} tone="danger" title="Empleado ya enviado en otra planilla del periodo">
+              {o.name} ya fue enviado para {periodLabel(period)} desde {o.provider || "otra planilla"} (lote #{o.batchId}, «{o.fileName}»). Una persona no se contabiliza dos veces en el mismo periodo, sin importar el operador: quítala de esta planilla o anula ese lote primero.
             </Alert>
           ))}
           {absences.map((a) => (
@@ -567,7 +621,7 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
               [
                 { title: "Resumen del período", rows: [["Días", formatInteger(detail.calc.days)], ["Sueldo base", formatExactCents(detail.calc.baseSalaryCents)], ["Sueldo del mes", formatExactCents(detail.calc.salaryCents)]] },
                 { title: "Devengados", rows: [["Auxilio de transporte", detail.calc.transportApplies ? formatExactCents(detail.calc.transportCents) : "No aplica"]] },
-                { title: operator.socialLabel, total: socialOf(detail), rows: [["Pensión", formatExactCents(detail.social.pension)], ["EPS", formatExactCents(detail.social.health)], ["ARL", formatExactCents(detail.social.arl)], ["CCF", formatExactCents(detail.social.ccf)]] },
+                { title: operator.socialLabel, total: socialOf(detail), rows: [["Pensión", formatExactCents(detail.social.pension)], ["EPS", formatExactCents(detail.social.health)], ["ARL", formatExactCents(detail.social.arl)], ["CCF", formatExactCents(detail.social.ccf)], ["SENA", formatExactCents(detail.social.sena)], ["ICBF", formatExactCents(detail.social.icbf)]] },
                 { title: "Prestaciones sociales", total: benefitsOf(detail), rows: [["Prima", formatExactCents(detail.calc.primaCents)], ["Cesantías", formatExactCents(detail.calc.cesantiasCents)], ["Intereses de cesantías", formatExactCents(detail.calc.interesesCents)], ["Vacaciones", formatExactCents(detail.calc.vacacionesCents)]] },
               ] as { title: string; total?: number; rows: (readonly [string, string])[] }[]
             ).map((section) => (
@@ -602,7 +656,7 @@ export function PayrollFlow<A>({ operator }: { operator: PayrollOperator<A> }) {
           </div>
         )}
       </Modal>
-      <EmptyPeriodModal open={emptyOpen} source="payroll" companies={data.companies} companyId={companyId} defaultMonth={period || null} onClose={() => setEmptyOpen(false)} />
+      <EmptyPeriodModal open={emptyOpen} source="payroll" companies={data.companies} companyId={companyId} defaultMonth={period || null} onClose={() => setEmptyOpen(false)} onChanged={() => onSent?.()} />
       <PucSettingsModal
         open={settingsOpen}
         title="Cuentas PUC de nómina"

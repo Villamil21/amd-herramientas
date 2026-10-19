@@ -24,7 +24,25 @@ export interface PayrollEmployee {
   totalContribution: number;
   /** Aporte de parafiscales (SENA/ICBF). No se muestra: solo valida que la fila sume su total. */
   otherContribution?: number;
+  /** Días e IBC por subsistema (la fila los trae completos; antes solo se usaba pensión). `undefined` = el subsistema no aparece en la fila. */
+  health?: SubsystemBase;
+  risk?: SubsystemBase;
+  ccf?: SubsystemBase;
+  /** Parafiscales: Aportes en Línea los trae en UNA sola columna «SENA e ICBF» (no separa SENA de ICBF). */
+  parafiscal?: SubsystemBase & { exonerated?: boolean };
+  /** Código de la administradora de cada subsistema tal como lo imprime la fila (230301, EPS010, 14-11, CCF07). */
+  entityCodes?: { afp?: string; eps?: string; arl?: string; ccf?: string };
+  /** Códigos de novedad marcados en la fila (ing, ret, vsp, sln, ige, lma, vac, avp, vct, irl…). */
+  novelties?: string[];
+  /** Subsistemas cuyo código de entidad no se pudo leer de forma segura. */
+  unreadCodes?: string[];
   page: number;
+}
+
+/** Días e IBC de un subsistema en la fila de un cotizante. */
+export interface SubsystemBase {
+  days?: number;
+  ibc?: number;
 }
 
 /** Fila «Total Afiliados(n)» al final de la liquidación detallada. */
@@ -53,6 +71,17 @@ export interface PaymentEntity {
   nit: string;
   dv: string;
   liquidated: number;
+  /** Intereses de mora de la administradora (fuera del aporte liquidado). */
+  lateInterest?: number;
+  /** Fondo de Solidaridad y de Subsistencia (solo AFP) y sus intereses de mora: columnas aparte del aporte liquidado. */
+  fspSolidarity?: number;
+  fspSolidarityLate?: number;
+  fspSubsistence?: number;
+  fspSubsistenceLate?: number;
+  /** «Saldos e incapacidades»: nunca es aporte liquidado. */
+  incapacities?: number;
+  /** «Valor a pagar» de la administradora. */
+  toPay?: number;
 }
 
 /** Fila TOTAL y subtotales por riesgo del «Resumen de pago». */
@@ -73,11 +102,26 @@ export interface PayrollIssue {
   reason: string;
 }
 
+/** Datos del aportante («DATOS GENERALES DEL APORTANTE»). */
+export interface PayrollEmployer {
+  nit: string;
+  dv?: string;
+  name?: string;
+}
+
 export interface PayrollSummary {
   provider: PayrollProvider;
   pageCount: number;
   /** Periodo de pensión, ej. "2026-01". */
   period: string;
+  /** Periodo de salud (solo informativo; nunca se usa como periodo contable). */
+  healthPeriod?: string;
+  /** Aportante: su NIT identifica a la empresa. */
+  employer?: PayrollEmployer;
+  /** Número de la planilla (Clave → Planilla) cuando el PDF lo trae. */
+  planillaNumber?: string;
+  /** Tipo de planilla («E», «I»…). */
+  planillaType?: string;
   /** Fecha de pago tal como aparece, ej. "2026/02/26". */
   paymentDate: string;
   /** Valor pagado. */
