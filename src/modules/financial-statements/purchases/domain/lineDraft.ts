@@ -1,11 +1,11 @@
-import type { LineClassInput, PurchaseLine, RateVersion, RetentionPick } from "../../../../types/purchases";
+import type { LineClassInput, RateVersion, RetentionPick } from "../../../../types/purchases";
 import type { UvtValue, WithholdingRate } from "../../../../types/models";
 import { minBaseCents, retentionCents } from "../../../taxes/withholding/services/money";
 import { normalizeKey } from "../../../../utils/text";
 import { rateAt } from "./rateVersions";
 import { allocate, isInvoiceLevel } from "./retention";
-import { lineLabel } from "./model";
-import { normalizeClassification, productKey } from "./classify";
+import { lineLabel, type LineView } from "./model";
+import { isNotApplicablePuc, normalizeClassification, productKey } from "./classify";
 
 /**
  * Borrador de la clasificación de UNA línea (lo que edita el panel «Clasificar»). Funciones puras: el panel solo las llama,
@@ -85,36 +85,30 @@ export function chosenRates(rates: readonly WithholdingRate[], picks: readonly R
   return picks.map((p) => ({ rate: rates.find((r) => r.id === p.rateId), rateId: p.rateId }));
 }
 
-export const COPY_ALL_INCLUDES = "Incluye: PUC, concepto 1001 y retenciones.";
-export const copyAllLabel = (others: number) => `Aplicar clasificación completa a ${others === 1 ? "la otra línea" : `las otras ${others} líneas`}`;
+export const PROPOSALS_INCLUDE = "Incluye PUC, concepto 1001 y retenciones. Solo aplica a esta factura.";
+export const confirmProposalsLabel = (n: number) => `Confirmar ${n} ${n === 1 ? "propuesta completa" : "propuestas completas"} (solo esta factura)`;
 
-export interface ClassificationDraft {
-  pucCode: string;
-  concept1001: string;
-  retention: readonly RetentionPick[];
-}
+/** Líneas de la factura con una propuesta lista para confirmar (PUC y concepto 1001, o 7305 que no lleva concepto). */
+export const proposableLines = (lines: readonly LineView[]): LineView[] =>
+  lines.filter((l) => !l.confirmed && !l.line.issue && l.proposal.pucCode && (l.proposal.concept1001 || isNotApplicablePuc(l.proposal.pucCode)));
 
 /**
- * «Aplicar clasificación completa a las otras líneas»: copia PUC, concepto 1001 y TODAS las retenciones a las líneas elegidas,
- * solo para esta factura (`saveRule: false`). Nunca crea ni cambia reglas de producto: la regla de la línea de origen se guarda
- * únicamente si el usuario lo eligió para esa línea.
+ * «Confirmar N propuestas completas»: confirma de cada línea propuesta su PUC, su concepto 1001 y TODAS sus retenciones.
+ * Solo vale para esta factura: `saveRule: false`, nunca crea ni cambia reglas de producto/proveedor.
  */
-export function copyClassificationInputs(
-  documentId: number,
-  supplierNit: string,
-  source: ClassificationDraft,
-  targets: readonly PurchaseLine[],
-): LineClassInput[] {
-  const full = normalizeClassification({ pucCode: source.pucCode, concept1001: source.concept1001, retention: source.retention.map((r) => ({ rateId: r.rateId })) });
-  return targets.map((t) => ({
-    documentId,
-    lineIndex: t.index,
-    pucCode: full.pucCode,
-    concept1001: full.concept1001,
-    retention: full.retention.map((r) => ({ rateId: r.rateId })),
-    saveRule: false,
-    supplierNit,
-    productKey: productKey(t),
-    productLabel: lineLabel(t),
-  }));
+export function proposalInputs(documentId: number, supplierNit: string, lines: readonly LineView[]): LineClassInput[] {
+  return proposableLines(lines).map((l) => {
+    const full = normalizeClassification({ pucCode: l.proposal.pucCode, concept1001: l.proposal.concept1001, retention: l.proposal.retention });
+    return {
+      documentId,
+      lineIndex: l.line.index,
+      pucCode: full.pucCode,
+      concept1001: full.concept1001,
+      retention: full.retention.map((r) => ({ rateId: r.rateId })),
+      saveRule: false,
+      supplierNit,
+      productKey: productKey(l.line),
+      productLabel: lineLabel(l.line),
+    };
+  });
 }

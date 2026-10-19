@@ -5,9 +5,10 @@ import { purchasesService } from "../../../../services/purchasesService";
 import { errorMessage } from "../../../../services/tauri";
 import { formatMoneyCents } from "../../../../utils/format";
 import { leafConcept } from "../../puc-codes/services/pucCatalog";
-import { PROPOSAL_SOURCE_LABEL, productKey } from "../domain/classify";
+import { PROPOSAL_SOURCE_LABEL } from "../domain/classify";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
+import { confirmProposalsLabel, proposableLines, PROPOSALS_INCLUDE, proposalInputs } from "../domain/lineDraft";
 import { LineClassifyModal } from "./LineClassifyModal";
 import { StatusChip } from "./StatusStrip";
 
@@ -34,7 +35,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
   }, [view?.doc.id, focusLine]);
 
   const lines = view?.lines ?? [];
-  const proposable = useMemo(() => lines.filter((l) => !l.confirmed && l.proposal.pucCode && l.proposal.concept1001 && !l.line.issue), [lines]);
+  const proposable = useMemo(() => proposableLines(lines), [lines]);
 
   if (!view) return null;
   const { doc, data: parsed } = view;
@@ -56,20 +57,8 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
   const confirmProposals = () =>
     run(
       () =>
-        purchasesService.saveLineClasses(
-          proposable.map((l) => ({
-            documentId: doc.id,
-            lineIndex: l.line.index,
-            pucCode: l.proposal.pucCode,
-            concept1001: l.proposal.concept1001,
-            retention: l.proposal.retention,
-            saveRule: false,
-            supplierNit: doc.issuerNit,
-            productKey: productKey(l.line),
-            productLabel: lineLabel(l.line),
-          })),
-        ),
-      `${proposable.length} ${proposable.length === 1 ? "línea confirmada" : "líneas confirmadas"} solo para esta factura.`,
+        purchasesService.saveLineClasses(proposalInputs(doc.id, doc.issuerNit, lines)),
+      `${proposable.length} ${proposable.length === 1 ? "línea confirmada" : "líneas confirmadas"} con PUC, concepto 1001 y retenciones, solo para esta factura.`,
     );
 
   const flag = (kind: "name_confirm" | "exclude") => run(() => purchasesService.setFlag(doc.id, kind, "1").then(() => purchasesService.audit(doc.buyerNit, doc.year, kind === "exclude" ? "Factura excluida" : "Nombre del adquiriente confirmado", { documentId: doc.id, number: parsed.number })));
@@ -137,9 +126,12 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
             </Button>
           )}
           {proposable.length > 0 && (
-            <Button variant="primary" icon={<Check size={14} />} loading={busy} onClick={() => void confirmProposals()}>
-              Confirmar {proposable.length} {proposable.length === 1 ? "propuesta" : "propuestas"} (solo esta factura)
-            </Button>
+            <div className="stack" style={{ gap: 2 }}>
+              <Button variant="primary" icon={<Check size={14} />} loading={busy} onClick={() => void confirmProposals()}>
+                {confirmProposalsLabel(proposable.length)}
+              </Button>
+              <span className="field__hint">{PROPOSALS_INCLUDE}</span>
+            </div>
           )}
           {flags.has("exclude") ? (
             <Button icon={<RotateCcw size={14} />} loading={busy} onClick={() => void unflag("exclude")}>

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { PurchaseDocument, PurchaseLine, PurchasesState, YearConcept } from "../../../../types/purchases";
+import type { PurchaseDocument, PurchaseLine, PurchaseRule, PurchasesState, YearConcept } from "../../../../types/purchases";
 import { buildPucIndex } from "../../puc-codes/services/pucCatalog";
 import { NOT_APPLICABLE_PUC } from "./classify";
 import { buildPurchasesModel, type PurchasesInput } from "./model";
-import { COPY_ALL_INCLUDES, copyAllLabel, copyClassificationInputs, previewRetention } from "./lineDraft";
+import { confirmProposalsLabel, proposableLines, PROPOSALS_INCLUDE, proposalInputs, previewRetention } from "./lineDraft";
 
 const NIT = "901817531";
 const line = (index: number, baseCents: number, vatCents: number, description = `Producto ${index}`): PurchaseLine => ({ index, page: 1, code: `P${index}`, description, unit: "UN", baseCents, vatCents });
@@ -184,47 +184,55 @@ describe("retención común a toda la factura", () => {
   });
 });
 
-describe("aplicar clasificación completa a las otras líneas", () => {
-  const targets = [line(1, pesos(10_000), 0, "Ternera"), line(2, pesos(20_000), 0, "Agua")];
+describe("Confirmar N propuestas completas (encabezado de la factura)", () => {
+  const d = () => doc(1, [line(0, pesos(80_000), 0, "Pollo"), line(1, pesos(80_000), 0, "Ternera"), line(2, pesos(80_000), 0, "Agua")]);
+  const rule = (i: number, retention: { rateId: number }[]): PurchaseRule =>
+    ({ id: i + 1, supplierNit: "900111222", productKey: `c:p${i}`, productLabel: `Producto ${i}`, pucCode: "510506", concept1001: "5001", retention, uses: 1, sourceDocumentId: 1, createdAt: "", updatedAt: "" }) as PurchaseRule;
+  const withRules = (retention: { rateId: number }[]) => ({ ...input([d()]), rules: [0, 1, 2].map((i) => rule(i, retention)) });
 
-  it("copia PUC, concepto 1001 y una o varias retenciones solo a las líneas elegidas", () => {
-    const out = copyClassificationInputs(7, "900111222", { pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }, { rateId: 2 }] }, targets);
-    expect(out.map((i) => i.lineIndex)).toEqual([1, 2]);
-    for (const i of out) expect(i).toMatchObject({ documentId: 7, pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }, { rateId: 2 }], supplierNit: "900111222" });
-    expect(copyClassificationInputs(7, "900111222", { pucCode: "510506", concept1001: "5001", retention: [] }, targets)[0].retention).toEqual([]);
-    expect(copyClassificationInputs(7, "900111222", { pucCode: "510506", concept1001: "5001", retention: [{ rateId: 3 }] }, [targets[0]])).toHaveLength(1);
+  it("confirma de cada propuesta PUC, concepto 1001 y todas las retenciones", () => {
+    const m = buildPurchasesModel(withRules([{ rateId: 1 }, { rateId: 2 }]));
+    const inputs = proposalInputs(1, "900111222", m.docs[0].lines);
+    expect(inputs.map((i) => i.lineIndex)).toEqual([0, 1, 2]);
+    for (const i of inputs) expect(i).toMatchObject({ documentId: 1, pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }, { rateId: 2 }] });
   });
 
-  it("no crea reglas permanentes: solo vale para esta factura y cada producto conserva su propia identidad", () => {
-    const out = copyClassificationInputs(7, "900111222", { pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }] }, targets);
-    expect(out.every((i) => i.saveRule === false)).toBe(true);
-    expect(new Set(out.map((i) => i.productKey)).size).toBe(2);
-    expect(out.map((i) => i.productLabel)).toEqual(["Ternera", "Agua"]);
+  it("no crea ni modifica reglas de producto o proveedor", () => {
+    const m = buildPurchasesModel(withRules([{ rateId: 1 }]));
+    const inputs = proposalInputs(1, "900111222", m.docs[0].lines);
+    expect(inputs.every((i) => i.saveRule === false)).toBe(true);
+    expect(new Set(inputs.map((i) => i.productKey)).size).toBe(3);
   });
 
-  it("la copia no comparte el arreglo de retenciones con el origen y 7305 se copia sin concepto ni retenciones", () => {
-    const source = { pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }] };
-    const out = copyClassificationInputs(7, "900111222", source, targets);
-    out[0].retention.push({ rateId: 9 });
-    expect(source.retention).toEqual([{ rateId: 1 }]);
-    expect(out[1].retention).toEqual([{ rateId: 1 }]);
-    for (const i of copyClassificationInputs(7, "900111222", { pucCode: NOT_APPLICABLE_PUC, concept1001: "5001", retention: [{ rateId: 1 }] }, targets)) {
-      expect([i.pucCode, i.concept1001, i.retention]).toEqual([NOT_APPLICABLE_PUC, "", []]);
-    }
+  it("las N líneas quedan Confirmadas, salen del conteo «Por confirmar» y EEFF/1001 se recalculan", () => {
+    const before = buildPurchasesModel(withRules([{ rateId: 1 }]));
+    expect(proposableLines(before.docs[0].lines)).toHaveLength(3);
+    expect(before.totals.pendingLines).toBe(3);
+    expect(before.eeff.movements).toEqual([]);
+    expect(before.proposals["1001"]).toEqual([]);
+    const lineClasses = proposalInputs(1, "900111222", before.docs[0].lines).map((i) => cls(1, i.lineIndex, i.pucCode, i.concept1001, i.retention));
+    const after = buildPurchasesModel({ ...withRules([{ rateId: 1 }]), state: { uploads: [], documents: [d()], lineClasses, flags: [], audit: [] } });
+    expect(after.docs[0].lines.every((l) => l.confirmed)).toBe(true);
+    expect(after.docs[0].lines.map((l) => l.retention)).toEqual([[{ rateId: 1 }], [{ rateId: 1 }], [{ rateId: 1 }]]);
+    expect(after.totals.pendingLines).toBe(0);
+    expect(proposableLines(after.docs[0].lines)).toHaveLength(0);
+    expect(after.eeff.totalCents).toBe(pesos(240_000));
+    expect(after.proposals["1001"][0].data.deductible).toBe(240_000);
+    // Misma retención en todas las líneas: tope sobre el subtotal y una sola retención.
+    expect(after.docs[0].retention.byRate).toHaveLength(1);
+    expect(after.docs[0].retention.byRate[0]).toMatchObject({ scope: "invoice", baseCents: pesos(240_000), belowMinimum: false });
+    expect(retOf(after)).toBe(8_400);
   });
 
-  it("al confirmar la copia las otras líneas quedan con la clasificación completa y la retención común se calcula una vez", () => {
-    const d = doc(1, [line(0, pesos(80_000), 0, "Pollo"), ...[line(1, pesos(80_000), 0, "Ternera"), line(2, pesos(80_000), 0, "Agua")]]);
-    const copies = copyClassificationInputs(1, "900111222", { pucCode: "510506", concept1001: "5001", retention: [{ rateId: 1 }] }, d.data.lines.slice(1));
-    const lineClasses = [cls(1, 0, "510506", "5001", [{ rateId: 1 }]), ...copies.map((c) => cls(1, c.lineIndex, c.pucCode, c.concept1001, c.retention))];
-    const m = buildPurchasesModel(input([d], { lineClasses }));
-    expect(m.docs[0].lines.map((l) => [l.pucCode, l.concept1001, l.retention])).toEqual([0, 1, 2].map(() => ["510506", "5001", [{ rateId: 1 }]]));
-    expect(retOf(m)).toBe(8_400);
+  it("una propuesta sin retención no inventa ninguna, y 7305 se confirma sin concepto ni retenciones", () => {
+    const m = buildPurchasesModel({ ...input([d()]), rules: [rule(0, []), { ...rule(1, [{ rateId: 1 }]), pucCode: NOT_APPLICABLE_PUC, concept1001: "" }] });
+    const inputs = proposalInputs(1, "900111222", m.docs[0].lines);
+    expect(inputs.map((i) => [i.lineIndex, i.pucCode, i.concept1001, i.retention])).toEqual([[0, "510506", "5001", []], [1, NOT_APPLICABLE_PUC, "", []], [2, "510506", "5001", []]]);
+    // La línea 2 no tiene regla: su propuesta es la sugerencia general del proveedor, sin retención inventada.
   });
 
-  it("la opción dice qué incluye", () => {
-    expect(copyAllLabel(2)).toBe("Aplicar clasificación completa a las otras 2 líneas");
-    expect(copyAllLabel(1)).toBe("Aplicar clasificación completa a la otra línea");
-    expect(COPY_ALL_INCLUDES).toContain("PUC, concepto 1001 y retenciones");
+  it("el botón y la ayuda dicen qué incluye y que es solo para esta factura", () => {
+    expect(confirmProposalsLabel(2)).toBe("Confirmar 2 propuestas completas (solo esta factura)");
+    expect(PROPOSALS_INCLUDE).toBe("Incluye PUC, concepto 1001 y retenciones. Solo aplica a esta factura.");
   });
 });

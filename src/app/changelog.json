@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.38.6",
+    "date": "2026-10-19",
+    "notes": [
+      "Compras: la acción para confirmar propuestas vuelve al encabezado de la factura como «Confirmar N propuestas completas (solo esta factura)». Confirma PUC, concepto 1001 y retenciones de cada línea propuesta (incluido 7305 NO APLICA), sin crear ni cambiar reglas de producto o proveedor.",
+      "Compras: se quitó del panel de clasificación de una línea la casilla «Aplicar clasificación completa a las otras líneas», para tener una sola forma de ejecutar esta acción."
+    ]
+  },
+  {
     "version": "1.38.5",
     "date": "2026-10-19",
     "notes": [

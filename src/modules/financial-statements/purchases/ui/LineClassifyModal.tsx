@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import { Button, Modal } from "../../../../components/ui";
 import { purchasesService } from "../../../../services/purchasesService";
@@ -14,7 +14,7 @@ import {
   PROPOSAL_SOURCE_LABEL,
   productKey,
 } from "../domain/classify";
-import { COPY_ALL_INCLUDES, copyAllLabel, copyClassificationInputs, hasRetention, previewRetention } from "../domain/lineDraft";
+import { hasRetention, previewRetention } from "../domain/lineDraft";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
 import { RetentionPicker } from "./RetentionPicker";
@@ -84,15 +84,9 @@ export function LineClassifyModal({
     ? []
     : l.proposal.retention.map((r) => r.rateId);
 
-  // Otras líneas que pueden recibir la misma clasificación completa: las aún sin confirmar y legibles.
-  const copyTargets = useMemo(() => view.lines.filter((o) => o.line.index !== l.line.index && !o.confirmed && !o.line.issue), [view.lines, l.line.index]);
-  const [applyToOthers, setApplyToOthers] = useState(false);
-  const copying = applyToOthers && copyTargets.length > 0;
-
-  // Retenciones que verá cada línea incluida: las demás con lo que muestran (o con esta clasificación si se copia) y esta con el borrador.
-  const picksOf = (other: LineView) =>
-    other.line.index === l.line.index ? retention : copying && copyTargets.includes(other) ? retention : other.confirmed ? other.retention : other.proposal.retention;
-  const included = view.lines.filter((o) => (o.line.index === l.line.index || (copying && copyTargets.includes(o)) ? !notApplicable : !o.notApplicable));
+  // Retenciones que verá cada línea incluida: las demás con lo que muestran y esta con el borrador.
+  const picksOf = (other: LineView) => (other.line.index === l.line.index ? retention : other.confirmed ? other.retention : other.proposal.retention);
+  const included = view.lines.filter((o) => (o.line.index === l.line.index ? !notApplicable : !o.notApplicable));
   // Base del concepto en toda la factura (cuantía mínima): suma de las líneas incluidas que lo tienen.
   const conceptBase = (rateId: number) => included.reduce((sum, o) => (hasRetention(picksOf(o), rateId) ? sum + (o.line.baseCents ?? 0) : sum), 0);
   // Si el concepto está en TODAS las líneas incluidas es una retención de factura: se evalúa contra el subtotal y se cuenta una sola vez.
@@ -105,14 +99,6 @@ export function LineClassifyModal({
     run(
       async () => {
         await purchasesService.saveLineClasses([
-          ...(copying
-            ? copyClassificationInputs(
-                view.doc.id,
-                view.doc.issuerNit,
-                { pucCode: puc, concept1001: concept, retention },
-                copyTargets.map((t) => t.line),
-              )
-            : []),
           {
             documentId: view.doc.id,
             lineIndex: l.line.index,
@@ -127,8 +113,7 @@ export function LineClassifyModal({
         ]);
         onClose();
       },
-      (scope === "rule" ? "Línea confirmada y regla del producto guardada." : "Línea confirmada solo para esta factura (la regla del producto no cambió).") +
-        (copying ? ` Clasificación completa aplicada a ${copyTargets.length} ${copyTargets.length === 1 ? "línea" : "líneas"} (solo esta factura).` : ""),
+      scope === "rule" ? "Línea confirmada y regla del producto guardada." : "Línea confirmada solo para esta factura (la regla del producto no cambió).",
     );
 
   const remove = () =>
@@ -293,16 +278,6 @@ export function LineClassifyModal({
               )}
             </section>
           </>
-        )}
-
-        {copyTargets.length > 0 && puc && (notApplicable || concept) && (
-          <section className="stack" style={{ gap: 4 }}>
-            <label className="row" style={{ gap: 6 }}>
-              <input type="checkbox" checked={applyToOthers} onChange={(e) => setApplyToOthers(e.target.checked)} />
-              {copyAllLabel(copyTargets.length)}
-            </label>
-            <div className="field__hint">{COPY_ALL_INCLUDES} Solo para esta factura: no crea reglas de producto.</div>
-          </section>
         )}
 
         <section className="stack" style={{ gap: 6 }}>
