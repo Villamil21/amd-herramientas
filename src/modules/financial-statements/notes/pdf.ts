@@ -269,8 +269,10 @@ const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", 
 
 function certification(w: Writer) {
   const { model, pdf } = w;
-  w.addPage("CERTIFICACIÓN A LOS ESTADOS FINANCIEROS", false);
-  w.space(14);
+  // Mismo encabezado de las notas (título, período, cifras y línea); el título de la certificación va debajo de la línea.
+  w.addPage();
+  w.heading("CERTIFICACIÓN A LOS ESTADOS FINANCIEROS", { size: 11, center: true, before: 0 });
+  w.space(10);
   for (const p of certificationParagraphs(model)) w.paragraph(p, { size: 10.5, leading: 1.6, gap: 10 });
   const d = model.generatedAt;
   const city = model.city.trim();

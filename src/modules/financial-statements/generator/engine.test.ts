@@ -629,11 +629,11 @@ describe("notas por grupo sobre estados reales", () => {
     const eerr = eerrRows(s);
     const items = buildNoteItems(esf, eerr, { catalog, statements: s, pucConcepts: new Map([["1110", "BANCOS"]]) });
     const numbered = withNoteNumbers(esf, eerr, catalog);
-    expect([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note]))).toEqual(items.map((i) => i.number));
+    expect([...new Set([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note])))]).toEqual(items.map((i) => i.number));
     expect(items.map((i) => i.number)).toEqual(items.map((_, i) => i + 1));
     const results = items.find((i) => i.id === "results")!;
     if (results.body.kind !== "table") throw new Error("tabla");
-    expect(results.body.rows.filter((r) => r.indent).map((r) => [r.label, r.pesos])).toEqual([["2024", 400_000], ["2025", 600_000]]);
+    expect(results.body.rows.slice(1).map((r) => [r.label, r.pesos])).toEqual([["Resultados de ejercicios anteriores — 2024", 400_000], ["Resultados de ejercicios anteriores — 2025", 600_000]]);
     const line = (label: string) => esf.find((r) => r.kind === "line" && r.label === label)!.pesos!;
     expect(noteTableTotal(results.body.rows)).toBe(line("Resultados del ejercicio") + line("Resultados de ejercicios anteriores"));
     const cash = items.find((i) => i.id === "disponible")!;

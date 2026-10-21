@@ -83,7 +83,7 @@ describe("notas específicas por grupo contable", () => {
       [7, "other_expenses"],
     ]);
   });
-  it("el número se imprime una sola vez, en el encabezado del grupo (o en su primera partida cuando no hay encabezado propio)", () => {
+  it("el número va en el encabezado del grupo; las partidas sin encabezado propio (Resultados, Otros ingresos, Otros gastos) comparten el número de su grupo", () => {
     const numbered = withNoteNumbers(fullEsf(), fullEerr());
     const marked = [...numbered.esf, ...numbered.eerr].filter((r) => r.note !== undefined).map((r) => [r.note, r.label]);
     expect(marked).toEqual([
@@ -93,10 +93,13 @@ describe("notas específicas por grupo contable", () => {
       [4, "PASIVO NO CORRIENTE"],
       [5, "Capital social"],
       [6, "Resultados del ejercicio"],
+      [6, "Resultados de ejercicios anteriores"],
       [7, "INGRESOS DE ACTIVIDADES ORDINARIAS"],
       [8, "GASTOS OPERACIONALES DE ADMINISTRACIÓN"],
       [9, "GASTOS OPERACIONALES DE VENTAS"],
+      [7, "Otros Ingresos"],
       [10, "Otros Gastos"],
+      [10, "Otros Gastos financieros"],
     ]);
     // Nunca repetido en las sublíneas ni en subtotales, totales o resultados.
     expect(numbered.esf.filter((r) => r.kind === "line" && r.label === "Impuestos, gravámenes y tasas")[0].note).toBeUndefined();
@@ -104,7 +107,19 @@ describe("notas específicas por grupo contable", () => {
   it("la numeración de las notas coincide con la columna NOTA de los estados", () => {
     const items = buildNoteItems(fullEsf(), fullEerr());
     const numbered = withNoteNumbers(fullEsf(), fullEerr());
-    expect([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note]))).toEqual(items.map((i) => i.number));
+    expect([...new Set([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note])))]).toEqual(items.map((i) => i.number));
+  });
+  it("las tres parejas comparten número en los estados y en la nota, y cada nota cuadra exactamente con las partidas de los estados", () => {
+    const numbered = withNoteNumbers(fullEsf(), fullEerr());
+    const noteOf = (label: string) => [...numbered.esf, ...numbered.eerr].find((r) => r.kind === "line" && r.label === label)?.note;
+    expect(noteOf("Resultados del ejercicio")).toBeDefined();
+    expect(noteOf("Resultados de ejercicios anteriores")).toBe(noteOf("Resultados del ejercicio"));
+    expect(noteOf("Otros Gastos financieros")).toBe(noteOf("Otros Gastos"));
+    expect(noteOf("Otros Ingresos")).toBe(numbered.eerr.find((r) => r.kind === "header" && r.label === "INGRESOS DE ACTIVIDADES ORDINARIAS")?.note);
+    // Mismas cifras: la nota suma exactamente las partidas del grupo tal como las muestran los estados (valor, signo y redondeo).
+    for (const item of buildNoteItems(fullEsf(), fullEerr())) {
+      if (item.body.kind === "table") expect(noteTableTotal(item.body.rows)).toBe(item.pesos);
+    }
   });
   it("estados cerrados antiguos (sin sección en las filas) se agrupan con el catálogo guardado", () => {
     const strip = (rows: StatementRow[]) => rows.map(({ section: _s, role: _r, ...rest }) => rest);
@@ -173,9 +188,8 @@ describe("notas específicas por grupo contable", () => {
       kind: "table",
       rows: [
         { label: "Resultados del ejercicio", pesos: 3_026_000 },
-        { label: "Resultados de ejercicios anteriores" },
-        { label: "2024", pesos: 400_000, indent: true },
-        { label: "2025", pesos: 600_000, indent: true },
+        { label: "Resultados de ejercicios anteriores — 2024", pesos: 400_000 },
+        { label: "Resultados de ejercicios anteriores — 2025", pesos: 600_000 },
       ],
     });
   });

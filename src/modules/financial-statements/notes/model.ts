@@ -28,7 +28,7 @@ export const NOTE_GROUP_TITLE: Record<NoteGroupId, string> = {
   liab_noncurrent: "Pasivo no corriente",
   capital: "Capital social",
   results: "Resultados",
-  income: "Ingresos",
+  income: "Ingresos de actividades ordinarias",
   admin: "Gastos operacionales de administración",
   sales: "Gastos operacionales de ventas",
   other_expenses: "Otros gastos",
@@ -112,8 +112,10 @@ export interface NoteGroup {
   number: number;
   section: NoteSection;
   title: string;
-  /** Posición de la fila que lleva el número en los estados. */
+  /** Posición de la fila principal que lleva el número en los estados (el encabezado del grupo o su primera partida). */
   anchor: { section: NoteSection; index: number };
+  /** Todas las filas que muestran el número: el encabezado y las partidas que no cuelgan de él (Otros ingresos, ambos Otros gastos, ambos Resultados). */
+  marks: number[];
   /** Filas de partida que forman la nota, en el orden de los estados. */
   lines: StatementRow[];
 }
@@ -123,18 +125,20 @@ export interface NoteGroup {
  * si tiene al menos una partida visible; los que no existen no reservan número.
  */
 export function buildNoteGroups(esf: StatementRow[], eerr: StatementRow[], catalog?: FsCatalog | null): NoteGroup[] {
-  const found = new Map<NoteGroupId, { section: NoteSection; headerIndex?: number; firstLineIndex?: number; anchor: Anchor; lines: StatementRow[]; order: number }>();
+  const found = new Map<NoteGroupId, { section: NoteSection; headerIndex?: number; firstLineIndex?: number; anchor: Anchor; lines: StatementRow[]; loose: number[]; order: number }>();
   let order = 0;
   const scan = (section: NoteSection, rows: StatementRow[]) => {
     for (const c of classify(rows, catalog)) {
       const m = membershipOf(c);
       if (!m) continue;
       let g = found.get(m.id);
-      if (!g) found.set(m.id, (g = { section, anchor: m.anchor, lines: [], order: order++ }));
+      if (!g) found.set(m.id, (g = { section, anchor: m.anchor, lines: [], loose: [], order: order++ }));
       if (c.row.kind === "header") g.headerIndex ??= c.index;
       else {
         g.firstLineIndex ??= c.index;
         if (m.member) g.lines.push(c.row);
+        // Sin encabezado propio (o fuera de él): la partida lleva el mismo número del grupo.
+        if (m.member && (m.anchor === "first-line" || c.section === "other_income")) g.loose.push(c.index);
       }
     }
   };
@@ -149,14 +153,15 @@ export function buildNoteGroups(esf: StatementRow[], eerr: StatementRow[], catal
       section: g.section,
       title: NOTE_GROUP_TITLE[id],
       anchor: { section: g.section, index: (g.anchor === "header" ? g.headerIndex : undefined) ?? g.firstLineIndex! },
+      marks: [...new Set([...(g.anchor === "header" && g.headerIndex !== undefined ? [g.headerIndex] : []), ...g.loose])],
       lines: g.lines,
     }));
 }
 
-/** Copia de las filas con el número de cada grupo SOLO en su encabezado (columna NOTA de los estados y del PDF). */
+/** Copia de las filas con el número de cada grupo en su encabezado (y en las partidas sin encabezado propio): columna NOTA de los estados y del PDF. */
 export function withNoteNumbers(esf: StatementRow[], eerr: StatementRow[], catalog?: FsCatalog | null): { esf: StatementRow[]; eerr: StatementRow[] } {
   const groups = buildNoteGroups(esf, eerr, catalog);
-  const apply = (section: NoteSection, rows: StatementRow[]) => rows.map((row, i) => ({ ...row, note: groups.find((g) => g.anchor.section === section && g.anchor.index === i)?.number }));
+  const apply = (section: NoteSection, rows: StatementRow[]) => rows.map((row, i) => ({ ...row, note: groups.find((g) => g.section === section && g.marks.includes(i))?.number }));
   return { esf: apply("esf", esf), eerr: apply("eerr", eerr) };
 }
 
@@ -298,11 +303,8 @@ function bodyOf(group: NoteGroup, src: NoteSources, values: ReturnType<typeof li
       }
       const pesos = allocateToPesos(v.byYear.map((y) => y.cents), line.pesos ?? 0);
       const years = v.byYear.map((y, i) => ({ label: y.year || "Sin fecha", pesos: pesos[i] })).filter((y) => y.pesos !== 0);
-      if (years.length <= 1 && !years[0]?.label.match(/^\d{4}$/)) rows.push({ label: line.label, pesos: line.pesos });
-      else {
-        rows.push({ label: line.label });
-        for (const y of years) rows.push({ label: y.label, pesos: y.pesos, indent: true });
-      }
+      if (years.length === 0 || (years.length === 1 && !/^\d{4}$/.test(years[0].label))) rows.push({ label: line.label, pesos: line.pesos });
+      else for (const y of years) rows.push({ label: `${line.label} — ${y.label}`, pesos: y.pesos });
     }
     return { kind: "table", rows };
   }

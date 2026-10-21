@@ -75,6 +75,9 @@ describe("PDF de Notas Financieras", () => {
     expect(texts).toHaveLength(pages);
     const last = texts[texts.length - 1];
     expect(last).toContain("CERTIFICACIÓN A LOS ESTADOS FINANCIEROS");
+    expect(last).toContain("NOTAS A LOS ESTADOS FINANCIEROS");
+    expect(last).toContain("(CIFRAS EXPRESADAS EN PESOS COLOMBIANOS)");
+    expect(last).toContain("NIT 901.709.567 - 7");
     expect(last).toContain("D&P Capital Inversiones SAS");
     expect(last).toContain("Ley 1314 de 2009");
     expect(last).toContain("2420 y 2496 de 2015");

@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.48.1",
+    "date": "2026-10-21",
+    "notes": [
+      "Notas Financieras → PDF: la página de certificación conserva el encabezado completo de las notas (título «NOTAS A LOS ESTADOS FINANCIEROS», período, cifras en pesos y línea) y el título «CERTIFICACIÓN A LOS ESTADOS FINANCIEROS» aparece debajo de la línea.",
+      "Notas Financieras: Resultados del ejercicio y de ejercicios anteriores, Otros gastos y Otros gastos financieros, y Otros ingresos e Ingresos de actividades ordinarias comparten el mismo número de nota en los Estados Financieros, las notas y el PDF. No cambian cifras ni clasificación contable."
+    ]
+  },
+  {
+    "version": "1.48.1",
+    "date": "2026-10-21",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.48.0",
     "date": "2026-10-21",
     "notes": [
