@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { cryptoFormatState, CRYPTO_FORMATS, shouldReopen } from "../../exogena/domain/cryptoFormat";
 import { exogenaService } from "../../../services/exogenaService";
 import { loadEinvoiceContribution } from "../../exogena/useEinvoiceSales";
+import { loadBankExoContribution } from "../bank/exogena/load";
 import type { CryptoModel } from "./domain/model";
 
 /**
@@ -20,7 +21,8 @@ export function useExoFormatGuard(companyId: number | null, model: CryptoModel |
           if (!row || row.status !== "listo") continue;
           const stored = await exogenaService.records(companyId, model.year, format);
           const sales = format === "1007" ? await loadEinvoiceContribution(companyId, model.year) : null;
-          if (!cancelled && shouldReopen(row.status, cryptoFormatState(model, format, stored, sales).problems)) await exogenaService.setStatus(companyId, model.year, format, "requiere_actualizacion");
+          const bank = format === "1007" ? await loadBankExoContribution(companyId, model.year) : null;
+          if (!cancelled && shouldReopen(row.status, cryptoFormatState(model, format, stored, sales, bank).problems)) await exogenaService.setStatus(companyId, model.year, format, "requiere_actualizacion");
         }
       } catch {
         /* la reapertura se reintenta en el siguiente cambio y la pantalla de Exógena la repite al abrirse */

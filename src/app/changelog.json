@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.43.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Extractos bancarios → Cobertura y Exógena: los extractos alimentan Exógena 1012 (saldo al 31 de diciembre, concepto 1110), 1007 (intereses recibidos, concepto 4003) y 1011 (50 % del GMF anual, concepto 8211, una sola fila por empresa).",
+      "Ficha del banco (NIT, DV calculado, razón social, país 169) que se crea una sola vez y se reutiliza; sin ficha no se envía el extracto y la alerta lleva a crearla.",
+      "Vista de cobertura por banco, cuenta y mes (cargado, reemplazado, pendiente, sin extracto) con detalle de saldo, intereses y GMF; las alertas llevan al banco, extracto o ficha que las resuelve.",
+      "Los extractos importados antes de esta versión deben reimportarse con «Reemplazar» para aportar a 1007 y 1011. Las fichas, reglas de interés y decisiones viajan en las copias de seguridad."
+    ]
+  },
+  {
     "version": "1.42.0",
     "date": "2026-10-21",
     "notes": [

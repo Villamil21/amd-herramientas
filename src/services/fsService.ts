@@ -18,6 +18,10 @@ import type {
   FsPucMapping,
   FsSectionKey,
   GmfRule,
+  InterestRule,
+  BankProfile,
+  BankProfileInput,
+  BankExoReview,
   Liquidation,
   Movement,
   MovementEdit,
@@ -70,6 +74,15 @@ export const fsService = {
   saveBankLifecycle: (input: BankLifecycleInput) => call<void>("save_fs_bank_lifecycle", { input }),
   gmfRules: () => call<GmfRule[]>("list_fs_bank_gmf_rules"),
   saveGmfRule: (bank: string, concept: string, isGmf: boolean, origin: "auto" | "manual") => call<void>("save_fs_bank_gmf_rule", { bank, concept, isGmf, origin }),
+  /** Intereses generados (1007): banco + concepto exacto → sí / no. */
+  interestRules: () => call<InterestRule[]>("list_fs_bank_interest_rules"),
+  saveInterestRule: (bank: string, concept: string, isInterest: boolean, origin: "auto" | "manual") => call<void>("save_fs_bank_interest_rule", { bank, concept, isInterest, origin }),
+  /** Ficha del banco para Exógena: una sola vez, global. */
+  bankProfiles: () => call<BankProfile[]>("list_fs_bank_profiles"),
+  saveBankProfile: (input: BankProfileInput) => call<BankProfile>("save_fs_bank_profile", { input }),
+  /** Decisiones sobre situaciones revisables de los extractos de un año. `decision` vacío la devuelve a «por revisar». */
+  bankExoReviews: (companyId: number, year: number) => call<BankExoReview[]>("list_fs_bank_exo_reviews", { companyId, year }),
+  saveBankExoReview: (companyId: number, year: number, reviewKey: string, decision: "include" | "exclude" | "", note = "") => call<void>("save_fs_bank_exo_review", { companyId, year, reviewKey, decision, note }),
 
   // Configuración global
   pucSettings: () => call<PucSetting[]>("list_fs_puc_settings"),

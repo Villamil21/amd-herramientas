@@ -294,6 +294,44 @@ export interface GmfRule {
   updatedAt: string;
 }
 
+/** Banco + concepto exacto → es interés generado (ingreso financiero del 1007) o no. */
+export interface InterestRule {
+  bank: string;
+  concept: string;
+  isInterest: boolean;
+  origin: "auto" | "manual";
+  confirmed: boolean;
+  updatedAt: string;
+}
+
+/** Ficha persistente del banco como informado en Exógena (1012 y 1007). El DV lo calcula el sistema. */
+export interface BankProfile {
+  bankKey: string;
+  bank: string;
+  nit: string;
+  dv: string;
+  businessName: string;
+  docTypeCode: string;
+  countryCode: string;
+  updatedAt: string;
+}
+
+export interface BankProfileInput {
+  bank: string;
+  nit: string;
+  businessName: string;
+}
+
+/** Decisión sobre una situación revisable de un extracto (sobregiro, signo inesperado…): incluir o excluir del formato. */
+export interface BankExoReview {
+  companyId: number;
+  year: number;
+  reviewKey: string;
+  decision: "include" | "exclude";
+  note: string;
+  updatedAt: string;
+}
+
 export interface PucSetting {
   key: string;
   pucCode: string;

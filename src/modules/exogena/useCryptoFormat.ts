@@ -4,6 +4,7 @@ import { useCryptoData } from "../financial-statements/crypto/useCryptoData";
 import type { CryptoExoFormat } from "../financial-statements/crypto/exogenaSync";
 import { cryptoFormatState } from "./domain/cryptoFormat";
 import { useFormatRecords } from "./hooks";
+import { useBankExo } from "../financial-statements/bank/exogena/load";
 import { useEinvoiceSales } from "./useEinvoiceSales";
 
 /**
@@ -22,10 +23,16 @@ export function useCryptoFormat(companyId: number | null, year: number, format: 
   const records = useFormatRecords(companyId, year, format);
   // El 1007 suma, como otro origen, los ingresos de Facturación electrónica.
   const sales = useEinvoiceSales(companyId, year);
+  // ...y los intereses de Extractos bancarios (concepto 4003).
+  const bank = useBankExo(companyId, year);
   const model = crypto.model;
   const contribution = sales.contribution;
+  const bankContribution = bank.contribution;
 
-  const computed = useMemo(() => (model && records.records && contribution ? cryptoFormatState(model, format, records.records, contribution) : null), [model, records.records, format, contribution]);
+  const computed = useMemo(
+    () => (model && records.records && contribution && bankContribution ? cryptoFormatState(model, format, records.records, contribution, bankContribution) : null),
+    [model, records.records, format, contribution, bankContribution],
+  );
 
-  return { crypto, company: crypto.company, companies: crypto.fs.companies, format: records, model, computed, sales, ready: !!(model && records.records && computed) };
+  return { crypto, company: crypto.company, companies: crypto.fs.companies, format: records, model, computed, sales, bank, ready: !!(model && records.records && computed) };
 }

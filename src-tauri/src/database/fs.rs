@@ -946,6 +946,113 @@ pub fn save_gmf_rule(conn: &Connection, bank: &str, concept: &str, is_gmf: bool,
     Ok(())
 }
 
+pub fn list_interest_rules(conn: &Connection) -> AppResult<Vec<InterestRule>> {
+    Ok(conn
+        .prepare("SELECT bank, concept, is_interest, origin, confirmed, updated_at FROM fs_bank_interest_rules ORDER BY bank, concept")?
+        .query_map([], |r| Ok(InterestRule { bank: r.get(0)?, concept: r.get(1)?, is_interest: r.get(2)?, origin: r.get(3)?, confirmed: r.get(4)?, updated_at: r.get(5)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Banco + concepto exacto → interés generado sí / no (confirmado por el usuario).
+pub fn save_interest_rule(conn: &Connection, bank: &str, concept: &str, is_interest: bool, origin: &str) -> AppResult<()> {
+    if bank.trim().is_empty() || concept.is_empty() {
+        return Err(AppError::user("Falta el banco o el concepto."));
+    }
+    if !matches!(origin, "auto" | "manual") {
+        return Err(AppError::user("Origen de clasificación no válido."));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO fs_bank_interest_rules (bank, concept, is_interest, origin, confirmed, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+         ON CONFLICT(bank, concept) DO UPDATE SET is_interest = excluded.is_interest, origin = excluded.origin, confirmed = 1, updated_at = excluded.updated_at",
+        params![bank.trim(), concept, is_interest, origin, now],
+    )?;
+    Ok(())
+}
+
+/// Dígito de verificación de un NIT colombiano (módulo 11 con los primos de la DIAN).
+pub fn nit_dv(nit: &str) -> Option<String> {
+    const PRIMES: [u32; 15] = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+    let digits: Vec<u32> = nit.chars().filter_map(|c| c.to_digit(10)).collect();
+    if digits.is_empty() || digits.len() > PRIMES.len() {
+        return None;
+    }
+    let sum: u32 = digits.iter().rev().zip(PRIMES).map(|(d, p)| d * p).sum();
+    let rest = sum % 11;
+    Some((if rest > 1 { 11 - rest } else { rest }).to_string())
+}
+
+/// Clave estable de un banco: el nombre del extracto en mayúsculas y con un solo espacio entre palabras.
+pub fn bank_key(bank: &str) -> String {
+    bank.split_whitespace().collect::<Vec<_>>().join(" ").to_uppercase()
+}
+
+pub fn list_bank_profiles(conn: &Connection) -> AppResult<Vec<BankProfile>> {
+    Ok(conn
+        .prepare("SELECT bank_key, bank, nit, dv, business_name, doc_type_code, country_code, updated_at FROM fs_bank_profiles ORDER BY bank")?
+        .query_map([], |r| {
+            Ok(BankProfile { bank_key: r.get(0)?, bank: r.get(1)?, nit: r.get(2)?, dv: r.get(3)?, business_name: r.get(4)?, doc_type_code: r.get(5)?, country_code: r.get(6)?, updated_at: r.get(7)? })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Crea o completa la ficha de un banco. El NIT va sin DV (si llega «900.123.456-7» se separa y el DV se verifica); el DV
+/// siempre lo calcula el sistema; el tipo de documento es NIT y el país Colombia. Nunca se inventa el NIT ni la razón social.
+pub fn save_bank_profile(conn: &Connection, input: &BankProfileInput) -> AppResult<BankProfile> {
+    let bank = input.bank.split_whitespace().collect::<Vec<_>>().join(" ");
+    if bank.is_empty() {
+        return Err(AppError::user("Falta el banco."));
+    }
+    let (nit, given_dv) = crate::models::normalize::nit_and_dv(&input.nit, "").map_err(AppError::user)?;
+    if nit.is_empty() || !nit.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::user("El NIT debe contener solo dígitos (sin DV)."));
+    }
+    let dv = nit_dv(&nit).ok_or_else(|| AppError::user("El NIT debe tener entre 1 y 15 dígitos."))?;
+    if !given_dv.is_empty() && given_dv != dv {
+        return Err(AppError::user(format!("El DV del NIT debería ser {dv}, no {given_dv}.")));
+    }
+    let name = crate::models::normalize::upper_text(&input.business_name, 200);
+    if name.is_empty() {
+        return Err(AppError::user("Falta la razón social del banco."));
+    }
+    let key = bank_key(&bank);
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO fs_bank_profiles (bank_key, bank, nit, dv, business_name, doc_type_code, country_code, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, '31', '169', ?6, ?6)
+         ON CONFLICT(bank_key) DO UPDATE SET bank = excluded.bank, nit = excluded.nit, dv = excluded.dv, business_name = excluded.business_name, updated_at = excluded.updated_at",
+        params![key, bank, nit, dv, name, now],
+    )?;
+    Ok(BankProfile { bank_key: key, bank, nit, dv, business_name: name, doc_type_code: "31".into(), country_code: "169".into(), updated_at: now })
+}
+
+pub fn list_bank_exo_reviews(conn: &Connection, company_id: i64, year: i64) -> AppResult<Vec<BankExoReview>> {
+    Ok(conn
+        .prepare("SELECT company_id, year, review_key, decision, note, updated_at FROM fs_bank_exo_reviews WHERE company_id = ?1 AND year = ?2 ORDER BY review_key")?
+        .query_map(params![company_id, year], |r| Ok(BankExoReview { company_id: r.get(0)?, year: r.get(1)?, review_key: r.get(2)?, decision: r.get(3)?, note: r.get(4)?, updated_at: r.get(5)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Incluir o excluir una situación revisable; `decision` vacío la devuelve a «por revisar».
+pub fn save_bank_exo_review(conn: &Connection, company_id: i64, year: i64, review_key: &str, decision: &str, note: &str) -> AppResult<()> {
+    if review_key.trim().is_empty() {
+        return Err(AppError::user("Falta la situación a revisar."));
+    }
+    if decision.is_empty() {
+        conn.execute("DELETE FROM fs_bank_exo_reviews WHERE company_id = ?1 AND year = ?2 AND review_key = ?3", params![company_id, year, review_key])?;
+        return Ok(());
+    }
+    if !matches!(decision, "include" | "exclude") {
+        return Err(AppError::user("Decisión no válida."));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO fs_bank_exo_reviews (company_id, year, review_key, decision, note, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT(company_id, year, review_key) DO UPDATE SET decision = excluded.decision, note = excluded.note, updated_at = excluded.updated_at",
+        params![company_id, year, review_key, decision, note.trim(), now],
+    )?;
+    Ok(())
+}
+
 /// «Reclasificar movimientos anteriores»: cambio explícito del PUC de movimientos
 /// ya enviados (nunca automático). Respeta los periodos cerrados.
 pub fn reclassify_movements(conn: &mut Connection, company_id: Option<i64>, ids: &[i64], puc_code: &str) -> AppResult<i64> {
@@ -2438,6 +2545,61 @@ mod tests {
         let rules = list_gmf_rules(&conn).unwrap();
         assert_eq!(rules.iter().map(|r| (r.concept.as_str(), r.is_gmf, r.origin.as_str())).collect::<Vec<_>>(), [("GRAVAMEN ESPECIAL", true, "manual"), ("IMPUESTO MOV FINANCIEROS", true, "auto")]);
         assert!(run_pending(&mut conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn interest_rules_remember_confirmations_and_rejections() {
+        let conn = db();
+        save_interest_rule(&conn, "BBVA", "ABONO INTERESES AHORROS", true, "auto").unwrap();
+        save_interest_rule(&conn, "BBVA", "INTERESES DE MORA", false, "auto").unwrap();
+        save_interest_rule(&conn, "BBVA", "INTERESES DE MORA", false, "manual").unwrap();
+        assert!(save_interest_rule(&conn, "BBVA", "X", true, "otro").is_err());
+        let rules = list_interest_rules(&conn).unwrap();
+        assert_eq!(rules.iter().map(|r| (r.concept.as_str(), r.is_interest, r.origin.as_str())).collect::<Vec<_>>(), [("ABONO INTERESES AHORROS", true, "auto"), ("INTERESES DE MORA", false, "manual")]);
+    }
+
+    #[test]
+    fn bank_exo_reviews_are_per_company_and_year_and_can_be_reverted() {
+        let conn = db();
+        let a = company(&conn, "900111111");
+        let b = company(&conn, "900222222");
+        save_bank_exo_review(&conn, a, 2025, "overdraft:BBVA|1|2025-12", "include", " sobregiro autorizado ").unwrap();
+        assert!(save_bank_exo_review(&conn, a, 2025, "x", "quizas", "").is_err());
+        assert_eq!(list_bank_exo_reviews(&conn, a, 2025).unwrap()[0].note, "sobregiro autorizado");
+        assert!(list_bank_exo_reviews(&conn, a, 2024).unwrap().is_empty());
+        assert!(list_bank_exo_reviews(&conn, b, 2025).unwrap().is_empty());
+        save_bank_exo_review(&conn, a, 2025, "overdraft:BBVA|1|2025-12", "exclude", "").unwrap();
+        assert_eq!(list_bank_exo_reviews(&conn, a, 2025).unwrap()[0].decision, "exclude");
+        save_bank_exo_review(&conn, a, 2025, "overdraft:BBVA|1|2025-12", "", "").unwrap();
+        assert!(list_bank_exo_reviews(&conn, a, 2025).unwrap().is_empty());
+    }
+
+    #[test]
+    fn nit_dv_matches_known_nits() {
+        // NIT de la DIAN y de bancos conocidos.
+        assert_eq!(nit_dv("800197268").as_deref(), Some("4"));
+        assert_eq!(nit_dv("890903938").as_deref(), Some("8"));
+        assert_eq!(nit_dv("860003020").as_deref(), Some("1"));
+        assert_eq!(nit_dv(""), None);
+    }
+
+    #[test]
+    fn bank_profile_is_created_once_computes_dv_and_never_invents_data() {
+        let conn = db();
+        let input = |bank: &str, nit: &str, name: &str| BankProfileInput { bank: bank.into(), nit: nit.into(), business_name: name.into() };
+        // Sin NIT o sin razón social no se guarda nada.
+        assert!(save_bank_profile(&conn, &input("BBVA", "", "BANCO BILBAO VIZCAYA ARGENTARIA COLOMBIA S.A.")).is_err());
+        assert!(save_bank_profile(&conn, &input("BBVA", "860003020", "  ")).is_err());
+        assert!(save_bank_profile(&conn, &input("BBVA", "86000A020", "BANCO")).is_err());
+        assert!(list_bank_profiles(&conn).unwrap().is_empty());
+        let p = save_bank_profile(&conn, &input("  bbva ", "860.003.020", "banco bilbao vizcaya argentaria colombia s.a.")).unwrap();
+        assert_eq!((p.bank_key.as_str(), p.nit.as_str(), p.dv.as_str(), p.doc_type_code.as_str(), p.country_code.as_str()), ("BBVA", "860003020", "1", "31", "169"));
+        // Un DV que contradice al calculado se rechaza; el correcto se acepta.
+        assert!(save_bank_profile(&conn, &input("BBVA", "860003020-9", "BBVA")).is_err());
+        save_bank_profile(&conn, &input("BBVA", "860003020-1", "BBVA COLOMBIA")).unwrap();
+        // Una sola ficha por banco: editar no duplica.
+        let all = list_bank_profiles(&conn).unwrap();
+        assert_eq!((all.len(), all[0].business_name.as_str()), (1, "BBVA COLOMBIA"));
     }
 
     #[test]

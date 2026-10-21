@@ -311,6 +311,9 @@ const FS_TABLES: &[&str] = &[
     "fs_bank_account_lifecycle",
     "fs_bank_account_events",
     "fs_bank_gmf_rules",
+    "fs_bank_profiles",
+    "fs_bank_interest_rules",
+    "fs_bank_exo_reviews",
     "fs_employee_events",
     "fs_movement_edits",
     "fs_tax_empty_periods",
@@ -1237,6 +1240,53 @@ mod tests {
         restore(&mut other, &dir, &dir, &dir, &older).unwrap();
         assert_eq!(fs::list_movements(&other, 5).unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fichas de banco, reglas de intereses y los datos de Exógena de cada extracto (metadata del lote) viajan en el respaldo.
+    #[test]
+    fn bank_exogena_data_survives_backup_and_restore() {
+        use crate::database::fs;
+        use crate::models::fs::{BankProfileInput, BatchInput};
+        let dir = std::env::temp_dir().join(format!("amd-json-bank-exo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x')", []).unwrap();
+        fs::save_bank_profile(&conn, &BankProfileInput { bank: "Bancolombia".into(), nit: "890903938".into(), business_name: "Bancolombia S.A.".into() }).unwrap();
+        fs::save_interest_rule(&conn, "Bancolombia", "ABONO INTERESES AHORROS", true, "manual").unwrap();
+        let input = BatchInput {
+            company_id: 5,
+            source: "bank".into(),
+            file_name: "dic.pdf".into(),
+            period_label: String::new(),
+            period_start: Some("2025-12-01".into()),
+            period_end: Some("2025-12-31".into()),
+            dedupe_key: "bank:Bancolombia:123:2025-12-01:2025-12-31".into(),
+            replace: false,
+            metadata: Some(serde_json::json!({ "bank": "Bancolombia", "accountNumber": "123", "closingBalanceCents": 1_000_000, "exogena": { "version": 1, "concepts": [{ "description": "ABONO INTERESES AHORROS", "dc": "C", "count": 1, "totalCents": 5_000 }] } })),
+            movements: vec![],
+            bank_balances: vec![crate::models::fs::BankBalanceInput { bank: "Bancolombia".into(), account_number: "123".into(), balance_date: "2025-12-31".into(), balance_cents: 1_000_000, puc_code: "111005".into() }],
+            bank_concept_mappings: vec![],
+            payroll_rows: vec![],
+            decisions: vec![],
+        };
+        fs::send_batch(&mut conn, &input).unwrap();
+        let file = build(&conn, &dir, &dir, &dir, "1.43.0").unwrap();
+        let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+
+        let mut other = Connection::open_in_memory().unwrap();
+        other.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut other).unwrap();
+        restore(&mut other, &dir, &dir, &dir, &parsed).unwrap();
+        let profiles = fs::list_bank_profiles(&other).unwrap();
+        assert_eq!((profiles.len(), profiles[0].nit.as_str(), profiles[0].dv.as_str()), (1, "890903938", "8"));
+        assert_eq!(fs::list_interest_rules(&other).unwrap().len(), 1);
+        let batches = fs::list_batches(&other, 5).unwrap();
+        let exo = batches[0].metadata["exogena"]["concepts"][0]["totalCents"].as_i64();
+        assert_eq!(exo, Some(5_000));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

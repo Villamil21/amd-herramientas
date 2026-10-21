@@ -27,9 +27,9 @@ describe("orden de las tarjetas", () => {
     expect(orderedSubmodules(findModule("calculadoras")!).map((s) => s.name)).toEqual(["Calculadora de aportes para Dependientes", "Calculadora de aportes para Independientes"]);
   });
 
-  it("Información Exógena tiene las pantallas 1010, 1009, 1008, 1007, 1647, 1001, 1005, 1006, 1011, 2276 y Control y exportación", () => {
+  it("Información Exógena tiene las pantallas 1010, 1009, 1008, 1007, 1647, 1001, 1005, 1006, 1011, 1012, 2276 y Control y exportación", () => {
     const exo = findModule("informacion-exogena")!;
-    expect(orderedSubmodules(exo).map((s) => s.id)).toEqual(["1010", "1009", "1008", "1007", "1647", "1001", "1005", "1006", "1011", "2276", "control"]);
+    expect(orderedSubmodules(exo).map((s) => s.id)).toEqual(["1010", "1009", "1008", "1007", "1647", "1001", "1005", "1006", "1011", "1012", "2276", "control"]);
     expect(exo.submodules.every((s) => Boolean(s.component))).toBe(true);
     expect(exo.landing).toBeDefined();
   });

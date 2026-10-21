@@ -1,8 +1,12 @@
-import { Bitcoin, Receipt, RefreshCcw } from "lucide-react";
+import { Bitcoin, Landmark, Receipt, RefreshCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { navigate } from "../../../app/router";
 import { Alert, Badge, Button, Card, EmptyState, Loader, PageHeader, useToast } from "../../../components/ui";
 import { errorMessage } from "../../../services/tauri";
+import { reopenReadyBankFormats } from "../../financial-statements/bank/exogena/load";
+import { bankExoPath } from "../../financial-statements/bank/exogena/paths";
+import { BankExoStatusCard } from "../../financial-statements/bank/exogena/ui/BankExoAlerts";
+import { Audit1007 } from "../../financial-statements/bank/exogena/ui/BankExoAudit";
 import { syncCryptoFormat, type CryptoExoFormat } from "../../financial-statements/crypto/exogenaSync";
 import { EinvoiceAuditPanel } from "../components/EinvoiceAuditPanel";
 import { EinvoiceCustomersPanel } from "../components/EinvoiceCustomersPanel";
@@ -42,7 +46,7 @@ export default function CryptoFormatPage({ code }: { code: CryptoExoFormat }) {
     setSyncing(true);
     try {
       const outcome = await syncCryptoFormat({ companyId: m.company.id, year: selection.year, model, format: code, overwriteManual: overwrite });
-      await Promise.all([format.reload(), m.sales.reload()]);
+      await Promise.all([format.reload(), m.sales.reload(), m.bank.reload()]);
       toast(`${outcome.created} nuevos · ${outcome.updated} actualizados · ${outcome.unchanged} sin cambios · ${outcome.removed} retirados.`);
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -57,7 +61,7 @@ export default function CryptoFormatPage({ code }: { code: CryptoExoFormat }) {
       <PageHeader
         eyebrow={`Información Exógena · ${selection.year}`}
         title={`${code} · ${def.name}`}
-        description={code === "1007" ? "Ingresos recibidos (concepto 4001) por cliente, desde las Ventas de Transacciones Cripto y desde Facturación electrónica (facturas como ingresos, notas crédito como devoluciones)." : "Ingresos recibidos para terceros (concepto 4070), con cada tercero de Compras asignado completo a un pagador de Ventas."}
+        description={code === "1007" ? "Ingresos recibidos por cliente (concepto 4001), desde las Ventas de Transacciones Cripto y desde Facturación electrónica (facturas como ingresos, notas crédito como devoluciones), y los intereses de los bancos (concepto 4003) desde Extractos bancarios." : "Ingresos recibidos para terceros (concepto 4070), con cada tercero de Compras asignado completo a un pagador de Ventas."}
         actions={
           <>
             <Button icon={<Bitcoin size={15} />} onClick={() => navigate(CRYPTO_PATH)}>
@@ -68,8 +72,13 @@ export default function CryptoFormatPage({ code }: { code: CryptoExoFormat }) {
                 Abrir Facturación electrónica
               </Button>
             )}
+            {code === "1007" && (
+              <Button icon={<Landmark size={15} />} onClick={() => navigate(bankExoPath())}>
+                Abrir Extractos bancarios
+              </Button>
+            )}
             <Button variant="primary" icon={<RefreshCcw size={15} />} loading={syncing} disabled={!m.ready} onClick={() => void sync()}>
-              {code === "1007" ? "Actualizar desde Cripto y Facturación electrónica" : "Actualizar desde Transacciones Cripto"}
+              {code === "1007" ? "Actualizar desde Cripto, Facturación y Bancos" : "Actualizar desde Transacciones Cripto"}
             </Button>
           </>
         }
@@ -86,7 +95,7 @@ export default function CryptoFormatPage({ code }: { code: CryptoExoFormat }) {
           <StatusPanel row={format.status} problems={computed.problems} onSetStatus={format.setStatus} />
           {computed.changes.length > 0 && (
             <Alert tone="warning" title="Hay cambios sin sincronizar">
-              {code === "1007" ? "Transacciones Cripto o Facturación electrónica cambió desde la última sincronización. Usa «Actualizar»." : "Transacciones Cripto cambió desde la última sincronización. Usa «Actualizar desde Transacciones Cripto»."}
+              {code === "1007" ? "Transacciones Cripto, Facturación electrónica o Extractos bancarios cambió desde la última sincronización. Usa «Actualizar»." : "Transacciones Cripto cambió desde la última sincronización. Usa «Actualizar desde Transacciones Cripto»."}
             </Alert>
           )}
           <ProblemsPanel problems={computed.problems} okText={`Sin pendientes: el ${code} se puede marcar como listo.`} />
@@ -132,6 +141,21 @@ export default function CryptoFormatPage({ code }: { code: CryptoExoFormat }) {
             )}
           </Card>
           {sales && <EinvoiceAuditPanel format="1007" sales={sales} />}
+          {code === "1007" && m.bank.contribution && m.company && (
+            <>
+              <BankExoStatusCard
+                result={m.bank.contribution.result}
+                companyId={m.company.id}
+                formats={["1007"]}
+                title="Estado de los intereses bancarios (1007)"
+                onChanged={async () => {
+                  await m.bank.reload();
+                  void reopenReadyBankFormats(m.company!.id, [selection.year]).catch(() => undefined);
+                }}
+              />
+              <Audit1007 rows={m.bank.contribution.result.audit.f1007} />
+            </>
+          )}
         </>
       )}
     </>

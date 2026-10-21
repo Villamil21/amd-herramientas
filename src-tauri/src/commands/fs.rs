@@ -194,6 +194,36 @@ pub fn save_fs_bank_gmf_rule(db: State<'_, Db>, bank: String, concept: String, i
 }
 
 #[tauri::command]
+pub fn list_fs_bank_interest_rules(db: State<'_, Db>) -> AppResult<Vec<InterestRule>> {
+    db.with(|c| fs::list_interest_rules(c))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_interest_rule(db: State<'_, Db>, bank: String, concept: String, is_interest: bool, origin: String) -> AppResult<()> {
+    db.with(|c| fs::save_interest_rule(c, &bank, &concept, is_interest, &origin))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_profiles(db: State<'_, Db>) -> AppResult<Vec<BankProfile>> {
+    db.with(|c| fs::list_bank_profiles(c))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_profile(db: State<'_, Db>, input: BankProfileInput) -> AppResult<BankProfile> {
+    db.with(|c| fs::save_bank_profile(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_exo_reviews(db: State<'_, Db>, company_id: i64, year: i64) -> AppResult<Vec<BankExoReview>> {
+    db.with(|c| fs::list_bank_exo_reviews(c, company_id, year))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_exo_review(db: State<'_, Db>, company_id: i64, year: i64, review_key: String, decision: String, note: String) -> AppResult<()> {
+    db.with(|c| fs::save_bank_exo_review(c, company_id, year, &review_key, &decision, &note))
+}
+
+#[tauri::command]
 pub fn set_fs_employee_area(db: State<'_, Db>, employee_id: i64, area: String, effective_from: String) -> AppResult<()> {
     db.with(|c| fs::set_employee_area(c, employee_id, &area, &effective_from))
 }

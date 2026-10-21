@@ -1,9 +1,13 @@
-import { AlertTriangle, CheckCircle2, CircleDot, MinusCircle, RefreshCcw, UsersRound, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDot, Landmark, MinusCircle, RefreshCcw, UsersRound, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { navigate } from "../../../app/router";
 import { Alert, Badge, Button, Card, EmptyState, Loader, PageHeader, useToast } from "../../../components/ui";
 import { exogenaService } from "../../../services/exogenaService";
 import { errorMessage } from "../../../services/tauri";
+import { reopenReadyBankFormats } from "../../financial-statements/bank/exogena/load";
+import { bankExoPath } from "../../financial-statements/bank/exogena/paths";
+import { BankExoStatusCard } from "../../financial-statements/bank/exogena/ui/BankExoAlerts";
+import { Audit1011Gmf } from "../../financial-statements/bank/exogena/ui/BankExoAudit";
 import { Audit1011, Audit2276, CoverageStrip } from "../../financial-statements/payroll/social/AuditViews";
 import { NOMINA_PATH, PAYROLL_DEST_LABEL } from "../../financial-statements/payroll/social/alerts";
 import { STATUS_LABEL, STATUS_TONE, type DestStatus } from "../../financial-statements/purchases/domain/status";
@@ -17,7 +21,7 @@ import { useExogenaSelection } from "../state";
 import { usePayrollFormat } from "../usePayrollFormat";
 
 const DESCRIPTION: Record<PayrollExoFormat, string> = {
-  "1011": "Cifras anuales de la declaración de renta que salen de la nómina: salarios (8207), ICBF, CCF, SENA, pensión, cesantías y aportes a EPS y ARL. Sin terceros.",
+  "1011": "Cifras anuales de la declaración de renta, sin terceros: las de la nómina —salarios (8207), ICBF, CCF, SENA, pensión, cesantías y aportes a EPS y ARL— y el 50 % del GMF anual (8211) desde Extractos bancarios.",
   "2276": "Un registro anual por empleado con sus ingresos laborales y aportes. El nombre separado debe estar confirmado en la ficha del empleado y el domicilio es el de la empresa.",
 };
 
@@ -51,9 +55,14 @@ export default function PayrollFormatPage({ code }: { code: PayrollExoFormat }) 
         source: PAYROLL_EXO_SOURCE,
         proposals: state.proposals,
         removeMissing: true,
-        summary: { sources: ["Nómina y seguridad social"], planillas: overview.data.planillas.length, months: overview.data.coverage.filter((c) => c.state === "planilla").length },
+        summary: {
+          sources: code === "1011" ? ["Nómina y seguridad social", "Extractos bancarios"] : ["Nómina y seguridad social"],
+          planillas: overview.data.planillas.length,
+          months: overview.data.coverage.filter((c) => c.state === "planilla").length,
+          ...(code === "1011" ? { gmfRecords: m.bank.contribution?.proposals["1011"].length ?? 0 } : {}),
+        },
       });
-      await format.reload();
+      await Promise.all([format.reload(), m.bank.reload()]);
       m.refresh();
       toast(`${outcome.created} nuevos · ${outcome.updated} actualizados · ${outcome.unchanged} sin cambios · ${outcome.removed} retirados.`);
     } catch (e) {
@@ -79,8 +88,13 @@ export default function PayrollFormatPage({ code }: { code: PayrollExoFormat }) 
             <Button icon={<UsersRound size={15} />} onClick={() => navigate(NOMINA_PATH)}>
               Abrir Nómina y seguridad social
             </Button>
+            {code === "1011" && (
+              <Button icon={<Landmark size={15} />} onClick={() => navigate(bankExoPath())}>
+                Abrir Extractos bancarios
+              </Button>
+            )}
             <Button variant="primary" icon={<RefreshCcw size={15} />} loading={syncing} disabled={!m.ready} onClick={() => void sync()}>
-              Actualizar desde Nómina
+              {code === "1011" ? "Actualizar desde Nómina y Bancos" : "Actualizar desde Nómina"}
             </Button>
           </>
         }
@@ -108,11 +122,26 @@ export default function PayrollFormatPage({ code }: { code: PayrollExoFormat }) 
           <StatusPanel row={format.status} problems={state.problems} onSetStatus={format.setStatus} />
           {state.changes.length > 0 && (
             <Alert tone="warning" title="Hay cambios sin sincronizar">
-              Nómina cambió desde la última sincronización. Usa «Actualizar desde Nómina».
+              {code === "1011" ? "Nómina o Extractos bancarios cambió desde la última sincronización. Usa «Actualizar desde Nómina y Bancos»." : "Nómina cambió desde la última sincronización. Usa «Actualizar desde Nómina»."}
             </Alert>
           )}
           <ProblemsPanel problems={state.problems} okText={`Sin pendientes: el ${code} se puede marcar como listo.`} />
           {code === "1011" ? <Audit1011 form={overview.f1011} /> : <Audit2276 form={overview.f2276} />}
+          {code === "1011" && m.bank.contribution && (
+            <>
+              <BankExoStatusCard
+                result={m.bank.contribution.result}
+                companyId={m.company.id}
+                formats={["1011"]}
+                title="Estado del GMF de Extractos bancarios (8211)"
+                onChanged={async () => {
+                  await m.bank.reload();
+                  void reopenReadyBankFormats(m.company!.id, [selection.year]).catch(() => undefined);
+                }}
+              />
+              <Audit1011Gmf audit={m.bank.contribution.result.audit.f1011} />
+            </>
+          )}
           <Card flush title={`Registros sincronizados (${records.length})`}>
             {records.length === 0 ? (
               <EmptyState icon={<UsersRound size={20} />} title="Aún no hay registros" description="Actualiza desde Nómina cuando no queden pendientes, o marca el formato «No aplica» con su justificación." />

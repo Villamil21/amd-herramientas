@@ -6,7 +6,7 @@ import { SearchBox, SegmentedFilter } from "../../bank-analysis/shared/component
 import { lifecycleText } from "./BankLifecycleModal";
 import { fsService } from "../../../services/fsService";
 import { errorMessage } from "../../../services/tauri";
-import type { BankAccount, BankAccountLifecycle, BankConceptMapping, BatchSummary, GmfRule } from "../../../types/fs";
+import type { BankAccount, BankAccountLifecycle, BankConceptMapping, BankProfile, BatchSummary, GmfRule, InterestRule } from "../../../types/fs";
 import { formatInteger } from "../../../utils/format";
 import { maskAccount } from "../generator/checks";
 import { CompanySelect } from "../shared/components/CompanySelect";
@@ -14,6 +14,11 @@ import { PucField } from "../shared/components/PucField";
 import { SendToFs } from "../shared/components/SendToFs";
 import { formatExactCents, formatIsoDate, periodLabel } from "../shared/money";
 import { useFsData } from "../shared/useFsData";
+import { bankKeyOf } from "./exogena/model";
+import { reopenReadyBankFormats } from "./exogena/load";
+import { bankExoPath } from "./exogena/paths";
+import { BankProfileModal } from "./exogena/ui/BankProfileModal";
+import { navigate } from "../../../app/router";
 import {
   buildBankBatch,
   conceptMappingKey,
@@ -24,6 +29,9 @@ import {
   gmfRuleKey,
   gmfState,
   hasEarlierStatement,
+  interestRuleKey,
+  interestState,
+  type InterestState,
   lifecycleQuestions,
   pendingConcepts,
   type AccountingStatement,
@@ -87,6 +95,9 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [conceptMappings, setConceptMappings] = useState<BankConceptMapping[]>([]);
   const [gmfRules, setGmfRules] = useState<GmfRule[]>([]);
+  const [interestRules, setInterestRules] = useState<InterestRule[]>([]);
+  const [profiles, setProfiles] = useState<BankProfile[] | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [lifecycles, setLifecycles] = useState<BankAccountLifecycle[] | null>(null);
   const [batches, setBatches] = useState<BatchSummary[] | null>(null);
@@ -104,6 +115,8 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
     void fsService.bankAccounts().then(setAccounts);
     void fsService.bankConceptMappings().then(setConceptMappings);
     void fsService.gmfRules().then(setGmfRules);
+    void fsService.interestRules().then(setInterestRules);
+    void fsService.bankProfiles().then(setProfiles);
   }, []);
 
   // Empresa y PUC de saldo ya configurados para este banco + cuenta.
@@ -149,6 +162,10 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
   const suggested = useMemo(() => new Map(conceptMappings.map((m) => [conceptMappingKey(m.bank, m.concept), m.pucCode])), [conceptMappings]);
   const rules = useMemo(() => new Map(gmfRules.map((r) => [gmfRuleKey(r.bank, r.concept), r])), [gmfRules]);
   const gmfOf = (description: string): GmfState => gmfState(statement.bank, description, rules);
+  // Ficha del banco para Exógena: se crea una sola vez y vale para todos los extractos y empresas del banco.
+  const profile = profiles?.find((p) => p.bankKey === bankKeyOf(statement.bank)) ?? null;
+  const interestRulesMap = useMemo(() => new Map(interestRules.map((r) => [interestRuleKey(r.bank, r.concept), r])), [interestRules]);
+  const interestOf = (description: string, dc: "D" | "C"): InterestState => interestState(statement.bank, description, dc, interestRulesMap);
   const confirmedGmf = useMemo(
     () =>
       new Map(
@@ -164,6 +181,7 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
     companyId === null && { text: "Selecciona la empresa", status: "Requiere revisión" },
     !statement.accountNumber && { text: "El extracto no trae número de cuenta", status: "Requiere revisión" },
     (!statement.periodFrom || !statement.periodTo) && { text: "El extracto no trae el periodo", status: "Requiere revisión" },
+    profiles !== null && !profile && { text: `Falta la ficha de ${statement.bank} para Exógena`, status: "Requiere revisión" },
     ...questions.map((q) => ({ text: q.kind === "closed" ? "Confirma si la cuenta fue cerrada" : "Confirma si la cuenta es nueva", status: "Requiere revisión" })),
     pending > 0 && { text: pending === 1 ? "Hay 1 concepto pendiente de clasificación" : `Hay ${formatInteger(pending)} conceptos pendientes de clasificación`, status: "Pendiente de clasificación" },
     gmfToReview.length > 0 && {
@@ -199,6 +217,19 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
       await fsService.saveGmfRule(statement.bank, description, isGmf, isGmf && state === "suggested" ? "auto" : "manual");
       setGmfRules(await fsService.gmfRules());
       toast(isGmf ? `«${description}» se tratará como GMF (${GMF_PERCENT} % a Estados Financieros).` : `«${description}» no se tratará como GMF.`);
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setAnswering(null);
+    }
+  }
+
+  async function setInterest(description: string, isInterest: boolean, state: InterestState) {
+    setAnswering(`interest:${description}`);
+    try {
+      await fsService.saveInterestRule(statement.bank, description, isInterest, isInterest && state === "suggested" ? "auto" : "manual");
+      setInterestRules(await fsService.interestRules());
+      toast(isInterest ? `«${description}» se tratará como interés generado (1007).` : `«${description}» no se tratará como interés.`);
     } catch (e) {
       toast(errorMessage(e), "error");
     } finally {
@@ -324,8 +355,30 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
         onSent={() => {
           void fsService.bankConceptMappings().then(setConceptMappings);
           void reloadAccountHistory();
+          // El extracto alimenta 1012, 1007 y 1011: un formato «Listo» de ese año se reabre para volver a sincronizarlo.
+          if (companyId !== null && statement.periodTo) void reopenReadyBankFormats(companyId, [Number(statement.periodTo.slice(0, 4))]).catch(() => undefined);
         }}
       />
+
+      {profiles !== null && !profile && (
+        <Alert tone="warning" title={`Falta la ficha de ${statement.bank} para Exógena`}>
+          El banco se informa como tercero en los formatos 1012 y 1007 (NIT sin DV y razón social). Se crea una sola vez y se reutiliza en cada extracto, empresa y año; el DV se calcula solo.
+          <div className="row" style={{ marginTop: 8 }}>
+            <Button size="sm" variant="primary" onClick={() => setProfileOpen(true)}>
+              Crear ficha de {statement.bank}
+            </Button>
+          </div>
+        </Alert>
+      )}
+      {profile && (
+        <div className="muted" style={{ fontSize: 12.5 }}>
+          Exógena: {statement.bank} se informa como {profile.businessName} (NIT {profile.nit}-{profile.dv}).{" "}
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => navigate(bankExoPath())}>
+            Ver cobertura y Exógena
+          </button>
+        </div>
+      )}
+      <BankProfileModal open={profileOpen} bank={statement.bank} profile={profile} onClose={() => setProfileOpen(false)} onSaved={async () => setProfiles(await fsService.bankProfiles())} />
 
       {questions.map((q) => (
         <Alert key={q.kind} tone="warning" title={QUESTION[q.kind].title}>
@@ -417,12 +470,13 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
                   <th>Destino</th>
                   <th>Cuenta PUC</th>
                   <th>GMF / 4x1000</th>
+                  <th>Interés (1007)</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted" style={{ textAlign: "center", padding: "var(--space-5)" }}>
+                    <td colSpan={9} className="muted" style={{ textAlign: "center", padding: "var(--space-5)" }}>
                       Ningún concepto coincide con el filtro.
                     </td>
                   </tr>
@@ -486,6 +540,9 @@ export function BankAccountingPanel({ statement, fileName, onExport, exporting, 
                       <td onClick={(e) => e.stopPropagation()}>
                         <GmfCell state={gmf} busy={busy} disabled={answering !== null} onSet={(isGmf) => void setGmf(c.description, isGmf, gmf)} />
                       </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <InterestCell state={interestOf(c.description, c.dc)} impossible={c.dc === "D"} busy={answering === `interest:${c.description}`} disabled={answering !== null} onSet={(v) => void setInterest(c.description, v, interestOf(c.description, c.dc))} />
+                      </td>
                     </tr>
                   );
                 })}
@@ -543,6 +600,42 @@ function GmfCell({ state, busy, disabled, onSet }: { state: GmfState; busy: bool
       {state === "rejected" && <span className="muted">No es GMF</span>}
       <Button size="sm" variant="ghost" loading={busy} disabled={disabled} onClick={() => onSet(true)}>
         Marcar GMF
+      </Button>
+    </div>
+  );
+}
+
+/** Interés generado (1007): solo un abono puede serlo; se recuerda por banco + concepto exacto. */
+function InterestCell({ state, impossible, busy, disabled, onSet }: { state: InterestState; impossible: boolean; busy: boolean; disabled: boolean; onSet: (isInterest: boolean) => void }) {
+  if (impossible) return <span className="muted">—</span>;
+  if (state === "suggested")
+    return (
+      <div className="stack stack--sm" style={{ alignItems: "flex-start" }}>
+        <Badge tone="warning">Parece interés generado</Badge>
+        <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+          <Button size="sm" variant="primary" loading={busy} disabled={disabled} onClick={() => onSet(true)}>
+            Es interés
+          </Button>
+          <Button size="sm" disabled={disabled} onClick={() => onSet(false)}>
+            No es interés
+          </Button>
+        </div>
+      </div>
+    );
+  if (state === "confirmed")
+    return (
+      <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+        <Badge tone="success">Interés · 4003</Badge>
+        <Button size="sm" variant="ghost" loading={busy} disabled={disabled} onClick={() => onSet(false)}>
+          Quitar
+        </Button>
+      </div>
+    );
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+      {state === "rejected" && <span className="muted">No es interés</span>}
+      <Button size="sm" variant="ghost" loading={busy} disabled={disabled} onClick={() => onSet(true)}>
+        Marcar interés
       </Button>
     </div>
   );

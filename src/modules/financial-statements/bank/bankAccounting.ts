@@ -1,4 +1,4 @@
-import type { BankAccountLifecycle, BatchInput, BatchSummary, GmfRule, MovementInput } from "../../../types/fs";
+import type { BankAccountLifecycle, BatchInput, BatchSummary, GmfRule, InterestRule, MovementInput } from "../../../types/fs";
 import { lastDayOfMonth, slashToIso } from "../shared/money";
 import { formatDateForDisplay } from "../../../utils/dates";
 
@@ -197,6 +197,59 @@ export function gmfState(bank: string, description: string, rules: Map<string, G
 export const gmfAccountingCents = (netCents: number) => Math.sign(netCents) * Math.round((Math.abs(netCents) * GMF_PERCENT) / 100);
 
 // ---------------------------------------------------------------------------
+// Intereses generados (1007) y datos del extracto para Exógena
+// ---------------------------------------------------------------------------
+
+/** Palabras que sugieren un interés generado a favor de la empresa (abonos por intereses o rendimientos). */
+const INTEREST_PATTERNS: RegExp[] = [/\bINTERES(ES)?\b/, /\bRENDIMIENTOS?\b/];
+/** Cargos o retenciones que mencionan intereses pero no son un ingreso: nunca se sugieren. */
+const INTEREST_EXCLUDED: RegExp[] = [/\bRETENCION\b/, /\bRETEFUENTE\b/, /\bRTE\b/, /\bMORA\b/, /\bSOBREGIRO\b/, /\bIVA\b/, /\bICA\b/, /\bGMF\b/];
+
+/**
+ * ¿El concepto parece un interés generado? Solo un ABONO (entrada) puede serlo: una salida con «intereses» es un costo
+ * financiero. Es una sugerencia: nada entra al 1007 sin una regla confirmada por banco + concepto exacto.
+ */
+export function isInterestConcept(description: string, dc: "D" | "C"): boolean {
+  if (dc !== "C") return false;
+  const text = normalizeConcept(description);
+  return INTEREST_PATTERNS.some((p) => p.test(text)) && !INTEREST_EXCLUDED.some((p) => p.test(text));
+}
+
+export type InterestState = "confirmed" | "rejected" | "suggested" | "none";
+
+export const interestRuleKey = (bank: string, description: string) => `${bank.trim()}|${description}`;
+
+export function interestState(bank: string, description: string, dc: "D" | "C", rules: Map<string, InterestRule>): InterestState {
+  const rule = rules.get(interestRuleKey(bank, description));
+  if (rule) return rule.isInterest ? "confirmed" : "rejected";
+  return isInterestConcept(description, dc) ? "suggested" : "none";
+}
+
+/** Un concepto del extracto tal como se conserva para Exógena (sin su destino contable). */
+export interface ExoConcept {
+  description: string;
+  dc: "D" | "C";
+  count: number;
+  totalCents: number;
+  movements: AccountingMovement[];
+}
+
+/**
+ * Datos del extracto que Exógena necesita (1007 intereses y 1011 GMF) y que no dependen de a dónde se envió cada concepto
+ * en Estados Financieros: TODOS los conceptos con su total y sus movimientos. Viaja en `fs_batches.metadata.exogena`, así
+ * un reemplazo, una anulación o una restauración se comportan igual que con el resto del extracto.
+ */
+export interface StatementExoPayload {
+  version: 1;
+  concepts: ExoConcept[];
+}
+
+export const exogenaPayload = (statement: AccountingStatement): StatementExoPayload => ({
+  version: 1,
+  concepts: statement.concepts.map((c) => ({ description: c.description, dc: c.dc, count: c.count, totalCents: c.totalCents, movements: c.movements })),
+});
+
+// ---------------------------------------------------------------------------
 // Apertura y cierre de cuentas (siempre los confirma el usuario)
 // ---------------------------------------------------------------------------
 
@@ -328,6 +381,7 @@ export function buildBankBatch(
       accountNumber: statement.accountNumber,
       // Trazabilidad del extracto: un extracto sin movimientos también se registra (cubre el periodo).
       movementCount: statement.movementCount,
+      exogena: exogenaPayload(statement),
       openingBalanceCents: statement.openingBalanceCents,
       closingBalanceCents: statement.closingBalanceCents,
       skipped: statement.concepts.filter((c) => decisions[c.key]?.destination === "skip").map((c) => c.description),

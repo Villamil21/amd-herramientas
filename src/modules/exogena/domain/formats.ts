@@ -1,5 +1,5 @@
 /**
- * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008, 1007 y 1647 (Transacciones Cripto), 1001, 1005 y 1006 (Compras, costos y exógena) y 1011 y 2276 (Nómina y seguridad social); el resto queda
+ * Registro de formatos de Información Exógena. Están implementados 1010, 1009, 1008, 1007 y 1647 (Transacciones Cripto), 1001, 1005 y 1006 (Compras, costos y exógena), 1011 y 2276 (Nómina y seguridad social) y 1012 (Extractos bancarios, que también aportan al 1007 y al 1011); el resto queda
  * registrado (con su código y nombre confirmados) para agregarlo después sin cambiar la infraestructura: una pantalla
  * "no disponible" nunca se presenta como terminada.
  *
@@ -79,7 +79,7 @@ export const FORMAT_1008_COLUMNS: FormatColumn[] = [
   { key: "balance", header: "Saldo cuentas por cobrar al 31-12", kind: "integer" },
 ];
 
-/** 1007 · Ingresos recibidos (se arma desde Transacciones Cripto → Reporte de operaciones y desde Ventas → Facturación electrónica; concepto siempre 4001). */
+/** 1007 · Ingresos recibidos (se arma desde Transacciones Cripto → Reporte de operaciones, desde Ventas → Facturación electrónica —concepto 4001— y desde Extractos bancarios —intereses de bancos, concepto 4003—). */
 export const FORMAT_1007_COLUMNS: FormatColumn[] = [
   { key: "concept", header: "Concepto", kind: "text" },
   { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
@@ -93,6 +93,21 @@ export const FORMAT_1007_COLUMNS: FormatColumn[] = [
   { key: "countryCode", header: "País de residencia o domicilio", kind: "text" },
   { key: "grossIncome", header: "Ingresos brutos recibidos", kind: "integer" },
   { key: "returns", header: "Devoluciones, rebajas y descuentos", kind: "integer" },
+];
+
+/** 1012 · Saldos de cuentas bancarias al 31-12 (se arma desde Estados Financieros → Extractos bancarios; concepto siempre 1110, tipo de documento NIT y país 169). Encabezados de la plantilla DIAN 2025. */
+export const FORMAT_1012_COLUMNS: FormatColumn[] = [
+  { key: "concept", header: "Concepto", kind: "text" },
+  { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
+  { key: "docNumber", header: "Número de Identificación", kind: "text" },
+  { key: "dv", header: "DV", kind: "text" },
+  { key: "firstSurname", header: "Primer apellido del informado", kind: "text" },
+  { key: "secondSurname", header: "Segundo apellido del informado", kind: "text" },
+  { key: "firstName", header: "Primer nombre del informado", kind: "text" },
+  { key: "otherNames", header: "Otros nombres del informado", kind: "text" },
+  { key: "businessName", header: "Razón social informado", kind: "text" },
+  { key: "countryCode", header: "País de residencia o domicilio", kind: "text" },
+  { key: "balance", header: "Valor al 31-12", kind: "integer" },
 ];
 
 /** 1647 · Ingresos recibidos para terceros (concepto siempre 4070): el tercero para quien se recibió el ingreso y quien lo recibió. */
@@ -179,7 +194,7 @@ export const FORMAT_1006_COLUMNS: FormatColumn[] = [
   { key: "consumption", header: "Impuesto al consumo", kind: "integer" },
 ];
 
-/** 1011 · Información de las declaraciones tributarias: una cifra anual por concepto (sin terceros). Fase inicial: 8207, 8241, 8242, 8243, 8244, 8245 y 8295 desde Nómina. */
+/** 1011 · Información de las declaraciones tributarias: una cifra anual por concepto (sin terceros). Fase inicial: 8207, 8241, 8242, 8243, 8244, 8245 y 8295 desde Nómina, y 8211 (50 % del GMF anual) desde Extractos bancarios. */
 export const FORMAT_1011_COLUMNS: FormatColumn[] = [
   { key: "concept", header: "Concepto", kind: "text" },
   { key: "balance", header: "Saldo a dic. 31", kind: "integer" },
@@ -245,7 +260,7 @@ export const FORMATS: FormatDef[] = [
   { code: "1009", name: "Saldos de cuentas por pagar al 31 de diciembre", sheetTitle: "Saldo de cuentas por pagar al 31 de diciembre", implemented: true, columns: FORMAT_1009_COLUMNS },
   { code: "1010", name: "Socios, accionistas y similares", sheetTitle: "Información de socios, accionistas, comuneros y/o cooperados", implemented: true, columns: FORMAT_1010_COLUMNS },
   { code: "1011", name: "Información de las declaraciones tributarias", sheetTitle: "Información de las declaraciones tributarias", implemented: true, columns: FORMAT_1011_COLUMNS },
-  { code: "1012", name: "Información de declaraciones tributarias, acciones y aportes, inversiones y cuentas", sheetTitle: "Información de declaraciones tributarias, acciones y aportes, inversiones en bonos títulos valores y cuentas de ahorro y cuentas corrientes", implemented: false },
+  { code: "1012", name: "Información de declaraciones tributarias, acciones y aportes, inversiones y cuentas", sheetTitle: "Información de declaraciones tributarias, acciones y aportes, inversiones en bonos títulos valores y cuentas de ahorro y cuentas corrientes", implemented: true, columns: FORMAT_1012_COLUMNS },
   { code: "1056", name: "Pagos o abonos en cuenta y retenciones por secretarios generales que administran recursos del tesoro", sheetTitle: "Pagos o abonos en cuenta y retenciones por secretarios generales que administran recursos del tesoro", implemented: false },
   { code: "1647", name: "Ingresos recibidos para terceros", sheetTitle: "Ingresos recibidos para terceros", implemented: true, columns: FORMAT_1647_COLUMNS },
   { code: "2275", name: "Ingresos no constitutivos de renta ni ganancia ocasional", sheetTitle: "Ingresos no constitutivos de renta ni ganancia ocasional", implemented: false },

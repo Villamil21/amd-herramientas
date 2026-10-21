@@ -369,6 +369,53 @@ pub struct GmfRule {
     pub updated_at: String,
 }
 
+/// Banco + concepto exacto → es interés generado (ingreso financiero del 1007) o no.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InterestRule {
+    pub bank: String,
+    pub concept: String,
+    pub is_interest: bool,
+    pub origin: String,
+    pub confirmed: bool,
+    pub updated_at: String,
+}
+
+/// Ficha persistente del banco como informado en Exógena (1012, 1007): NIT sin DV, DV calculado, razón social,
+/// tipo de documento NIT (31) y país Colombia (169).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankProfile {
+    pub bank_key: String,
+    pub bank: String,
+    pub nit: String,
+    pub dv: String,
+    pub business_name: String,
+    pub doc_type_code: String,
+    pub country_code: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankProfileInput {
+    pub bank: String,
+    pub nit: String,
+    pub business_name: String,
+}
+
+/// Decisión del usuario sobre una situación revisable de un extracto para Exógena.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankExoReview {
+    pub company_id: i64,
+    pub year: i64,
+    pub review_key: String,
+    pub decision: String,
+    pub note: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PucSetting {

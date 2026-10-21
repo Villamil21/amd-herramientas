@@ -1,7 +1,8 @@
 import { lazy } from "react";
-import { BookCheck, Bitcoin, ChartNoAxesCombined, Contact, FileChartColumn, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
+import { BookCheck, Bitcoin, ChartNoAxesCombined, Contact, FileChartColumn, FileSpreadsheet, Landmark, ListTree, NotebookText, Receipt, Scale, ScrollText, ShoppingBag, UsersRound } from "lucide-react";
 import type { ModuleDef } from "../../types/modules";
 import { bankAnalysisModule } from "../bank-analysis";
+import { BANK_EXO_PROVIDER_ID } from "./bank/exogena/paths";
 
 /**
  * Preparación de estados financieros por empresa: cada fuente (compras,
@@ -44,8 +45,12 @@ export const financialStatementsModule: ModuleDef = {
       name: "Extractos bancarios",
       description: "Analiza extractos bancarios y envía sus conceptos y saldos a Estados Financieros.",
       icon: FileChartColumn,
-      providers: bankAnalysisModule.submodules,
-      providersDescription: "Selecciona el banco del extracto.",
+      providers: [
+        // Primero: qué se ha importado por banco y cuenta, las fichas de los bancos y lo que los extractos aportan a Exógena.
+        { id: BANK_EXO_PROVIDER_ID, name: "Cobertura y Exógena", description: "Extractos por empresa, banco, cuenta y mes, fichas de bancos y formatos 1012, 1007 y 1011.", icon: FileSpreadsheet, component: lazy(() => import("./bank/exogena/BankExoPage")) },
+        ...bankAnalysisModule.submodules,
+      ],
+      providersDescription: "Selecciona el banco del extracto, o abre la cobertura y lo que los extractos aportan a Exógena.",
     },
     {
       // Un solo submódulo visible: el operador (Aportes en Línea, MiPlanilla…) se detecta desde el PDF.
