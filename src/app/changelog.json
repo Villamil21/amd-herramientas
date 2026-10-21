@@ -3,7 +3,10 @@
     "version": "1.45.0",
     "date": "2026-10-21",
     "notes": [
-      "(Describe aquí las novedades de esta versión)"
+      "Extractos bancarios rediseñado por banco: la pantalla inicial muestra solo los bancos y cada banco integra ficha Exógena, importación de PDF, resumen de 1012/1007/1011 y 12 tarjetas por mes (Enviado, Pendiente, Actualización pendiente, Requiere revisión, Falta, No aplica, Aún no termina).",
+      "Cada mes con extracto abre su detalle guardado sin reimportar, con conceptos agrupados que se editan directamente (destino, PUC, GMF, No enviar). El cambio queda como «Actualización pendiente» y no toca los Estados Financieros hasta confirmar.",
+      "Botón único «Actualizar Estados Financieros» con resumen previo (valores, PUC anterior y nuevo, periodo e impacto en 1007/1011/1012), motivo obligatorio y auditoría; actualiza el mismo lote sin duplicar. Periodos aprobados o con PDF piden confirmación adicional y pasan a «Requiere nueva revisión»; los cerrados se bloquean.",
+      "Meses sin extracto: «Falta» con acción de importar, «No aplica» registrable y «Aún no termina» sin alertas. Los extractos antiguos siguen funcionando con cambios limitados a PUC y No enviar."
     ]
   },
   {
