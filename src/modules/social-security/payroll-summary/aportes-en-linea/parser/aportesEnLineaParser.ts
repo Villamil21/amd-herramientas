@@ -89,12 +89,16 @@ interface Row {
 /** Agrupa los fragmentos por línea base, de arriba hacia abajo, sin depender del orden interno del PDF. */
 function buildPageRows(page: PdfPageText): Row[] {
   const items = [...page.items].sort((a, b) => b.y - a.y || a.x - b.x);
-  const groups: { y: number; height: number; items: PdfTextItem[] }[] = [];
+  const groups: { y: number; lastY: number; height: number; items: PdfTextItem[] }[] = [];
   for (const item of items) {
     const g = groups[groups.length - 1];
     const tolerance = Math.max(1.5, 0.35 * Math.max(item.height, g?.height ?? 0));
-    if (g && Math.abs(g.y - item.y) <= tolerance) g.items.push(item);
-    else groups.push({ y: item.y, height: item.height, items: [item] });
+    // Los fragmentos de una misma línea pueden variar unas décimas de punto (encabezados compactos de 4.5 pt): se
+    // encadenan por cercanía al fragmento anterior, sin que la línea se ensanche más de dos tolerancias.
+    if (g && g.lastY - item.y <= tolerance && g.y - item.y <= 2 * tolerance) {
+      g.items.push(item);
+      g.lastY = item.y;
+    } else groups.push({ y: item.y, lastY: item.y, height: item.height, items: [item] });
   }
   return groups.map((g) => {
     const cells = g.items
@@ -242,7 +246,7 @@ const LABELS = new Set(["NO", "NO.", "IDENTIFICACION", "NOMBRE", "CODIGO", "DIAS
 /** No exige «Codigo»: en algunas planillas llega partido («Codig» + «o»). */
 const isColumnHeader = (r: Row) => {
   const keys = new Set(r.words.map((w) => norm(w.text)));
-  return keys.has("IDENTIFICACION") && keys.has("NOMBRE") && keys.has("APORTES");
+  return keys.has("IDENTIFICACION") && keys.has("NOMBRE") && (keys.has("APORTES") || keys.has("TOTAL"));
 };
 
 /**
@@ -263,7 +267,8 @@ function headerWords(rows: Row[], headerIndex: number): Word[] {
   return header;
 }
 
-function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined {
+/** Distribución de columnas, o el motivo (qué parte no se pudo identificar) para el mensaje al usuario. */
+function buildLayout(rows: Row[], headerIndex: number): DetailLayout | string {
   const header = headerWords(rows, headerIndex);
   // Fila de secciones: la más cercana por encima de la de columnas.
   let titleRow: Row | undefined;
@@ -274,14 +279,16 @@ function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined
       break;
     }
   }
-  if (!titleRow) return undefined;
+  if (!titleRow) return "no se encontró la fila de secciones (Pensión, Salud, CCF, Riesgos) sobre los encabezados";
   const titles = titleRow.words.map((w) => ({ key: norm(w.text), center: center(w), x: w.x }));
   const sectionTitles = titles.filter((t) => (SECTIONS as string[]).includes(t.key));
 
   const identification = header.find((w) => norm(w.text) === "IDENTIFICACION");
   const name = header.find((w) => norm(w.text) === "NOMBRE");
   const firstCode = header.findIndex((w) => norm(w.text) === "CODIGO");
-  if (!identification || !name || firstCode < 0) return undefined;
+  if (!identification) return "no se identificó la columna de Identificación";
+  if (!name) return "no se identificó la columna de Nombre";
+  if (firstCode < 0) return "no se identificaron las columnas Código/Días/IBC/Aporte de ninguna sección";
 
   const columns: Column[] = [];
   const push = (key: string, left: number) => {
@@ -293,10 +300,10 @@ function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined
       // Grupo Codigo … Aporte: pertenece a la sección cuyo título queda encima del grupo.
       let j = i;
       while (j < header.length && norm(header[j].text) !== "APORTE") j++;
-      if (j === header.length) return undefined;
+      if (j === header.length) return "un grupo de columnas no termina en «Aporte»";
       const group = header.slice(i, j + 1);
       const section = sectionTitles.find((t) => t.center >= group[0].x && t.center <= group[group.length - 1].right);
-      if (!section) return undefined;
+      if (!section) return `no se pudo asociar un grupo de columnas (${group.map((w) => w.text).join(" ")}) a su sección`;
       for (const w of group) push(`${section.key}.${FIELD[norm(w.text)] ?? norm(w.text).toLowerCase()}`, w.x);
       i = j;
     } else if (k === "TOTAL" && norm(header[i + 1]?.text ?? "") === "APORTES") {
@@ -309,7 +316,8 @@ function buildLayout(rows: Row[], headerIndex: number): DetailLayout | undefined
     }
   }
   columns.sort((a, b) => a.left - b.left);
-  if (!REQUIRED_COLUMNS.every((k) => columns.some((c) => c.key === k))) return undefined;
+  const missing = REQUIRED_COLUMNS.filter((k) => !columns.some((c) => c.key === k));
+  if (missing.length) return `no se identificaron las columnas ${missing.join(", ")}`;
   const dataLeft = columns[0].left;
 
   // Las novedades (ing, ret, tde…) se rotulan en líneas debajo de la fila de columnas.
@@ -408,6 +416,8 @@ interface DetailResult {
   totals: PayrollDetailTotals;
   issues: PayrollIssue[];
   joinedNames: number;
+  /** Primera parte de la tabla que no se pudo identificar (para el mensaje al usuario). */
+  failure?: { page: number; reason: string };
 }
 
 function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult {
@@ -426,15 +436,19 @@ function parseDetail(pages: { page: PdfPageText; rows: Row[] }[]): DetailResult 
     let start: number;
     if (headerIndex >= 0) {
       const pageLayout = buildLayout(rows, headerIndex);
-      if (!pageLayout) {
+      if (typeof pageLayout === "string") {
         devLog(`página ${page.pageNumber}: fila de columnas sin reconstruir`, rows[headerIndex].text);
+        result.failure ??= { page: page.pageNumber, reason: pageLayout };
         continue;
       }
       layout = pageLayout;
       start = headerIndex + 1;
     } else if (layout && result.found) {
       start = 0;
-    } else continue;
+    } else {
+      if (title >= 0) result.failure ??= { page: page.pageNumber, reason: "no se encontró la fila de encabezados (Identificación, Nombre … Total Aportes) bajo el título de la tabla" };
+      continue;
+    }
     result.found = true;
     const current = layout;
     const issue = (text: string, reason: string) => result.issues.push({ page: page.pageNumber, text, reason });
@@ -728,9 +742,13 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
 
   const detail = parseDetail(pages);
   devLog(`filas detectadas: ${detail.detectedRows}; empleados reconstruidos: ${detail.employees.length}; descartadas: ${detail.detectedRows - detail.employees.length}; totales:`, detail.totals);
-  if (!detail.found) throw new StatementError(detail.titleFound ? MESSAGES.detailRows : MESSAGES.detail);
+  if (!detail.found) {
+    if (!detail.titleFound) throw new StatementError(MESSAGES.detail);
+    const where = detail.failure ? ` Página ${detail.failure.page}: ${detail.failure.reason}.` : "";
+    throw new StatementError(`${MESSAGES.detailRows} Operador detectado: Aportes en Línea.${where}`);
+  }
   if (detail.employees.length === 0) {
-    if (detail.detectedRows > 0) throw new StatementError(`${MESSAGES.detailRows} ${detail.issues[0]?.reason ?? ""}`.trim());
+    if (detail.detectedRows > 0) throw new StatementError(`${MESSAGES.detailRows} Operador detectado: Aportes en Línea; ${detail.detectedRows} fila(s) de empleado ubicadas en la página ${detail.issues[0]?.page ?? 1}. ${detail.issues[0]?.reason ?? ""}`.trim());
     throw new StatementError(detail.issues.length ? `${MESSAGES.noEmployees} ${detail.issues[0].reason}` : MESSAGES.noEmployees);
   }
   if (general.paymentAmount === undefined) throw new StatementError(MESSAGES.payment);

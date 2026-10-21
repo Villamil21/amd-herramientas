@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readDocumentText } from "../../../bank-analysis/shared/pdf/pdfText";
+import { analyzeAportesEnLinea } from "../../../social-security/payroll-summary/aportes-en-linea/services/analysis";
 import { detectOperator } from "./detect";
 import { normalizePlanilla } from "./normalize";
 import { build1001Payroll } from "./exo1001";
@@ -50,6 +51,7 @@ describe.skipIf(files.length === 0)("normalización de planillas reales", () => 
       const known: Record<string, { operator: string; nit: string; employees: number; late: number }> = {
         "9498222960": { operator: "aportes-en-linea", nit: "901841760", employees: 3, late: 11_700 },
         "9499368247": { operator: "aportes-en-linea", nit: "901741186", employees: 4, late: 8_000 },
+        "9498222357": { operator: "aportes-en-linea", nit: "901795718", employees: 7, late: 61_800 },
         "40724055": { operator: "miplanilla", nit: "901679752", employees: 3, late: 4_400 },
       };
       const k = known[p.planillaNumber ?? ""];
@@ -77,6 +79,20 @@ describe.skipIf(files.length === 0)("normalización de planillas reales", () => 
         expect(eps).toHaveLength(1);
         expect(eps[0].concept).toBe("5011");
         expect(p.employees.find((e) => e.docType === "PT")?.docNumber).toBe("1030953");
+      }
+      if (p.planillaNumber === "9498222357") {
+        // Variante compacta (encabezados de 4,5 pt en líneas partidas): 7 empleados únicos con el detalle de cada sistema.
+        expect(new Set(p.employees.map((e) => `${e.docType} ${e.docNumber}`)).size).toBe(7);
+        expect(p.employees.reduce((n, e) => n + e.contributions.pension, 0)).toBe(1_961_400);
+        expect(p.employees.reduce((n, e) => n + e.contributions.health, 0)).toBe(490_700);
+        expect(p.employees.reduce((n, e) => n + e.contributions.ccf, 0)).toBe(490_700);
+        expect(p.employees.reduce((n, e) => n + e.contributions.arl, 0)).toBe(64_400);
+        const { summary: s, validation } = analyzeAportesEnLinea(doc);
+        expect([s.totalContributions, s.lateInterest, s.paymentAmount]).toEqual([3_007_200, 61_800, 3_069_000]);
+        expect(validation.validated).toBe(true);
+        expect(p.checks.every((c) => c.status !== "failed")).toBe(true);
+        // El resumen por entidades suma el liquidado de los empleados (sin mora).
+        expect(p.entities.reduce((n, e) => n + e.liquidated, 0)).toBe(3_007_200);
       }
       if (p.planillaNumber === "9499368247") {
         // Quien cotizó 29 días: el salario del mes es su IBC (no se asumen 30 días) y la base mensual se proyecta a 30.

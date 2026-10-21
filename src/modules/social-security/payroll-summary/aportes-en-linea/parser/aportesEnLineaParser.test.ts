@@ -371,11 +371,11 @@ describe("parser Aportes en Línea", () => {
       ...[["EMPLEADO", 50.6], ["NOVEDADES", 148.7], ["PENSION", 251.6], ["SALUD", 339], ["CCF", 427.8], ["RIESGOS", 514.4], ["PARAFISCALES", 604.8]].map(([x, px]) => t(x as string, px as number, 478.3, 6)),
       ...[["Codig", 223.1], ["Días", 236.6], ["Codig", 307.1], ["Dias", 321.4], ["Codigo Días", 391.5], ["Codig", 477.3], ["Días", 490.9], ["Tarifa", 532.1], ["Días", 577], ["Exonerado", 648.8], ["Total Aportes", 677.7]].map(([x, px]) => t(x as string, px as number, H)),
       ...[["No", 25.1], ["Identificación", 36.8], ["Nombre", 80.9], ["IBC", 257.1], ["Aporte", 283], ["IBC", 342.3], ["Aporte", 368.2], ["IBC", 427.6], ["Aporte", 453.5], ["IBC", 511.5], ["Aporte", 553.5], ["IBC", 597.5], ["Aporte", 623.4]].map(([x, px]) => t(x as string, px as number, H - 0.5, 5)),
-      ...[["in", 110], ["re", 115.8], ["td", 122.2], ["vi", 217]].map(([x, px]) => t(x as string, px as number, H - 2.8)),
+      ...[["in", 110], ["re", 115.8], ["td", 122.2], ["vi", 217]].map(([x, px]) => t(x as string, px as number, H + 1.4)), // por ENCIMA de la fila de columnas (geometría real: 469,1 vs 467,7 y 467,2)
       ...[227.4, 311.4, 481.6].map((x) => t("o", x, H - 5.3)),
       t("SENA e ICBF", 647.9, H - 5.3),
       t(".", 27.2, H - 6.2, 5),
-      ...[["g", 110.8], ["t", 117.1], ["p", 217.5]].map(([x, px]) => t(x as string, px as number, H - 8.1)),
+      ...[["g", 110.8], ["t", 117.1], ["p", 217.5]].map(([x, px]) => t(x as string, px as number, H - 3.8)),
     ];
     const row = (no: number, doc: string, name: string[], y: number): PdfTextItem[] => {
       const [docType, docNumber] = doc.split(" ");
@@ -457,7 +457,19 @@ describe("parser Aportes en Línea", () => {
   });
 
   it("distingue la tabla encontrada cuyas filas no se pueden reconstruir", () => {
-    expectError(() => parseAportesEnLinea(docOf(page(1, [...generalBlock(537.6, { value: "$10,000" }), t("LIQUIDACION DETALLADA DE APORTES", 19, 496, 6)]))), MESSAGES.detailRows);
+    expect(() => parseAportesEnLinea(docOf(page(1, [...generalBlock(537.6, { value: "$10,000" }), t("LIQUIDACION DETALLADA DE APORTES", 19, 496, 6)])))).toThrow(MESSAGES.detailRows);
+  });
+
+  it("explica operador, página y parte no identificada cuando la tabla no se puede reconstruir", () => {
+    const d = docOf(page(1, [...generalBlock(537.6, { value: "$10,000" }), t("LIQUIDACION DETALLADA DE APORTES", 19, 496, 6), t("Identificación", 40, 480), t("Nombre", 90, 480), t("Total Aportes", 700, 480)]));
+    try {
+      parseAportesEnLinea(d);
+      throw new Error("se esperaba un error");
+    } catch (e) {
+      expect(e).toBeInstanceOf(StatementError);
+      expect((e as Error).message).toContain(MESSAGES.detailRows);
+      expect((e as Error).message).toMatch(/Aportes en Línea.*Página 1: no se encontró la fila de secciones/);
+    }
   });
 
   it("informa si no hay empleados", () => {

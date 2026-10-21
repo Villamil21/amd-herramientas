@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.47.1",
+    "date": "2026-10-21",
+    "notes": [
+      "Seguridad social → Aportes en Línea: ahora se leen las planillas con encabezados compactos de la tabla de liquidación detallada (letra pequeña, rótulos partidos y desalineados unas décimas de punto), que antes fallaban con «no fue posible reconstruir las filas de empleados».",
+      "Si una planilla sigue sin poder leerse, el error bloqueante indica el operador detectado, la página y qué parte de la tabla no se pudo identificar. Las validaciones de empleados, totales por sistema, mora y total pagado no cambian."
+    ]
+  },
+  {
     "version": "1.47.0",
     "date": "2026-10-21",
     "notes": [
@@ -58,13 +66,6 @@
     ]
   },
   {
-    "version": "1.42.0",
-    "date": "2026-10-21",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
-    ]
-  },
-  {
     "version": "1.41.0",
     "date": "2026-10-21",
     "notes": [
@@ -72,13 +73,6 @@
       "Exógena 1007: ingresos por cliente y tipo de documento con base Total − (IVA … ICUI); facturas como ingresos y notas crédito como devoluciones, sin netear, junto a los registros de Transacciones Cripto. Si el Excel no trae ICUI, eliges explícitamente hasta qué columna restar.",
       "Exógena 1006 (IVA generado por facturas) y 1005 (IVA por devoluciones en ventas, notas crédito) solo con responsabilidad de IVA vigente en la fecha del documento, con conciliación de ventas independiente de la de compras.",
       "Clientes: NIT de 9 dígitos que empieza por 90 se completa solo (tipo 31, DV, razón social); los demás quedan por confirmar una sola vez. Auditoría por registro hasta archivo, hoja y fila, y respaldo/restauración compatibles."
-    ]
-  },
-  {
-    "version": "1.41.0",
-    "date": "2026-10-21",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {
@@ -100,13 +94,6 @@
       "SENA e ICBF: se reconocen por separado y se pueden clasificar por PUC. Al identificarlos una planilla se crea sola la ficha mínima de proveedor con su NIT oficial (sin razón social ni domicilio, sin nombres provisionales); los datos faltantes bloquean solo el 1001. Si Aportes en Línea los trae en una sola cifra no separable, queda bloqueado sin inventar el reparto.",
       "Fondo de Solidaridad Pensional de Aportes en Línea: cuando solo viene por administradora, la alerta bloqueante del 2276 indica que no puede asignarse al empleado y muestra administradora, periodo y valor.",
       "Empresas: domicilio (país, departamento y municipio) en Generales. Migración 030, aditiva e idempotente, incluida en copia y restauración."
-    ]
-  },
-  {
-    "version": "1.39.0",
-    "date": "2026-10-19",
-    "notes": [
-      "(Describe aquí las novedades de esta versión)"
     ]
   },
   {
