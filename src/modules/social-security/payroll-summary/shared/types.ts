@@ -37,6 +37,11 @@ export interface PayrollEmployee {
   /** Subsistemas cuyo código de entidad no se pudo leer de forma segura. */
   unreadCodes?: string[];
   page: number;
+  /**
+   * Tramos físicos de la planilla que se consolidaron en este empleado (misma identificación, dos o más filas dentro de la
+   * misma planilla). Cada tramo conserva su fila, días, IBC, aportes, códigos y novedades. Ausente = una sola fila.
+   */
+  segments?: PayrollEmployee[];
 }
 
 /** Días e IBC de un subsistema en la fila de un cotizante. */
@@ -130,8 +135,9 @@ export interface PayrollSummary {
   totalContributions: number;
   /** Valor pagado − total aportes liquidados. */
   lateInterest: number;
+  /** Empleados únicos (los tramos de una misma identificación cuentan una vez). */
   employeeCount: number;
-  /** Filas de empleado detectadas en la tabla (interpretadas o no). */
+  /** Filas físicas de empleado detectadas en la tabla (interpretadas o no); puede ser mayor que `employeeCount`. */
   detectedRows: number;
   employees: PayrollEmployee[];
   detailTotals: PayrollDetailTotals;

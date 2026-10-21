@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.47.2",
+    "date": "2026-10-21",
+    "notes": [
+      "Seguridad social → Aportes en Línea: un empleado con varios tramos dentro de la misma planilla (misma identificación y mismo período) ahora se consolida en un solo empleado, sumando días, IBC y aportes de cada subsistema. Antes se contaba como dos y la validación bloqueaba con «se extrajeron 9 empleados y la planilla indica Total Afiliados (8)».",
+      "La validación distingue filas físicas interpretadas, empleados únicos consolidados y Total Afiliados declarado. Cada tramo conserva su fila, días, IBC, aportes, códigos y novedades, y el detalle por empleado permite desplegarlos. Si el nombre o la administradora difieren entre tramos del mismo documento, no se consolida y la importación sigue bloqueada."
+    ]
+  },
+  {
     "version": "1.47.1",
     "date": "2026-10-21",
     "notes": [

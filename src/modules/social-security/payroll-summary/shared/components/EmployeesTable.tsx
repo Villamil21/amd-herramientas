@@ -30,6 +30,13 @@ export function EmployeesTable({ summary }: { summary: PayrollSummary }) {
   const { employees } = summary;
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggleOpen = (key: string) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   const visible = useMemo(() => {
     const q = query.trim().toLocaleUpperCase("es");
@@ -76,18 +83,47 @@ export function EmployeesTable({ summary }: { summary: PayrollSummary }) {
             </tr>
           </thead>
           <tbody>
-            {visible.map((e) => (
-              <tr key={`${e.page}-${e.rowNumber}`}>
-                <td className="selectable payroll-table__id">{e.identification}</td>
-                <td className="table__primary selectable">{e.name}</td>
-                <td className="num">{formatInteger(e.pensionDays)}</td>
-                {MONEY_COLUMNS.map((c) => (
-                  <td key={c.key} className={c.key === "totalContribution" ? "num table__primary" : "num"}>
-                    {formatPesos(e[c.key] as number)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {visible.map((e) => {
+              const key = `${e.page}-${e.rowNumber}`;
+              const segments = e.segments;
+              return (
+                <Fragment key={key}>
+                  <tr>
+                    <td className="selectable payroll-table__id">{e.identification}</td>
+                    <td className="table__primary selectable">
+                      {e.name}
+                      {segments && (
+                        <button type="button" className="btn btn--ghost btn--sm" style={{ marginLeft: "var(--space-2)" }} aria-expanded={open.has(key)} onClick={() => toggleOpen(key)}>
+                          Consolidado de {segments.length} tramos {open.has(key) ? "▾" : "▸"}
+                        </button>
+                      )}
+                    </td>
+                    <td className="num">{formatInteger(e.pensionDays)}</td>
+                    {MONEY_COLUMNS.map((c) => (
+                      <td key={c.key} className={c.key === "totalContribution" ? "num table__primary" : "num"}>
+                        {formatPesos(e[c.key] as number)}
+                      </td>
+                    ))}
+                  </tr>
+                  {segments &&
+                    open.has(key) &&
+                    segments.map((seg) => (
+                      <tr key={`${key}-${seg.rowNumber}`} className="muted">
+                        <td className="payroll-table__id">Fila {seg.rowNumber}</td>
+                        <td>
+                          Tramo de la planilla{seg.novelties?.length ? ` · novedades: ${seg.novelties.join(", ")}` : ""}
+                        </td>
+                        <td className="num">{formatInteger(seg.pensionDays)}</td>
+                        {MONEY_COLUMNS.map((c) => (
+                          <td key={c.key} className="num">
+                            {formatPesos(seg[c.key] as number)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                </Fragment>
+              );
+            })}
             {visible.length === 0 && (
               <tr>
                 <td colSpan={3 + MONEY_COLUMNS.length} className="muted" style={{ textAlign: "center", padding: "var(--space-6)" }}>

@@ -5,7 +5,8 @@ import { formatPesos } from "../../../../../utils/format";
 import { parsePesoAmount } from "../../shared/money";
 import { buildPayrollSheets, suggestedPayrollExportName } from "../../shared/export/excelExport";
 import { analyzeAportesEnLinea } from "../services/analysis";
-import { MESSAGES, parseAportesEnLinea } from "./aportesEnLineaParser";
+import type { PayrollEmployee } from "../../shared/types";
+import { MESSAGES, consolidateEmployees, parseAportesEnLinea } from "./aportesEnLineaParser";
 
 // ---------------------------------------------------------------------------
 // PDF sintético con la geometría de la planilla real de Aportes en Línea:
@@ -553,5 +554,55 @@ describe("resumen de pago por administradora", () => {
   it("los intereses de mora de la planilla no cambian el valor de la entidad", () => {
     const withMora = parseAportesEnLinea(planilla(EMPS, { interest: 123_456 })).paymentSummary!;
     expect(withMora.entities?.[0].liquidated).toBe(831_300);
+  });
+});
+
+describe("empleados con varios tramos en la misma planilla", () => {
+  const seg = (rowNumber: number, over: Partial<PayrollEmployee> = {}): PayrollEmployee => ({
+    rowNumber,
+    identification: "CC 16725609",
+    name: "VILLAMIL RUBIANO PEDRO JULIO",
+    pensionDays: 18,
+    pensionIbc: 1_050_543,
+    pensionContribution: 168_100,
+    healthContribution: 42_100,
+    ccfContribution: 42_100,
+    riskContribution: 5_500,
+    totalContribution: 257_800,
+    otherContribution: 0,
+    health: { days: 18, ibc: 1_050_543 },
+    ccf: { days: 18, ibc: 1_050_543 },
+    entityCodes: { afp: "230201", eps: "EPS018" },
+    novelties: [],
+    page: 1,
+    ...over,
+  });
+  const second = () => seg(9, { pensionDays: 12, pensionIbc: 700_362, pensionContribution: 112_100, healthContribution: 28_100, ccfContribution: 0, riskContribution: 0, totalContribution: 140_200, health: { days: 12, ibc: 700_362 }, ccf: { days: 12, ibc: 700_362 }, novelties: ["ige"] });
+
+  it("suma tramos de la misma identificación y conserva cada uno", () => {
+    const other = seg(1, { identification: "CC 1", name: "OTRA PERSONA" });
+    const { employees, issues } = consolidateEmployees([other, seg(8), second()]);
+    expect(issues).toEqual([]);
+    expect(employees.map((e) => e.identification)).toEqual(["CC 1", "CC 16725609"]);
+    const e = employees[1];
+    expect(e).toMatchObject({ pensionDays: 30, pensionIbc: 1_750_905, pensionContribution: 280_200, healthContribution: 70_200, ccfContribution: 42_100, riskContribution: 5_500, totalContribution: 398_000 });
+    expect(e.health).toEqual({ days: 30, ibc: 1_750_905 });
+    expect(e.novelties).toEqual(["ige"]);
+    expect(e.segments?.map((x) => [x.rowNumber, x.pensionDays, x.novelties])).toEqual([[8, 18, []], [9, 12, ["ige"]]]);
+    expect(employees[0].segments).toBeUndefined();
+  });
+
+  it("no une por nombre ni cuando el nombre difiere para el mismo documento", () => {
+    const sameName = consolidateEmployees([seg(1, { identification: "CC 1" }), seg(2, { identification: "CC 2" })]);
+    expect(sameName.employees).toHaveLength(2);
+    const clash = consolidateEmployees([seg(8), seg(9, { name: "OTRO NOMBRE DISTINTO" })]);
+    expect(clash.employees).toHaveLength(2);
+    expect(clash.issues[0].reason).toMatch(/nombres distintos/);
+  });
+
+  it("no consolida si la administradora cambia entre tramos", () => {
+    const r = consolidateEmployees([seg(8), seg(9, { entityCodes: { afp: "230301", eps: "EPS018" } })]);
+    expect(r.employees).toHaveLength(2);
+    expect(r.issues[0].reason).toMatch(/cambia entre tramos/);
   });
 });

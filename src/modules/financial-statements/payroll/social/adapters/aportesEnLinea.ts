@@ -1,6 +1,6 @@
 import type { PdfDocumentText } from "../../../../bank-analysis/shared/pdf/pdfTypes";
 import { analyzeAportesEnLinea } from "../../../../social-security/payroll-summary/aportes-en-linea/services/analysis";
-import type { PaymentEntity } from "../../../../social-security/payroll-summary/shared/types";
+import type { PayrollEmployee, PaymentEntity } from "../../../../social-security/payroll-summary/shared/types";
 import { slashToIso } from "../../../shared/money";
 import { parseIdentification } from "../../calc";
 import { OPERATOR_LABEL, PLANILLA_SCHEMA_VERSION, type NormalizedEmployee, type NormalizedEntity, type NormalizedPlanilla } from "../types";
@@ -18,7 +18,7 @@ export function normalizeAportesEnLinea(doc: PdfDocumentText): NormalizedPlanill
   const flat: PdfDocumentText = { ...doc, pages: doc.pages.map((p) => ({ ...p, items: p.items.filter((i) => !i.rotated) })) };
   const { summary: s, validation } = analyzeAportesEnLinea(flat);
   const nit = flat.pages[0]?.items.map((i) => /^NIT\s+(\d{5,})/.exec(i.text.trim())).find(Boolean)?.[1];
-  const employees: NormalizedEmployee[] = s.employees.map((e) => {
+  const toNormalized = (e: PayrollEmployee): Omit<NormalizedEmployee, "segments"> => {
     const { docType, docNumber } = parseIdentification(e.identification);
     return {
       docType,
@@ -37,7 +37,8 @@ export function normalizeAportesEnLinea(doc: PdfDocumentText): NormalizedPlanill
       page: e.page,
       row: e.rowNumber,
     };
-  });
+  };
+  const employees: NormalizedEmployee[] = s.employees.map((e) => (e.segments ? { ...toNormalized(e), segments: e.segments.map(toNormalized) } : toNormalized(e)));
   const issues = [...s.issues];
   for (const c of validation.checks) if (c.status === "failed") issues.push({ page: 0, text: c.label, reason: c.detail ?? "El control no cuadra." });
   return {

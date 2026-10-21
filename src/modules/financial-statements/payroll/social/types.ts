@@ -51,6 +51,8 @@ export interface NormalizedEmployee {
   /** Evidencia: página y fila del PDF. */
   page: number;
   row: number;
+  /** Tramos de la misma planilla consolidados en este empleado (misma identificación, varias filas). Trazabilidad: no se suman de nuevo. */
+  segments?: Omit<NormalizedEmployee, "segments">[];
 }
 
 export interface NormalizedEntity {

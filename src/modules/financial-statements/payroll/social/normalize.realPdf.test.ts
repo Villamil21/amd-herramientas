@@ -48,10 +48,11 @@ describe.skipIf(files.length === 0)("normalización de planillas reales", () => 
       }
 
       // Hechos conocidos de cada planilla de regresión (se comprueban solo para la que corresponde).
-      const known: Record<string, { operator: string; nit: string; employees: number; late: number }> = {
+      const known: Record<string, { operator: string; nit: string; employees: number; late: number; period?: string }> = {
         "9498222960": { operator: "aportes-en-linea", nit: "901841760", employees: 3, late: 11_700 },
         "9499368247": { operator: "aportes-en-linea", nit: "901741186", employees: 4, late: 8_000 },
         "9498222357": { operator: "aportes-en-linea", nit: "901795718", employees: 7, late: 61_800 },
+        "9507790132": { operator: "aportes-en-linea", nit: "901795718", employees: 8, late: 21_500, period: "2026-06" },
         "40724055": { operator: "miplanilla", nit: "901679752", employees: 3, late: 4_400 },
       };
       const k = known[p.planillaNumber ?? ""];
@@ -60,7 +61,7 @@ describe.skipIf(files.length === 0)("normalización de planillas reales", () => 
         expect(p.employer.nit).toBe(k.nit);
         expect(p.employees).toHaveLength(k.employees);
         expect(p.lateInterest).toBe(k.late);
-        expect(p.period).toBe("2026-01");
+        expect(p.period).toBe(k.period ?? "2026-01");
         // La mora nunca es aporte: lo liquidado por entidad es exactamente la suma del detalle por empleado.
         const liquidated = p.entities.reduce((n, e) => n + e.liquidated, 0);
         const detail = p.employees.reduce((n, e) => n + e.contributions.pension + e.contributions.health + e.contributions.arl + e.contributions.ccf, 0);
@@ -93,6 +94,30 @@ describe.skipIf(files.length === 0)("normalización de planillas reales", () => 
         expect(p.checks.every((c) => c.status !== "failed")).toBe(true);
         // El resumen por entidades suma el liquidado de los empleados (sin mora).
         expect(p.entities.reduce((n, e) => n + e.liquidated, 0)).toBe(3_007_200);
+      }
+      if (p.planillaNumber === "9507790132") {
+        // 9 filas físicas, 8 personas: CC 16725609 viene en dos tramos (18 + 12 días) y se consolida UNA vez.
+        const { summary: s, validation } = analyzeAportesEnLinea(doc);
+        expect(s.detectedRows).toBe(9);
+        expect(s.employeeCount).toBe(8);
+        expect(s.detailTotals.declaredEmployees).toBe(8);
+        expect(s.paymentDate).toBe("2026/07/10");
+        expect([s.totalContributions, s.lateInterest, s.paymentAmount]).toEqual([7_059_200, 21_500, 7_080_700]);
+        expect(validation.validated).toBe(true);
+        expect(validation.checks.every((c) => c.status !== "failed")).toBe(true);
+        const mine = p.employees.filter((e) => e.docType === "CC" && e.docNumber === "16725609");
+        expect(mine).toHaveLength(1);
+        expect(mine[0].segments?.map((x) => x.pension.days)).toEqual([18, 12]);
+        expect(mine[0].pension.days).toBe(30);
+        expect(mine[0].novelties).toEqual(["ige"]);
+        expect(new Set(p.employees.map((e) => `${e.docType} ${e.docNumber}`)).size).toBe(8);
+        // Totales consolidados = Total Afiliados y Resumen de pago.
+        expect(p.employees.reduce((n, e) => n + e.contributions.pension, 0)).toBe(4_681_400);
+        expect(p.employees.reduce((n, e) => n + e.contributions.health, 0)).toBe(1_130_800);
+        expect(p.employees.reduce((n, e) => n + e.contributions.ccf, 0)).toBe(1_102_700);
+        expect(p.employees.reduce((n, e) => n + e.contributions.arl, 0)).toBe(144_300);
+        // La consolidación interna no es un empleado duplicado entre planillas.
+        expect(buildYearData(2026, [batchOf(p)], WAGES).duplicates).toEqual([]);
       }
       if (p.planillaNumber === "9499368247") {
         // Quien cotizó 29 días: el salario del mes es su IBC (no se asumen 30 días) y la base mensual se proyecta a 30.

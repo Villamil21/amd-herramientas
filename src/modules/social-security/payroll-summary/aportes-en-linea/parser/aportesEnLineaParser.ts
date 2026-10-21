@@ -722,6 +722,82 @@ function parseEntityRow(row: Row, headers: Cell[], type: PaymentEntityType, extr
 // Documento completo
 // ---------------------------------------------------------------------------
 
+const sumDefined = (values: (number | undefined)[]): number | undefined => (values.some((v) => v !== undefined) ? values.reduce<number>((n, v) => n + (v ?? 0), 0) : undefined);
+
+function mergeBase(parts: (SubsystemBase | undefined)[]): SubsystemBase | undefined {
+  const present = parts.filter((p): p is SubsystemBase => p !== undefined);
+  if (!present.length) return undefined;
+  return { days: sumDefined(present.map((p) => p.days)), ibc: sumDefined(present.map((p) => p.ibc)) };
+}
+
+/**
+ * Una persona puede aparecer en varias filas de la misma planilla (tramos del mismo período con días, IBC o novedades
+ * distintos). Se consolida SOLO con identificación completa idéntica y el mismo nombre; si el nombre difiere o las
+ * administradoras cambian entre tramos, las filas quedan separadas y se informa (el conteo no cuadrará y bloquea).
+ */
+export function consolidateEmployees(rows: PayrollEmployee[]): { employees: PayrollEmployee[]; issues: PayrollIssue[] } {
+  const groups = new Map<string, PayrollEmployee[]>();
+  for (const e of rows) groups.set(e.identification, [...(groups.get(e.identification) ?? []), e]);
+  const issues: PayrollIssue[] = [];
+  const merged = new Map<string, PayrollEmployee>();
+  for (const [id, parts] of groups) {
+    if (parts.length === 1) continue;
+    const conflict = (reason: string) => issues.push({ page: parts[0].page, text: `${id} ${parts[0].name}`, reason: `${reason} No se consolidó: las ${parts.length} filas (${parts.map((p) => p.rowNumber).join(", ")}) quedan separadas.` });
+    if (new Set(parts.map((p) => norm(p.name))).size > 1) {
+      conflict(`La identificación ${id} aparece con nombres distintos (${parts.map((p) => p.name).join(" / ")}).`);
+      continue;
+    }
+    const codes: NonNullable<PayrollEmployee["entityCodes"]> = {};
+    let codeConflict: string | undefined;
+    for (const slot of ["afp", "eps", "arl", "ccf"] as const) {
+      const values = [...new Set(parts.map((p) => p.entityCodes?.[slot]).filter((c): c is string => !!c))];
+      if (values.length > 1) codeConflict = `La administradora de ${slot.toUpperCase()} cambia entre tramos (${values.join(" / ")}).`;
+      else if (values[0]) codes[slot] = values[0];
+    }
+    if (codeConflict) {
+      conflict(codeConflict);
+      continue;
+    }
+    const exonerated = [...new Set(parts.map((p) => p.parafiscal?.exonerated))];
+    const parafiscal = mergeBase(parts.map((p) => p.parafiscal));
+    const first = parts[0];
+    const sum = (pick: (e: PayrollEmployee) => number) => parts.reduce((n, p) => n + pick(p), 0);
+    merged.set(id, {
+      rowNumber: first.rowNumber,
+      identification: id,
+      name: first.name,
+      pensionDays: sum((p) => p.pensionDays),
+      pensionIbc: sum((p) => p.pensionIbc),
+      pensionContribution: sum((p) => p.pensionContribution),
+      healthContribution: sum((p) => p.healthContribution),
+      ccfContribution: sum((p) => p.ccfContribution),
+      riskContribution: sum((p) => p.riskContribution),
+      totalContribution: sum((p) => p.totalContribution),
+      otherContribution: sumDefined(parts.map((p) => p.otherContribution)),
+      health: mergeBase(parts.map((p) => p.health)),
+      risk: mergeBase(parts.map((p) => p.risk)),
+      ccf: mergeBase(parts.map((p) => p.ccf)),
+      parafiscal: parafiscal && { ...parafiscal, exonerated: exonerated.length === 1 ? exonerated[0] : undefined },
+      entityCodes: codes,
+      novelties: [...new Set(parts.flatMap((p) => p.novelties ?? []))],
+      unreadCodes: [...new Set(parts.flatMap((p) => p.unreadCodes ?? []))].length ? [...new Set(parts.flatMap((p) => p.unreadCodes ?? []))] : undefined,
+      page: first.page,
+      segments: parts,
+    });
+  }
+  const employees: PayrollEmployee[] = [];
+  const done = new Set<string>();
+  for (const e of rows) {
+    const m = merged.get(e.identification);
+    if (!m) employees.push(e);
+    else if (!done.has(e.identification)) {
+      done.add(e.identification);
+      employees.push(m);
+    }
+  }
+  return { employees, issues };
+}
+
 export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
   const pages = doc.pages.map((page) => ({ page, rows: buildPageRows(page) }));
   const has = (heading: string) => pages.some(({ rows }) => findHeading(rows, heading) >= 0);
@@ -751,6 +827,7 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
     if (detail.detectedRows > 0) throw new StatementError(`${MESSAGES.detailRows} Operador detectado: Aportes en Línea; ${detail.detectedRows} fila(s) de empleado ubicadas en la página ${detail.issues[0]?.page ?? 1}. ${detail.issues[0]?.reason ?? ""}`.trim());
     throw new StatementError(detail.issues.length ? `${MESSAGES.noEmployees} ${detail.issues[0].reason}` : MESSAGES.noEmployees);
   }
+  const consolidated = consolidateEmployees(detail.employees);
   if (general.paymentAmount === undefined) throw new StatementError(MESSAGES.payment);
   if (!general.period) throw new StatementError(MESSAGES.period);
   if (!general.paymentDate) throw new StatementError(MESSAGES.paymentDate);
@@ -782,12 +859,12 @@ export function parseAportesEnLinea(doc: PdfDocumentText): PayrollSummary {
     paymentAmount: general.paymentAmount,
     totalContributions,
     lateInterest: general.paymentAmount - totalContributions,
-    employeeCount: detail.employees.length,
+    employeeCount: consolidated.employees.length,
     detectedRows: detail.detectedRows,
-    employees: detail.employees,
+    employees: consolidated.employees,
     detailTotals: detail.totals,
     paymentSummary,
-    issues: detail.issues,
+    issues: [...detail.issues, ...consolidated.issues],
     joinedNames: detail.joinedNames,
   };
 }

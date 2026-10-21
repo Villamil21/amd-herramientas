@@ -21,9 +21,19 @@ export function validatePayroll(s: PayrollSummary): PayrollValidation {
   const { employees, detailTotals: t, paymentSummary: p } = s;
   const checks: PayrollCheck[] = [];
 
+  // Filas físicas ≠ empleados: una persona puede tener varios tramos en la planilla (se consolidan por identificación).
+  const physical = employees.reduce((n, e) => n + (e.segments?.length ?? 1), 0);
+  const consolidatedNote = physical === employees.length ? "" : ` (${formatInteger(physical)} filas físicas interpretadas, ${formatInteger(physical - employees.length)} consolidadas por tener varios tramos)`;
   checks.push(
-    compare("employee-count", "Empleados extraídos = Total Afiliados", employees.length, t.declaredEmployees, (a, b) => `se extrajeron ${formatInteger(a)} empleados y la planilla indica Total Afiliados(${formatInteger(b)}).`),
+    compare("employee-count", "Empleados únicos = Total Afiliados", employees.length, t.declaredEmployees, (a, b) => `se extrajeron ${formatInteger(a)} empleados únicos${consolidatedNote} y la planilla indica Total Afiliados(${formatInteger(b)}).`),
   );
+  if (physical !== employees.length) {
+    checks.push({
+      id: "physical-rows",
+      label: `Filas físicas interpretadas: ${formatInteger(physical)}; empleados únicos consolidados: ${formatInteger(employees.length)}; Total Afiliados declarado: ${t.declaredEmployees === undefined ? "—" : formatInteger(t.declaredEmployees)}`,
+      status: "ok",
+    });
+  }
   checks.push(
     compare("employee-sum", "Suma de Total Aportes por empleado = total de la planilla", sum(employees, (e) => e.totalContribution), s.totalContributions, (a, b) =>
       `La suma de los aportes por empleado (${formatPesos(a)}) no coincide con el total de la planilla (${formatPesos(b)}).`,
@@ -118,8 +128,8 @@ export function validatePayroll(s: PayrollSummary): PayrollValidation {
           label: "Todas las filas interpretadas",
           status: "failed",
           detail:
-            s.detectedRows > s.employees.length
-              ? `Se detectaron ${formatInteger(s.detectedRows)} empleados, pero ${formatInteger(s.detectedRows - s.employees.length)} fila(s) no pudieron interpretarse correctamente.`
+            s.detectedRows > physical
+              ? `Se detectaron ${formatInteger(s.detectedRows)} empleados, pero ${formatInteger(s.detectedRows - physical)} fila(s) no pudieron interpretarse correctamente.`
               : `${s.issues.length} texto(s) de la tabla sin interpretar.`,
         },
   );
