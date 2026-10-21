@@ -51,8 +51,12 @@ export interface EInvoiceRow {
   totalCents: number;
   /** Suma de todas las columnas desde IVA hasta Rete ICA (inclusive). */
   taxesCents: number;
-  /** Base = Total − impuestos y retenciones. */
+  /** Base de Estados Financieros = Total − impuestos y retenciones (IVA … Rete ICA). No cambia. */
   baseCents: number;
+  /** Valor de «IVA» (primera columna del rango), en centavos. */
+  ivaCents: number;
+  /** Cada columna del rango IVA … Rete ICA (en el orden de `taxColumns`), en centavos: sirve para calcular la base de Exógena. */
+  columnCents: number[];
   status: string;
   issue?: string;
 }
@@ -95,10 +99,12 @@ export function readEInvoiceWorkbook(book: Workbook): EInvoiceRead {
       const total = cellAmount(cells[col("total")]);
       let taxes = 0;
       let bad = total === null;
+      const columnCents: number[] = [];
       for (let c = from; c <= to; c++) {
         const v = cellAmount(cells[c]);
         if (v === null) bad = true;
         else taxes += v;
+        columnCents.push(Math.round((v ?? 0) * 100));
       }
       const issueDate = iso(cells[col("fecha emision")]);
       const docType = text(cells[col("tipo de documento")]);
@@ -119,6 +125,8 @@ export function readEInvoiceWorkbook(book: Workbook): EInvoiceRead {
         totalCents,
         taxesCents,
         baseCents: totalCents - taxesCents,
+        ivaCents: columnCents[0] ?? 0,
+        columnCents,
         status: status === undefined ? "" : text(cells[status]),
       };
       if (bad) row.issue = "Hay valores que no son números en Total o en las columnas de impuestos.";
@@ -129,6 +137,46 @@ export function readEInvoiceWorkbook(book: Workbook): EInvoiceRead {
   }
   return { sheets: used.map((u) => u.sheet.name), taxColumns, rows };
 }
+
+// ---------------------------------------------------------------------------
+// Alcance de la base de Exógena (1007): Total − (IVA … ICUI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encabezados que se reconocen como el impuesto «ICUI» (impuesto al consumo de productos ultraprocesados), ya normalizados
+ * (sin tildes, en minúsculas). Es la configuración de la plantilla: si el Excel usa otro nombre y no está aquí, el alcance NO se
+ * adivina: el usuario elige explícitamente hasta qué columna se resta.
+ */
+export const ICUI_HEADER_ALIASES = ["icui", "ic ultraprocesados", "ic ultraprocesado", "icui ultraprocesados", "impuesto al consumo de ultraprocesados", "impuesto al consumo ultraprocesados", "impuesto consumo ultraprocesados", "impuesto al consumo de productos ultraprocesados"];
+
+export interface ExoScope {
+  /** Columnas restadas, desde «IVA» hasta la última (en el orden del Excel). */
+  columns: string[];
+  /** Encabezado con que termina la resta («ICUI» o el equivalente / el elegido por el usuario). */
+  lastColumn: string;
+  resolvedBy: "header" | "manual";
+}
+
+/** Último índice del rango con un encabezado equivalente a ICUI; -1 si el Excel no lo trae. */
+export function icuiIndex(taxColumns: readonly string[]): number {
+  return taxColumns.findIndex((h) => ICUI_HEADER_ALIASES.includes(normalizeKey(h)));
+}
+
+/**
+ * Alcance de la resta del 1007. Con ICUI (o un equivalente configurado) se resuelve solo; si no, solo vale la columna que el
+ * usuario eligió. Sin ninguna de las dos devuelve `undefined`: el 1007 queda pendiente, nunca se asume un alcance.
+ */
+export function resolveExoScope(taxColumns: readonly string[], manualLast?: string): ExoScope | undefined {
+  const auto = icuiIndex(taxColumns);
+  if (auto >= 0) return { columns: taxColumns.slice(0, auto + 1), lastColumn: taxColumns[auto], resolvedBy: "header" };
+  const manual = manualLast ? taxColumns.indexOf(manualLast) : -1;
+  if (manual >= 0) return { columns: taxColumns.slice(0, manual + 1), lastColumn: taxColumns[manual], resolvedBy: "manual" };
+  return undefined;
+}
+
+/** Base del 1007 de un documento = Total − suma de las columnas del alcance (IVA … ICUI). */
+export const exoBaseCents = (row: Pick<EInvoiceRow, "totalCents" | "columnCents">, scope: ExoScope): number =>
+  row.totalCents - row.columnCents.slice(0, scope.columns.length).reduce((a, b) => a + b, 0);
 
 /** ID fuerte del documento: CUFE/CUDE o, sin él, NIT emisor + número. */
 export const einvoiceDocumentId = (r: EInvoiceRow) => r.cufe || `${r.issuerNit}|${r.number}`;

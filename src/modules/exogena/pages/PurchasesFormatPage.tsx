@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleDot, FileDown, MinusCircle, RefreshCcw, ShoppingBag, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDot, FileDown, MinusCircle, Receipt, RefreshCcw, ShoppingBag, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { navigate } from "../../../app/router";
 import { Alert, Badge, Button, Card, EmptyState, Loader, PageHeader, useToast } from "../../../components/ui";
@@ -8,6 +8,9 @@ import { errorMessage } from "../../../services/tauri";
 import { FORMAT_STATUS_LABEL } from "../../../types/exogena";
 import { formatExoCents } from "../domain/numbers";
 import { DEST_LABEL, STATUS_LABEL, STATUS_TONE, type Dest, type DestStatus } from "../../financial-statements/purchases/domain/status";
+import { EinvoiceAuditPanel } from "../components/EinvoiceAuditPanel";
+import { EinvoiceCustomersPanel } from "../components/EinvoiceCustomersPanel";
+import { EinvoiceSalesReconciliation } from "../components/EinvoiceSalesCards";
 import { ExogenaContextBar } from "../components/ExogenaContextBar";
 import { ProblemsPanel } from "../components/ProblemsPanel";
 import { StatusPanel } from "../components/StatusPanel";
@@ -15,13 +18,15 @@ import { auditFileName, buildPurchasesAudit } from "../domain/purchasesAudit";
 import { renderPurchasesAuditPdf } from "../domain/purchasesAuditPdf";
 import { PURCHASES_EXO_SOURCE, PURCHASES_PATH, shouldReopenPurchases, type PurchasesExoFormat } from "../domain/purchasesFormat";
 import { findFormat } from "../domain/formats";
+import { EINVOICE_PATH } from "../domain/einvoiceSales";
+import { useCatalogs } from "../hooks";
 import { useExogenaSelection } from "../state";
 import { usePurchasesFormat } from "../usePurchasesFormat";
 
 const DESCRIPTION: Record<PurchasesExoFormat, string> = {
   "1001": "Pagos o abonos en cuenta por tercero y concepto, con IVA como mayor valor del costo o gasto y retenciones practicadas o asumidas, desde Compras, costos y exógena, más los aportes a entidades de seguridad social de Nómina (por entidad y concepto).",
-  "1005": "IVA descontable por tercero de las compras. Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
-  "1006": "IVA recuperado en devoluciones de compras por tercero. Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
+  "1005": "IVA descontable por tercero de las compras (Compras, costos y exógena) e IVA resultante por devoluciones en ventas (notas crédito de Facturación electrónica). Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
+  "1006": "IVA recuperado en devoluciones de compras (Compras, costos y exógena) e IVA generado por facturas de venta (Facturación electrónica), por tercero. Solo aplica si la empresa era responsable de IVA (responsabilidad 48).",
 };
 
 const STATUS_ICON: Record<DestStatus, typeof XCircle> = { block: XCircle, pending: CircleDot, review: AlertTriangle, ready: CheckCircle2, na: MinusCircle };
@@ -38,6 +43,8 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
   const [syncing, setSyncing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const { format, state, model } = m;
+  const { catalogs } = useCatalogs();
+  const sales = code === "1005" || code === "1006" ? m.sales.contribution : null;
 
   // Un formato «listo» deja de estarlo si cambió su origen: se reabre, nunca se reescribe en silencio.
   useEffect(() => {
@@ -56,9 +63,9 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
         proposals: state.proposals,
         removeMissing: true,
         overwriteManual: overwrite,
-        summary: { sources: code === "1001" ? ["Compras, costos y exógena", "Nómina y seguridad social"] : ["Compras, costos y exógena"], documents: model.totals.documents, lines: model.totals.lines },
+        summary: { sources: code === "1001" ? ["Compras, costos y exógena", "Nómina y seguridad social"] : ["Compras, costos y exógena", "Facturación electrónica"], documents: model.totals.documents, lines: model.totals.lines },
       });
-      await format.reload();
+      await Promise.all([format.reload(), m.sales.reload()]);
       toast(`${outcome.created} nuevos · ${outcome.updated} actualizados · ${outcome.unchanged} sin cambios · ${outcome.removed} retirados.`);
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -71,7 +78,7 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
     if (!m.company || !state || !model || !format.records) return;
     setExporting(true);
     try {
-      const audit = buildPurchasesAudit({ model, format: code, state, records: format.records, company: m.company, year: selection.year, statusLabel: FORMAT_STATUS_LABEL[format.status.status] });
+      const audit = buildPurchasesAudit({ model, format: code, state, records: format.records, company: m.company, year: selection.year, statusLabel: FORMAT_STATUS_LABEL[format.status.status], sales: m.sales.contribution });
       const { bytes } = await renderPurchasesAuditPdf(audit);
       const path = await fileService.savePdf(bytes, auditFileName(m.company.razonSocial, code, selection.year));
       if (path) toast("Auditoría PDF guardada.");
@@ -100,11 +107,16 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
             <Button icon={<ShoppingBag size={15} />} onClick={() => navigate(PURCHASES_PATH)}>
               Abrir Compras, costos y exógena
             </Button>
+            {code !== "1001" && (
+              <Button icon={<Receipt size={15} />} onClick={() => navigate(EINVOICE_PATH)}>
+                Abrir Facturación electrónica
+              </Button>
+            )}
             <Button icon={<FileDown size={15} />} loading={exporting} disabled={!m.ready} onClick={() => void exportAudit()}>
               Auditoría PDF
             </Button>
             <Button variant="primary" icon={<RefreshCcw size={15} />} loading={syncing} disabled={!m.ready || !!state?.notApplicableReason} onClick={() => void sync()}>
-              {code === "1001" ? "Actualizar desde Compras y Nómina" : "Actualizar desde Compras"}
+              {code === "1001" ? "Actualizar desde Compras y Nómina" : "Actualizar desde Compras y Ventas"}
             </Button>
           </>
         }
@@ -138,11 +150,11 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
           <StatusPanel row={format.status} problems={state.problems} onSetStatus={format.setStatus} />
           {state.changes.length > 0 && (
             <Alert tone="warning" title="Hay cambios sin sincronizar">
-              Compras cambió desde la última sincronización. Usa «Actualizar desde Compras».
+              {code === "1001" ? "Compras cambió desde la última sincronización. Usa «Actualizar desde Compras»." : "Compras o Facturación electrónica cambió desde la última sincronización. Usa «Actualizar»."}
             </Alert>
           )}
           {rec?.applicable && (
-            <Card title="Conciliación del IVA" description="IVA descontable 1005 − IVA recuperado 1006 = IVA mayor valor deducible 1001.">
+            <Card title="Conciliación del IVA de compras" description="IVA descontable de compras 1005 − IVA recuperado por devoluciones de compras 1006 = IVA mayor valor deducible 1001. No incluye ventas.">
               <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>
                 <span>
                   1005: <strong>{formatExoCents(rec.discountableCents)}</strong>
@@ -157,7 +169,9 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
               </div>
             </Card>
           )}
+          {sales && !state.notApplicableReason && <EinvoiceSalesReconciliation sales={sales} />}
           <ProblemsPanel problems={state.problems} okText={`Sin pendientes: el ${code} se puede marcar como listo.`} />
+          {sales && m.company && !state.notApplicableReason && <EinvoiceCustomersPanel companyId={m.company.id} year={selection.year} pending={sales.pendingCustomers.filter((c) => c.formats.includes(code as "1005" | "1006"))} catalogs={catalogs} onChanged={m.sales.reload} />}
           <Card flush title={`Registros (${records.length})`}>
             {records.length === 0 ? (
               <EmptyState icon={<ShoppingBag size={20} />} title="Aún no hay registros" description="Actualiza desde Compras, o marca el formato «No aplica» con su justificación." />
@@ -193,6 +207,7 @@ export default function PurchasesFormatPage({ code }: { code: PurchasesExoFormat
               </div>
             )}
           </Card>
+          {sales && !state.notApplicableReason && <EinvoiceAuditPanel format={code as "1005" | "1006"} sales={sales} />}
         </>
       )}
     </>

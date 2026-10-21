@@ -2,6 +2,7 @@ import type { ExoRecord } from "../../../types/exogena";
 import { formatExoCents, formatExoPesos } from "./numbers";
 import { lineLabel, monthName, type DocView, type PurchasesModel } from "../../financial-statements/purchases/domain/model";
 import { DEST_LABEL } from "../../financial-statements/purchases/domain/status";
+import type { EinvoiceContribution } from "./einvoiceSales";
 import type { PurchasesExoFormat, PurchasesFormatState } from "./purchasesFormat";
 
 /**
@@ -40,6 +41,8 @@ export interface PurchasesAudit {
   coverage: { month: string; purchases: number; returns: number; duplicates: number; pending: number; blocked: number }[];
   problems: { level: "Bloquea" | "Advertencia"; message: string }[];
   reconciliation: { label: string; value: string }[] | null;
+  /** Conciliación independiente de ventas (Facturación electrónica): nunca se mezcla con la de compras. */
+  salesReconciliation: { label: string; value: string }[] | null;
   totals: { documents: number; lines: number; pendingLines: number };
 }
 
@@ -57,8 +60,23 @@ function docTrace(d: DocView, format: PurchasesExoFormat, concept: string | null
   return [{ ...base, detail: `${d.kind === "return" ? "Devolución" : "Compra"} · IVA de la factura`, amountCents: Math.abs(d.vatCents) }];
 }
 
-export function buildPurchasesAudit(args: { model: PurchasesModel; format: PurchasesExoFormat; state: PurchasesFormatState; records: ExoRecord[]; company: { razonSocial: string; nit: string }; year: number; statusLabel: string }): PurchasesAudit {
-  const { model, format, state, records, company, year } = args;
+/** Documentos de Facturación electrónica que aportan a un registro de 1005 / 1006 (mismo tercero), con su archivo, hoja y fila. */
+function salesTrace(sales: EinvoiceContribution | null | undefined, format: PurchasesExoFormat, record: ExoRecord): AuditTraceLine[] {
+  if (!sales || (format !== "1005" && format !== "1006")) return [];
+  const own = sales.proposals[format].filter((p) => p.data.docNumber === record.data.docNumber && p.data.docTypeCode === record.data.docTypeCode);
+  return own.flatMap((p) =>
+    (sales.audit[p.sourceKey] ?? []).map((l) => ({
+      invoice: `${l.docType} · ${l.fileName} · ${l.sheet} fila ${l.row}`,
+      date: l.issueDate,
+      file: l.fileName,
+      detail: `Facturación electrónica · ${format === "1006" ? "IVA de la factura (Impuesto generado)" : "IVA de la nota crédito (devolución en ventas)"} · ${l.documentId.slice(0, 12)}`,
+      amountCents: Math.abs(l.ivaCents),
+    })),
+  );
+}
+
+export function buildPurchasesAudit(args: { model: PurchasesModel; format: PurchasesExoFormat; state: PurchasesFormatState; records: ExoRecord[]; company: { razonSocial: string; nit: string }; year: number; statusLabel: string; sales?: EinvoiceContribution | null }): PurchasesAudit {
+  const { model, format, state, records, company, year, sales } = args;
   const changed = new Set(state.changes.map((c) => c.sourceKey));
   const counted = model.docs.filter((d) => d.counts && d.ready[format === "1001" ? "1001" : format]);
   const out: AuditRecord[] = records
@@ -67,12 +85,12 @@ export function buildPurchasesAudit(args: { model: PurchasesModel; format: Purch
     .map((r) => {
       const [, nit = "", concept = ""] = /^third:([^|]+)\|?(.*)$/.exec(r.sourceKey) ?? [];
       const docs = counted.filter((d) => d.supplierNit === nit && (format !== "1005" || d.kind !== "return") && (format !== "1006" || d.kind === "return"));
-      const trace = docs.flatMap((d) => docTrace(d, format, format === "1001" ? concept : null)).filter((t) => t.amountCents !== 0);
+      const trace = [...docs.flatMap((d) => docTrace(d, format, format === "1001" ? concept : null)), ...salesTrace(sales, format, r)].filter((t) => t.amountCents !== 0);
       const values = (format === "1001"
         ? [["Deducible", "deductible"], ["IVA mayor valor deducible", "ivaDeductible"], ["IVA mayor valor no deducible", "ivaNonDeductible"], ["Retención practicada", "retPracticed"], ["Retención asumida", "retAssumed"]]
         : format === "1005"
-          ? [["IVA descontable", "discountable"]]
-          : [["IVA recuperado en devoluciones", "purchaseReturns"]]
+          ? [["IVA descontable (compras)", "discountable"], ["IVA por devoluciones en ventas", "salesReturns"]]
+          : [["IVA recuperado en devoluciones (compras)", "purchaseReturns"], ["IVA generado (ventas)", "generated"]]
       ).map(([label, key]) => ({ label, value: money(r.data[key]) }));
       return { third: thirdName(r.data), document: String(r.data.docNumber ?? nit), concept: format === "1001" ? String(r.data.concept ?? concept) : "", values, trace, outdated: changed.has(r.sourceKey) };
     });
@@ -97,6 +115,13 @@ export function buildPurchasesAudit(args: { model: PurchasesModel; format: Purch
           { label: "Diferencia", value: formatExoCents(rec.differenceCents) },
         ]
       : null,
+    salesReconciliation:
+      sales && (format === "1005" || format === "1006") && (sales.reconciliation.invoiceIvaCents || sales.reconciliation.creditNoteIvaCents)
+        ? [
+            { label: "IVA de Facturas electrónicas → 1006 / Impuesto generado", value: `${formatExoCents(sales.reconciliation.invoiceIvaCents)} → ${formatExoCents(sales.reconciliation.generatedCents)}` },
+            { label: "IVA de Notas de crédito electrónicas → 1005 / IVA por devoluciones en ventas", value: `${formatExoCents(sales.reconciliation.creditNoteIvaCents)} → ${formatExoCents(sales.reconciliation.salesReturnsCents)}` },
+          ]
+        : null,
     totals: { documents: model.totals.documents, lines: model.totals.lines, pendingLines: model.totals.pendingLines },
   };
 }

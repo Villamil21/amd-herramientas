@@ -15,7 +15,7 @@ interface Props {
   blocked: string | null;
   /** Descarga del Excel del submódulo (para «Enviar y descargar»). */
   onExport?: () => Promise<string | null | void>;
-  onSent?: (batchId: number) => void;
+  onSent?: (batchId: number, replaced: boolean) => void;
   /** Título del aviso de duplicado («Este extracto ya fue enviado.»). */
   duplicateTitle?: string;
   replaceLabel?: string;
@@ -68,7 +68,7 @@ export function SendToFs({
       setDuplicate(null);
       setSentBatch(outcome.batchId);
       toast(`Enviado a Estados Financieros (importación #${outcome.batchId}).${outcome.invalidatedPeriods ? " Hay periodos que requieren nueva revisión." : ""}`);
-      onSent?.(outcome.batchId);
+      onSent?.(outcome.batchId, Boolean(input.replace));
       // Solo después de comprobar el envío.
       if (download && onExport) await onExport();
     } catch (e) {

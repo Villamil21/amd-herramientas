@@ -325,7 +325,7 @@ fn dump_financial_statements(conn: &Connection) -> AppResult<FsDump> {
 
 /// Tablas de Información Exógena en orden de dependencias (se restauran en este orden y se vacían en el inverso):
 /// los catálogos con sus ajustes, la auditoría de catálogos y el estado / registros / sincronizaciones por formato.
-const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs", "exo_year_concepts", "exo_year_concept_audit"];
+const EXO_TABLES: &[&str] = &["exo_document_types", "exo_countries", "exo_departments", "exo_municipalities", "exo_catalog_audit", "exo_format_concepts", "exo_format_status", "exo_records", "exo_sync_runs", "exo_year_concepts", "exo_year_concept_audit", "exo_einvoice_docs", "exo_einvoice_customers"];
 
 /// Tablas de Transacciones Cripto en orden de dependencias (se restauran en este orden y se vacían en el inverso).
 const CRYPTO_TABLES: &[&str] = &["crypto_homologations", "crypto_uploads", "crypto_upload_versions", "crypto_rows", "crypto_decisions", "crypto_audit"];
@@ -1751,6 +1751,69 @@ mod tests {
         let older = BackupFile { crypto: None, ..parsed.clone() };
         restore(&mut target, &dir, &dir, &dir, &older).unwrap();
         assert_eq!(crypto::state(&target, 5, 2026).unwrap().rows.len(), 1, "se conserva");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Ventas por facturación electrónica para Exógena (documentos y clientes confirmados) sobreviven a exportar y restaurar,
+    /// y un backup anterior (sin la sección de Exógena) no las borra.
+    #[test]
+    fn einvoice_exogena_survives_backup_and_old_backups_keep_it() {
+        use crate::database::einvoice::{self, EinvoiceCustomer, EinvoiceDocInput, SaveEinvoiceInput};
+        let dir = std::env::temp_dir().join(format!("amd-json-einvoice-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut conn).unwrap();
+        conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (5, 'GESAP SAS', '900111111', 'x', 'x')", []).unwrap();
+        let doc = EinvoiceDocInput {
+            document_id: "cufe-1".into(),
+            issue_date: "2025-06-01".into(),
+            doc_type: "Factura electrónica".into(),
+            doc_type_key: "factura electronica".into(),
+            category: "sale".into(),
+            number: "FE1".into(),
+            file_name: "ventas.xlsx".into(),
+            sheet: "Ventas".into(),
+            row_number: 2,
+            status: String::new(),
+            receiver_nit_raw: "1020304050".into(),
+            receiver_name: "PEREZ ANA".into(),
+            total_cents: 11_900,
+            iva_cents: 1_900,
+            eeff_base_cents: 10_000,
+            eeff_columns: vec!["IVA".into(), "Rete ICA".into()],
+            exo_base_cents: Some(10_000),
+            exo_columns: vec!["IVA".into(), "ICUI".into()],
+        };
+        einvoice::save_docs(&mut conn, &SaveEinvoiceInput { company_id: 5, replace: false, docs: vec![doc] }).unwrap();
+        let customer = EinvoiceCustomer { company_id: 5, doc_number: "1020304050".into(), doc_type_code: "13".into(), dv: String::new(), first_surname: "PEREZ".into(), second_surname: String::new(), first_name: "ANA".into(), other_names: String::new(), business_name: String::new(), confirmed_at: String::new(), updated_at: String::new() };
+        einvoice::save_customer(&conn, &customer).unwrap();
+
+        let file = build(&conn, &dir, &dir, &dir, "1.41.0").unwrap();
+        let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert!(parsed.exogena.as_ref().unwrap().contains_key("exo_einvoice_docs"));
+
+        let mut target = Connection::open_in_memory().unwrap();
+        target.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_pending(&mut target).unwrap();
+        restore(&mut target, &dir, &dir, &dir, &parsed).unwrap();
+        let docs = einvoice::list_docs(&target, 5, 2025).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!((docs[0].exo_base_cents, docs[0].exo_columns.clone(), docs[0].eeff_columns.len()), (Some(10_000), vec!["IVA".to_string(), "ICUI".to_string()], 2));
+        assert_eq!(einvoice::list_customers(&target, 5).unwrap().len(), 1);
+
+        // Un respaldo anterior a Exógena no borra lo que ya hay.
+        let older = BackupFile { exogena: None, ..parsed.clone() };
+        restore(&mut target, &dir, &dir, &dir, &older).unwrap();
+        assert_eq!(einvoice::list_docs(&target, 5, 2025).unwrap().len(), 1, "se conserva");
+        // Un respaldo con Exógena pero sin las tablas nuevas (anterior a esta versión) restaura sin error.
+        let mut legacy = parsed.clone();
+        if let Some(e) = legacy.exogena.as_mut() {
+            e.remove("exo_einvoice_docs");
+            e.remove("exo_einvoice_customers");
+        }
+        restore(&mut target, &dir, &dir, &dir, &legacy).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

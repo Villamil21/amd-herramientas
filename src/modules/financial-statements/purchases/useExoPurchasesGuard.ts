@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { exogenaService } from "../../../services/exogenaService";
+import { loadEinvoiceContribution } from "../../exogena/useEinvoiceSales";
 import { PURCHASES_FORMATS, purchasesFormatState, shouldReopenPurchases } from "../../exogena/domain/purchasesFormat";
 import type { PurchasesModel } from "./domain/model";
 
@@ -19,7 +20,8 @@ export function useExoPurchasesGuard(companyId: number | null, model: PurchasesM
           const row = overview.statuses.find((s) => s.formatCode === format);
           if (!row || row.status !== "listo") continue;
           const stored = await exogenaService.records(companyId, year, format);
-          if (!cancelled && shouldReopenPurchases(row.status, purchasesFormatState(model, format, stored).problems)) await exogenaService.setStatus(companyId, year, format, "requiere_actualizacion");
+          const sales = format === "1005" || format === "1006" ? await loadEinvoiceContribution(companyId, year) : null;
+          if (!cancelled && shouldReopenPurchases(row.status, purchasesFormatState(model, format, stored, undefined, sales).problems)) await exogenaService.setStatus(companyId, year, format, "requiere_actualizacion");
         }
       } catch {
         /* la reapertura se reintenta en el siguiente cambio y la pantalla de Exógena la repite al abrirse */

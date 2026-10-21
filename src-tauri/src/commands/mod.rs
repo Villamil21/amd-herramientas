@@ -8,6 +8,7 @@ pub mod company_documents;
 pub mod concepts;
 pub mod crypto;
 pub mod dropi;
+pub mod einvoice;
 pub mod exogena;
 pub mod files;
 pub mod fs;

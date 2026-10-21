@@ -9,6 +9,7 @@ import { formatDateTimeForDisplay } from "../../../utils/dates";
 import { formatExoCents } from "../domain/numbers";
 import { ExogenaContextBar } from "../components/ExogenaContextBar";
 import { StatusBadge } from "../components/StatusPanel";
+import { Einvoice1007Bases, EinvoiceSalesReconciliation } from "../components/EinvoiceSalesCards";
 import { buildExportWorkbook, exportBlockers, suggestedExportName } from "../domain/exportWorkbook";
 import { IMPLEMENTED_FORMATS } from "../domain/formats";
 import { blocking } from "../domain/problems";
@@ -86,7 +87,12 @@ export default function ControlPage() {
       if (st.notApplicableReason) return <Badge>No aplica</Badge>;
       const n = blocking(st.problems).length;
       const iva = px.model!.reconciliation;
-      if (n === 0 && iva.applicable && iva.differenceCents !== 0) return <Badge tone="danger">IVA: diferencia {formatExoCents(iva.differenceCents)}</Badge>;
+      if (n === 0 && iva.applicable && iva.differenceCents !== 0) return <Badge tone="danger">IVA compras: diferencia {formatExoCents(iva.differenceCents)}</Badge>;
+      const sr = px.sales.contribution?.reconciliation;
+      if (n === 0 && sr && code !== "1001") {
+        const d = code === "1006" ? sr.invoiceIvaCents - sr.generatedCents : sr.creditNoteIvaCents - sr.salesReturnsCents;
+        if (d !== 0) return <Badge tone="danger">IVA ventas: diferencia {formatExoCents(d)}</Badge>;
+      }
       return n === 0 ? <Badge tone="success">Sin pendientes</Badge> : <Badge tone="danger">{n} pendientes</Badge>;
     }
     if (code === "1011" || code === "2276") {
@@ -175,6 +181,8 @@ export default function ControlPage() {
               </table>
             </div>
           </Card>
+          {c7.sales.contribution && <Einvoice1007Bases sales={c7.sales.contribution} />}
+          {px.sales.contribution && <EinvoiceSalesReconciliation sales={px.sales.contribution} />}
           {c8.model && (
             <Card title="Conciliación del 1008" description={`CxC a socios (capital suscrito − pagado) frente al total del formato al 31/12/${selection.year}.`}>
               <div className="row" style={{ gap: 24, flexWrap: "wrap" }}>

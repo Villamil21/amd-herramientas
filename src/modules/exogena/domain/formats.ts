@@ -79,7 +79,7 @@ export const FORMAT_1008_COLUMNS: FormatColumn[] = [
   { key: "balance", header: "Saldo cuentas por cobrar al 31-12", kind: "integer" },
 ];
 
-/** 1007 · Ingresos recibidos (se arma desde Transacciones Cripto → Reporte de operaciones; concepto siempre 4001). */
+/** 1007 · Ingresos recibidos (se arma desde Transacciones Cripto → Reporte de operaciones y desde Ventas → Facturación electrónica; concepto siempre 4001). */
 export const FORMAT_1007_COLUMNS: FormatColumn[] = [
   { key: "concept", header: "Concepto", kind: "text" },
   { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
@@ -149,7 +149,7 @@ export const FORMAT_1001_COLUMNS: FormatColumn[] = [
   { key: "retIvaNonResident", header: "Retención en la fuente practicada IVA a no residentes o no domiciliados", kind: "integer" },
 ];
 
-/** 1005 · Impuesto a las ventas descontable (por tercero, sin conceptos; solo empresas responsables de IVA). */
+/** 1005 · Impuesto a las ventas descontable (por tercero, sin conceptos; solo empresas responsables de IVA). Compras aporta el descontable; las notas crédito de Facturación electrónica, el IVA por devoluciones en ventas. */
 export const FORMAT_1005_COLUMNS: FormatColumn[] = [
   { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
   { key: "docNumber", header: "Número de identificación del informado", kind: "text" },
@@ -164,7 +164,7 @@ export const FORMAT_1005_COLUMNS: FormatColumn[] = [
   { key: "costIva", header: "IVA tratado como mayor valor del costo o gasto", kind: "integer" },
 ];
 
-/** 1006 · Impuesto a las ventas generado e impuesto al consumo (por ahora solo devoluciones de compras; solo empresas responsables de IVA). */
+/** 1006 · Impuesto a las ventas generado e impuesto al consumo (solo empresas responsables de IVA). Compras aporta el IVA recuperado en devoluciones; las facturas de Facturación electrónica, el impuesto generado. */
 export const FORMAT_1006_COLUMNS: FormatColumn[] = [
   { key: "docTypeCode", header: "Tipo de documento", kind: "text" },
   { key: "docNumber", header: "Número de identificación del informado", kind: "text" },

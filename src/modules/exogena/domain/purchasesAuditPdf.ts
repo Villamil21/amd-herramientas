@@ -52,8 +52,12 @@ export async function renderPurchasesAuditPdf(audit: PurchasesAudit): Promise<{ 
   for (const c of audit.coverage) text(`${c.month}: ${c.purchases} compras · ${c.returns} devoluciones · ${c.duplicates} duplicadas · ${c.pending} con pendientes por confirmar · ${c.blocked} bloqueadas`);
 
   if (audit.reconciliation) {
-    heading("Conciliación del IVA (1005 − 1006 = 1001)");
+    heading("Conciliación del IVA de compras (1005 − 1006 = 1001)");
     for (const r of audit.reconciliation) text(`${r.label}: ${r.value}`);
+  }
+  if (audit.salesReconciliation) {
+    heading("Conciliación de ventas · Facturación electrónica (independiente de la de compras)");
+    for (const r of audit.salesReconciliation) text(`${r.label}: ${r.value}`);
   }
 
   heading("Pendientes");
