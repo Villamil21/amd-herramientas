@@ -4,7 +4,7 @@ import { navigate } from "../../../../app/router";
 import { Alert, Badge, Button, Field, Input, Modal, Select, useToast } from "../../../../components/ui";
 import { fsService } from "../../../../services/fsService";
 import { errorMessage } from "../../../../services/tauri";
-import type { BankEditLogEntry, BankPendingEdit, Period } from "../../../../types/fs";
+import type { BankEditLogEntry, BankInterestLogEntry, BankPendingEdit, Period } from "../../../../types/fs";
 import { formatDateForDisplay, formatDateTimeForDisplay } from "../../../../utils/dates";
 import { formatInteger } from "../../../../utils/format";
 import { maskAccount } from "../../generator/checks";
@@ -24,6 +24,9 @@ interface Props {
   statement: ImportedStatement;
   pending: BankPendingEdit[];
   log: BankEditLogEntry[];
+  interestLog: BankInterestLogEntry[];
+  /** Extractos del banco (para saber a cuáles alcanza una regla por banco + concepto). */
+  statements: ImportedStatement[];
   periods: Period[];
   exoInput: BankExoInput | null;
   data: FsData;
@@ -36,13 +39,15 @@ interface Props {
  * conceptos con su clasificación actual. Cada concepto se edita en su fila; el cambio queda como «Actualización pendiente» y solo
  * se aplica a Estados Financieros con «Actualizar Estados Financieros» (sobre este mismo extracto, sin reimportar ni duplicar).
  */
-export function StatementDetail({ statement: s, pending, log, periods, exoInput, data, onClose, onChanged }: Props) {
+export function StatementDetail({ statement: s, pending, log, interestLog, statements, periods, exoInput, data, onClose, onChanged }: Props) {
   const toast = useToast();
   const rows = useMemo(() => buildConceptRows(s, pending, log), [s, pending, log]);
   const [tab, setTab] = useState<"concepts" | "history">("concepts");
   const [drafts, setDrafts] = useState<Record<string, true>>({});
   const [txFor, setTxFor] = useState<ConceptRow | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [interestBusy, setInterestBusy] = useState<string | null>(null);
+  const [interestAsk, setInterestAsk] = useState<{ row: ConceptRow; decision: "confirm" | "reject" | "remove" } | null>(null);
   const editable = s.status === "active";
   const pendingCount = rows.filter((r) => r.pending).length;
 
@@ -61,6 +66,37 @@ export function StatementDetail({ statement: s, pending, log, periods, exoInput,
     } catch (e) {
       toast(errorMessage(e), "error");
     }
+  }
+
+  /** Interés generado (1007): regla por banco + concepto exacto; no toca movimientos, destino, PUC ni GMF. */
+  async function decideInterest(row: ConceptRow, decision: "confirm" | "reject" | "remove", reason: string) {
+    setInterestBusy(row.description);
+    try {
+      const reaches = statements.filter((x) => x.status === "active" && x.lines.some((l) => l.concept === row.description && l.dc === "C"));
+      await fsService.decideBankInterest({
+        companyId: s.companyId,
+        bank: s.bank,
+        concept: row.description,
+        decision,
+        origin: decision === "confirm" && row.interest === "suggested" ? "auto" : "manual",
+        reason,
+        amountCents: row.inflowCents,
+        batchIds: reaches.length > 0 ? reaches.map((x) => x.batchId) : [s.batchId],
+      });
+      toast(decision === "confirm" ? `«${row.description}» entra al 1007 como interés generado.` : decision === "reject" ? `«${row.description}» no se tratará como interés.` : `Se quitó la decisión sobre «${row.description}».`);
+      setInterestAsk(null);
+      await onChanged();
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setInterestBusy(null);
+    }
+  }
+
+  /** Confirmar o rechazar por primera vez es directo; quitar o cambiar una decisión ya guardada pide confirmación. */
+  function askInterest(row: ConceptRow, decision: "confirm" | "reject" | "remove") {
+    if (row.interest === "confirmed" || row.interest === "rejected") setInterestAsk({ row, decision });
+    else void decideInterest(row, decision, "");
   }
 
   async function discard(row: ConceptRow) {
@@ -122,11 +158,11 @@ export function StatementDetail({ statement: s, pending, log, periods, exoInput,
             Conceptos
           </Button>
           <Button size="sm" variant={tab === "history" ? "primary" : "ghost"} icon={<History size={13} />} onClick={() => setTab("history")}>
-            Historial ({s.history.length + log.filter((e) => e.batchId === s.batchId).length})
+            Historial ({s.history.length + log.filter((e) => e.batchId === s.batchId).length + interestLog.filter((e) => e.batchIds.includes(s.batchId)).length})
           </Button>
         </div>
         {tab === "history" ? (
-          <HistoryList statement={s} log={log} />
+          <HistoryList statement={s} log={log} interestLog={interestLog} />
         ) : (
           <div className="table-wrap table-wrap--scroll" style={{ maxHeight: "46vh" }}>
             <table className="table table--dense concept-table">
@@ -139,11 +175,12 @@ export function StatementDetail({ statement: s, pending, log, periods, exoInput,
                   <th>Destino</th>
                   <th>Cuenta PUC</th>
                   <th>GMF / 4x1000</th>
+                  <th style={{ minWidth: 120, whiteSpace: "normal" }}>Interés generado (1007)</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <ConceptRowView key={r.description} row={r} editable={editable} draft={Boolean(drafts[r.description])} data={data} onSave={(next) => void save(r, next)} onDiscard={() => void discard(r)} onOpen={() => setTxFor(r)} />
+                  <ConceptRowView key={r.description} row={r} editable={editable} draft={Boolean(drafts[r.description])} data={data} interestBusy={interestBusy === r.description} onInterest={(d) => askInterest(r, d)} onSave={(next) => void save(r, next)} onDiscard={() => void discard(r)} onOpen={() => setTxFor(r)} />
                 ))}
               </tbody>
             </table>
@@ -186,6 +223,8 @@ export function StatementDetail({ statement: s, pending, log, periods, exoInput,
         </Modal>
       )}
 
+      {interestAsk && <InterestConfirm ask={interestAsk} year={s.periodEnd.slice(0, 4)} busy={interestBusy !== null} onClose={() => setInterestAsk(null)} onConfirm={(reason) => void decideInterest(interestAsk.row, interestAsk.decision, reason)} />}
+
       {confirming && <ApplyConfirm statement={s} rows={rows} periods={periods} exoInput={exoInput} onClose={() => setConfirming(false)} onApplied={onChanged} />}
     </Modal>
   );
@@ -200,12 +239,18 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function HistoryList({ statement: s, log }: { statement: ImportedStatement; log: BankEditLogEntry[] }) {
+const INTEREST_DECISION_TEXT: Record<BankInterestLogEntry["decision"], string> = { confirmed: "confirmado como interés generado (1007)", rejected: "marcado como «No es interés»", removed: "decisión quitada (vuelve a la sugerencia por texto)", changed: "decisión cambiada" };
+const INTEREST_STATE_TEXT: Record<BankInterestLogEntry["previous"], string> = { confirmed: "Es interés", rejected: "No es interés", none: "Sin decisión" };
+
+function HistoryList({ statement: s, log, interestLog }: { statement: ImportedStatement; log: BankEditLogEntry[]; interestLog: BankInterestLogEntry[] }) {
   const entries = [
     ...s.history.map((h) => ({ at: h.at, text: h.text })),
     ...log
       .filter((e) => e.batchId === s.batchId)
       .map((e) => ({ at: e.createdAt, text: `«${e.concept}»: ${destinationText(e.previous.destination ?? "send")} ${e.previous.pucCode ?? ""}${e.previous.isGmf ? " (GMF)" : ""} → ${destinationText(e.next.destination ?? "send")} ${e.next.pucCode ?? ""}${e.next.isGmf ? " (GMF)" : ""}. Valor ${formatExactCents(e.previous.amountCents ?? 0)} → ${formatExactCents(e.next.amountCents ?? 0)}. Motivo: ${e.reason}` })),
+    ...interestLog
+      .filter((e) => e.batchIds.includes(s.batchId) || (e.bank.trim().toUpperCase() === s.bank.trim().toUpperCase() && s.lines.some((l) => l.concept === e.concept)))
+      .map((e) => ({ at: e.createdAt, text: `Interés 1007 · «${e.concept}» ${INTEREST_DECISION_TEXT[e.decision]}: ${INTEREST_STATE_TEXT[e.previous]} → ${INTEREST_STATE_TEXT[e.next]}. Valor ${formatExactCents(e.amountCents)} en ${formatInteger(e.batchIds.length)} extracto${e.batchIds.length === 1 ? "" : "s"}${e.reason ? `. Motivo: ${e.reason}` : ""}` })),
   ].sort((a, b) => a.at.localeCompare(b.at));
   return (
     <ul className="plain-list">
@@ -223,6 +268,8 @@ interface RowProps {
   editable: boolean;
   draft: boolean;
   data: FsData;
+  interestBusy: boolean;
+  onInterest: (decision: "confirm" | "reject" | "remove") => void;
   onSave: (next: { destination: "send" | "skip"; pucCode: string; isGmf: boolean }) => void;
   onDiscard: () => void;
   onOpen: () => void;
@@ -230,7 +277,7 @@ interface RowProps {
 
 const LEGACY_TEXT = "Este extracto se envió antes de guardar su detalle: reimpórtalo con «Reemplazar» para cambiar su destino o el GMF.";
 
-function ConceptRowView({ row: r, editable, draft, data, onSave, onDiscard, onOpen }: RowProps) {
+function ConceptRowView({ row: r, editable, draft, data, interestBusy, onInterest, onSave, onDiscard, onOpen }: RowProps) {
   const toast = useToast();
   const eff = r.effective;
   const destination = draft ? "send" : eff.destination;
@@ -279,7 +326,7 @@ function ConceptRowView({ row: r, editable, draft, data, onSave, onDiscard, onOp
               onSave({ destination: to, pucCode: eff.pucCode, isGmf: to === "send" && eff.isGmf });
             }}
           >
-            <option value="send">Enviar a EEFF</option>
+            <option value="send">EEFF</option>
             <option value="skip">No enviar</option>
           </Select>
         ) : (
@@ -317,6 +364,9 @@ function ConceptRowView({ row: r, editable, draft, data, onSave, onDiscard, onOp
           />
           <span>{eff.isGmf && destination === "send" ? "GMF · 50 % del neto" : r.current.isGmf ? "Sin GMF (pendiente)" : r.gmfLabel}</span>
         </label>
+      </td>
+      <td>
+        <InterestCell row={r} editable={editable} busy={interestBusy} onDecide={onInterest} />
       </td>
     </tr>
   );
@@ -442,6 +492,82 @@ function ApplyConfirm({ statement: s, rows, periods, exoInput, onClose, onApplie
           {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Por qué se corrige la clasificación" />}
         </Field>
         <p className="muted">Se guarda con auditoría: fecha, clasificación y valor anterior y nuevo, motivo y este extracto como origen. Cobertura, saldos, alertas y los formatos 1012, 1007 y 1011 se recalculan desde lo guardado.</p>
+      </div>
+    </Modal>
+  );
+}
+
+/** Interés generado (1007): solo un abono puede serlo; se recuerda por banco + concepto exacto y no depende del destino ni del PUC. */
+function InterestCell({ row: r, editable, busy, onDecide }: { row: ConceptRow; editable: boolean; busy: boolean; onDecide: (decision: "confirm" | "reject" | "remove") => void }) {
+  if (!r.canBeInterest) return <span className="muted">No aplica</span>;
+  if (!r.hasDetail) return <span className="muted">Reimporta el extracto para identificar intereses</span>;
+  const off = !editable;
+  if (r.interest === "suggested")
+    return (
+      <div className="stack stack--sm" style={{ alignItems: "flex-start" }}>
+        <Badge tone="warning">Parece interés</Badge>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <Button size="sm" variant="primary" loading={busy} disabled={off} onClick={() => onDecide("confirm")}>
+            Es interés
+          </Button>
+          <Button size="sm" disabled={off || busy} onClick={() => onDecide("reject")}>
+            No es interés
+          </Button>
+        </div>
+      </div>
+    );
+  if (r.interest === "confirmed")
+    return (
+      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+        <Badge tone="success">Es interés</Badge>
+        <Button size="sm" variant="ghost" loading={busy} disabled={off} onClick={() => onDecide("remove")}>
+          Quitar
+        </Button>
+      </div>
+    );
+  if (r.interest === "rejected")
+    return (
+      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+        <Badge tone="neutral">No es interés</Badge>
+        <Button size="sm" variant="ghost" loading={busy} disabled={off} onClick={() => onDecide("confirm")}>
+          Cambiar
+        </Button>
+      </div>
+    );
+  return (
+    <Button size="sm" variant="ghost" loading={busy} disabled={off} onClick={() => onDecide("confirm")}>
+      Marcar como interés
+    </Button>
+  );
+}
+
+function InterestConfirm({ ask, year, busy, onClose, onConfirm }: { ask: { row: ConceptRow; decision: "confirm" | "reject" | "remove" }; year: string; busy: boolean; onClose: () => void; onConfirm: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  const { row, decision } = ask;
+  const what = decision === "remove" ? `quitar la decisión sobre «${row.description}»` : decision === "confirm" ? `marcar «${row.description}» como interés generado` : `marcar «${row.description}» como «No es interés»`;
+  return (
+    <Modal
+      open
+      size="md"
+      title="Cambiar la decisión sobre el interés"
+      locked={busy}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" loading={busy} onClick={() => onConfirm(reason)}>
+            Confirmar
+          </Button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p>{`Vas a ${what}. La regla vale para todos los extractos de este banco con ese concepto exacto y recalcula el 1007 de ${year}; si el formato estaba cuadrado, vuelve a revisión. No cambia el PUC, el destino ni el GMF.`}</p>
+        <Field label="Motivo (opcional)">
+          {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} />}
+        </Field>
       </div>
     </Modal>
   );

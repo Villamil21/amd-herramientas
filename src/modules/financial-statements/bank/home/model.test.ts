@@ -47,6 +47,8 @@ interface Scenario {
   lifecycles?: BankAccountLifecycle[];
   today?: string;
   log?: BankEditLogEntry[];
+  /** Sustituye las reglas de interés (por defecto: confirmado si `rules`, ninguna si no). */
+  interestRules?: InterestRule[];
 }
 
 function scenario(o: Scenario) {
@@ -54,7 +56,7 @@ function scenario(o: Scenario) {
   const stored = o.specs.map((s) => persist(s, rules));
   const batches = stored.map((s) => s.batch);
   const movements = stored.flatMap((s) => s.movements);
-  const exoInput: BankExoInput = { companyId: 1, year: YEAR, batches, profiles: [profile], gmfRules: rules ? [gmfRule] : [], interestRules: rules ? [interestRule] : [], lifecycles: o.lifecycles ?? [], reviews: [] };
+  const exoInput: BankExoInput = { companyId: 1, year: YEAR, batches, profiles: [profile], gmfRules: rules ? [gmfRule] : [], interestRules: o.interestRules ?? (rules ? [interestRule] : []), lifecycles: o.lifecycles ?? [], reviews: [] };
   const result = buildBankExo(exoInput);
   const statements = buildImportedStatements({ companyId: 1, batches, movements, edits: [], mappings: [], gmfRules: exoInput.gmfRules, interestRules: exoInput.interestRules, alerts: result.alerts });
   const home = buildBankHome({ bank: BANK, year: YEAR, result, statements, pending: o.pending ?? [], monthNa: o.monthNa ?? [], today: o.today ?? "2026-05-15" });
@@ -231,5 +233,70 @@ describe("resumen de confirmación de «Actualizar Estados Financieros»", () =>
     expect([none.periods, none.closed, none.approved]).toEqual([[], [], []]);
     // Un cambio de PUC no mueve ningún formato.
     expect(none.impact.every((i) => !i.changed)).toBe(true);
+  });
+});
+
+describe("interés generado (1007) desde el detalle del extracto", () => {
+  const rejectRule: InterestRule = { ...interestRule, isInterest: false };
+  const INTEREST_OUT = { key: "m", description: "INTERESES MORA PAGADOS", dc: "D" as const, count: 1, totalCents: 900, movements: [mv("2026-01-20", "INTERESES MORA PAGADOS", -900)] };
+  const interestOf = (o: Partial<Scenario> & Pick<Spec, "concepts" | "send">, concept = "ABONO INTERESES AHORROS") => {
+    const { concepts, send, ...rest } = o;
+    const s = scenario({ specs: [{ ...spec(1, "111", "01"), concepts, send }], ...rest });
+    const st = s.statements[0];
+    return { s, st, row: buildConceptRows(st, o.pending ?? [], []).find((r) => r.description === concept)! };
+  };
+
+  it("un abono «ABONO INTERESES AHORROS» sin regla aparece como «Parece interés» y avisa en alertas", () => {
+    const { s, st, row } = interestOf({ rules: false });
+    expect(row).toMatchObject({ interest: "suggested", canBeInterest: true });
+    expect(st.interestCents).toBe(0);
+    expect(st.lines.filter((l) => l.concept === "ABONO INTERESES AHORROS").every((l) => l.interest === "suggested")).toBe(true);
+    expect(s.home.months[0]!.accounts[0]!.reasons.join(" ")).toContain("posible interés");
+  });
+
+  it("confirmarlo lo incluye en el 1007 y en el total de intereses del extracto", () => {
+    const before = interestOf({ rules: false });
+    const after = interestOf({ rules: false, interestRules: [interestRule] });
+    expect(before.s.result.banks[0]!.interestCents).toBe(0);
+    expect(after.row.interest).toBe("confirmed");
+    expect(after.st.interestCents).toBe(500);
+    expect(after.s.result.banks[0]!.interestCents).toBe(500);
+  });
+
+  it("rechazarlo lo excluye del 1007 y evita la sugerencia y la alerta en el mismo banco y concepto", () => {
+    const { s, st, row } = interestOf({ rules: false, interestRules: [rejectRule] });
+    expect(row.interest).toBe("rejected");
+    expect(st.interestCents).toBe(0);
+    expect(s.result.banks[0]!.interestCents).toBe(0);
+    expect(st.lines.some((l) => l.interest === "suggested")).toBe(false);
+    // Un extracto futuro del mismo banco con el mismo concepto ya no se sugiere.
+    const next = scenario({ specs: [spec(1, "111", "01"), spec(2, "111", "02")], rules: false, interestRules: [rejectRule] });
+    expect(next.statements.flatMap((x) => x.lines).some((l) => l.interest === "suggested")).toBe(false);
+    expect(s.home.months[0]!.accounts[0]!.reasons.join(" ")).not.toContain("ABONO INTERESES AHORROS");
+  });
+
+  it("una salida que menciona «interés» no puede ser interés generado", () => {
+    const { row, st } = interestOf({ rules: false, concepts: [COMPRA, INTEREST_OUT] }, "INTERESES MORA PAGADOS");
+    expect(row).toMatchObject({ type: "Salida", canBeInterest: false, interest: "none" });
+    expect(st.interestCents).toBe(0);
+  });
+
+  it("la decisión de interés no cambia PUC, destino, GMF ni cambios pendientes del extracto", () => {
+    const confirmed = interestOf({ rules: false, interestRules: [interestRule] });
+    const rejected = interestOf({ rules: false, interestRules: [rejectRule] });
+    const classify = (x: typeof confirmed) => buildConceptRows(x.st, [], []).map((r) => [r.description, r.current, r.sentCents, r.gmfLabel, r.pending]);
+    expect(classify(confirmed)).toEqual(classify(rejected));
+    expect(confirmed.st.sentCents).toBe(rejected.st.sentCents);
+    expect(confirmed.st.gmfGrossCents).toBe(rejected.st.gmfGrossCents);
+    // El interés sigue yendo a EEFF (421005) además de poder ser 1007.
+    expect(confirmed.row.current).toMatchObject({ destination: "send", pucCode: "421005" });
+  });
+
+  it("funciona en un extracto ya enviado y también si no se envió; un extracto antiguo sin detalle no ofrece la acción", () => {
+    const notSent = interestOf({ rules: false, send: false });
+    expect(notSent.row).toMatchObject({ interest: "suggested", canBeInterest: true, hasDetail: true });
+    const legacy = scenario({ specs: [spec(1, "111", "01")], rules: false });
+    const st = { ...legacy.statements[0]!, legacy: true };
+    expect(buildConceptRows(st, [], [])[0]!.hasDetail).toBe(false);
   });
 });

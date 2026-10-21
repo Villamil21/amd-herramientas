@@ -314,6 +314,7 @@ const FS_TABLES: &[&str] = &[
     "fs_bank_profiles",
     "fs_bank_interest_rules",
     "fs_bank_exo_reviews",
+    "fs_bank_interest_log",
     "fs_bank_pending_edits",
     "fs_bank_edit_log",
     "fs_bank_month_na",
@@ -1276,6 +1277,9 @@ mod tests {
             decisions: vec![],
         };
         fs::send_batch(&mut conn, &input).unwrap();
+        let batch_id = fs::list_batches(&conn, 5).unwrap()[0].id;
+        let decision = crate::models::fs::BankInterestDecisionInput { company_id: 5, bank: "Bancolombia".into(), concept: "ABONO INTERESES AHORROS".into(), decision: "reject".into(), origin: "manual".into(), reason: String::new(), amount_cents: 5_000, batch_ids: vec![batch_id] };
+        fs::decide_bank_interest(&mut conn, &decision).unwrap();
         let file = build(&conn, &dir, &dir, &dir, "1.43.0").unwrap();
         let parsed = parse(&serde_json::to_vec(&file).unwrap()).unwrap();
 
@@ -1285,7 +1289,10 @@ mod tests {
         restore(&mut other, &dir, &dir, &dir, &parsed).unwrap();
         let profiles = fs::list_bank_profiles(&other).unwrap();
         assert_eq!((profiles.len(), profiles[0].nit.as_str(), profiles[0].dv.as_str()), (1, "890903938", "8"));
-        assert_eq!(fs::list_interest_rules(&other).unwrap().len(), 1);
+        let rules = fs::list_interest_rules(&other).unwrap();
+        assert_eq!((rules.len(), rules[0].is_interest), (1, false), "la decisión sobrevive al respaldo");
+        let log = fs::list_bank_interest_log(&other, 5).unwrap();
+        assert_eq!((log.len(), log[0].decision.as_str(), log[0].batch_ids.len()), (1, "changed", 1), "la bitácora también");
         let batches = fs::list_batches(&other, 5).unwrap();
         let exo = batches[0].metadata["exogena"]["concepts"][0]["totalCents"].as_i64();
         assert_eq!(exo, Some(5_000));

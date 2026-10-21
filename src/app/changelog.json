@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.46.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Extractos bancarios → detalle de cada extracto: nueva columna «Interés generado (1007)». Un abono como «ABONO INTERESES AHORROS» aparece como «Parece interés» con las acciones Es interés y No es interés; los confirmados se pueden Quitar y los rechazados Cambiar, sin salir del banco ni volver a la tarjeta de Cobertura y Exógena.",
+      "La decisión se guarda como regla por banco y concepto exacto, actualiza al instante los intereses identificados del extracto y recalcula el formato 1007. No cambia PUC, destino, GMF ni crea movimientos en Estados Financieros; las salidas nunca pueden ser interés generado.",
+      "Quitar o cambiar una decisión pide confirmación con motivo opcional. Cada decisión queda auditada (banco, concepto, decisión, fecha, valor y extractos afectados), se muestra en el Historial del extracto y viaja en el respaldo."
+    ]
+  },
+  {
     "version": "1.45.0",
     "date": "2026-10-21",
     "notes": [

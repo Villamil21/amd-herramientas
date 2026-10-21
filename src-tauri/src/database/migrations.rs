@@ -79,6 +79,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 33, name: "purchase_totals_rule", sql: include_str!("../../migrations/033_purchase_totals_rule.sql"), rebuilds_tables: false },
     Migration { version: 34, name: "bank_exogena", sql: include_str!("../../migrations/034_bank_exogena.sql"), rebuilds_tables: false },
     Migration { version: 35, name: "bank_statement_edits", sql: include_str!("../../migrations/035_bank_statement_edits.sql"), rebuilds_tables: false },
+    Migration { version: 36, name: "bank_interest_log", sql: include_str!("../../migrations/036_bank_interest_log.sql"), rebuilds_tables: false },
 ];
 
 pub fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
@@ -239,7 +240,7 @@ mod tests {
         conn.execute("INSERT INTO suppliers (id, nit, business_name, vat_type, created_at, updated_at) VALUES (7, '900319753', 'PRICESMART', 'purchase', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO companies (id, razon_social, nit, created_at, updated_at) VALUES (1, 'E', '1', 'x', 'x')", []).unwrap();
         conn.execute("INSERT INTO shareholders (id, company_id, name, identity_document, percentage, sort_order, created_at, updated_at) VALUES (3, 1, 'ANA', 'CC 1020', 100, 0, 'x', 'x')", []).unwrap();
-        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string(), "025_tax_adjustments_excess".to_string(), "026_crypto_operations".to_string(), "027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string(), "030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string(), "033_purchase_totals_rule".to_string(), "034_bank_exogena".to_string(), "035_bank_statement_edits".to_string()]);
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["022_exogena_foundation".to_string(), "023_exogena_catalog_seed".to_string(), "024_company_registry_notes_concepts".to_string(), "025_tax_adjustments_excess".to_string(), "026_crypto_operations".to_string(), "027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string(), "030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string(), "033_purchase_totals_rule".to_string(), "034_bank_exogena".to_string(), "035_bank_statement_edits".to_string(), "036_bank_interest_log".to_string()]);
         let (id, nit, status, dv): (i64, String, String, String) = conn
             .query_row("SELECT id, nit, data_status, dv FROM suppliers", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .unwrap();
@@ -267,7 +268,7 @@ mod tests {
         conn.execute("INSERT INTO fs_employees (id, company_id, doc_type, doc_number, name, created_at, updated_at) VALUES (5, 1, 'CC', '1', 'PEREZ GOMEZ JUAN', 'x', 'x')", []).unwrap();
         // Un concepto 1011 personalizado que coincide con uno oficial: la siembra no lo pisa.
         conn.execute("INSERT OR REPLACE INTO exo_format_concepts (format_code, code, description, is_system, is_active, updated_at) VALUES ('1011', '8207', 'MI DESCRIPCIÓN', 0, 1, 'x')", []).unwrap();
-        assert_eq!(run_pending(&mut conn).unwrap(), vec!["030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string(), "033_purchase_totals_rule".to_string(), "034_bank_exogena".to_string(), "035_bank_statement_edits".to_string()]);
+        assert_eq!(run_pending(&mut conn).unwrap(), vec!["030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string(), "033_purchase_totals_rule".to_string(), "034_bank_exogena".to_string(), "035_bank_statement_edits".to_string(), "036_bank_interest_log".to_string()]);
         let (country, dept, muni): (String, String, String) = conn.query_row("SELECT country_code, dept_code, muni_code FROM companies WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((country.as_str(), dept.as_str(), muni.as_str()), ("", "", ""));
         let (first, confirmed): (String, Option<String>) = conn.query_row("SELECT first_surname, name_parts_confirmed_at FROM fs_employees WHERE id = 5", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();

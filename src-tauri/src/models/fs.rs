@@ -869,3 +869,41 @@ pub struct BankMonthNaInput {
     pub month: String,
     pub reason: String,
 }
+
+/// Decisión sobre «interés generado (1007)» tomada desde el detalle de un extracto.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankInterestDecisionInput {
+    pub company_id: i64,
+    pub bank: String,
+    pub concept: String,
+    /// `confirm` (es interés) · `reject` (no es interés) · `remove` (quita la regla y vuelve a la sugerencia por texto).
+    pub decision: String,
+    /// `auto` si el usuario confirma la sugerencia por texto; `manual` en cualquier otro caso.
+    #[serde(default)]
+    pub origin: String,
+    #[serde(default)]
+    pub reason: String,
+    /// Valor del concepto (abonos) en el extracto desde el que se decidió.
+    #[serde(default)]
+    pub amount_cents: i64,
+    /// Extractos vigentes de la empresa con ese banco y concepto a los que alcanza la regla.
+    #[serde(default)]
+    pub batch_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankInterestLogEntry {
+    pub id: i64,
+    pub company_id: i64,
+    pub bank: String,
+    pub concept: String,
+    pub decision: String,
+    pub previous: String,
+    pub next: String,
+    pub amount_cents: i64,
+    pub batch_ids: Vec<i64>,
+    pub reason: String,
+    pub created_at: String,
+}

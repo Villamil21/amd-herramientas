@@ -605,3 +605,28 @@ export interface BankMonthNaInput {
   month: string;
   reason: string;
 }
+
+export interface BankInterestDecisionInput {
+  companyId: number;
+  bank: string;
+  concept: string;
+  decision: "confirm" | "reject" | "remove";
+  origin: "auto" | "manual";
+  reason: string;
+  amountCents: number;
+  batchIds: number[];
+}
+
+export interface BankInterestLogEntry {
+  id: number;
+  companyId: number;
+  bank: string;
+  concept: string;
+  decision: "confirmed" | "rejected" | "removed" | "changed";
+  previous: "confirmed" | "rejected" | "none";
+  next: "confirmed" | "rejected" | "none";
+  amountCents: number;
+  batchIds: number[];
+  reason: string;
+  createdAt: string;
+}

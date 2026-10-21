@@ -129,6 +129,16 @@ pub fn list_fs_bank_month_na(db: State<'_, Db>, company_id: i64) -> AppResult<Ve
 }
 
 #[tauri::command]
+pub fn decide_fs_bank_interest(db: State<'_, Db>, input: BankInterestDecisionInput) -> AppResult<BankInterestLogEntry> {
+    db.with(|c| fs::decide_bank_interest(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_interest_log(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankInterestLogEntry>> {
+    db.with(|c| fs::list_bank_interest_log(c, company_id))
+}
+
+#[tauri::command]
 pub fn save_fs_bank_month_na(db: State<'_, Db>, input: BankMonthNaInput) -> AppResult<()> {
     db.with(|c| fs::save_bank_month_na(c, &input))
 }

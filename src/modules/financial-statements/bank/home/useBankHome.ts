@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../../../../components/ui";
 import { fsService } from "../../../../services/fsService";
 import { errorMessage } from "../../../../services/tauri";
-import type { BankConceptMapping, BankEditLogEntry, BankMonthNa, BankPendingEdit, BatchSummary, GmfRule, InterestRule, Movement, MovementEdit, Period } from "../../../../types/fs";
+import type { BankConceptMapping, BankEditLogEntry, BankInterestLogEntry, BankMonthNa, BankPendingEdit, BatchSummary, GmfRule, InterestRule, Movement, MovementEdit, Period } from "../../../../types/fs";
 import { bankExoInput, reopenReadyBankFormats, useBankExo } from "../exogena/load";
 import { buildImportedStatements, type ImportedStatement } from "../imported/model";
 import { buildBankHome, todayIso } from "./model";
@@ -17,6 +17,7 @@ interface Stored {
   periods: Period[];
   pending: BankPendingEdit[];
   log: BankEditLogEntry[];
+  interestLog: BankInterestLogEntry[];
   monthNa: BankMonthNa[];
 }
 
@@ -32,7 +33,7 @@ export function useBankHome(bank: string, companyId: number | null, year: number
   const load = useCallback(async () => {
     if (companyId === null) return setStored(null);
     try {
-      const [batches, movements, edits, mappings, gmfRules, interestRules, periods, pending, log, monthNa] = await Promise.all([
+      const [batches, movements, edits, mappings, gmfRules, interestRules, periods, pending, log, interestLog, monthNa] = await Promise.all([
         fsService.batches(companyId),
         fsService.movements(companyId),
         fsService.movementEdits(companyId),
@@ -42,9 +43,10 @@ export function useBankHome(bank: string, companyId: number | null, year: number
         fsService.periods(companyId),
         fsService.bankPendingEdits(companyId),
         fsService.bankEditLog(companyId),
+        fsService.bankInterestLog(companyId),
         fsService.bankMonthNa(companyId),
       ]);
-      setStored({ batches, movements, edits, mappings, gmfRules, interestRules, periods, pending, log, monthNa });
+      setStored({ batches, movements, edits, mappings, gmfRules, interestRules, periods, pending, log, interestLog, monthNa });
     } catch (e) {
       toast(errorMessage(e), "error");
     }

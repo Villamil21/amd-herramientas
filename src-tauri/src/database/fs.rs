@@ -970,6 +970,77 @@ pub fn save_interest_rule(conn: &Connection, bank: &str, concept: &str, is_inter
     Ok(())
 }
 
+fn interest_rule_of(conn: &Connection, bank: &str, concept: &str) -> AppResult<&'static str> {
+    let rule: Option<bool> = conn.query_row("SELECT is_interest FROM fs_bank_interest_rules WHERE bank = ?1 AND concept = ?2", params![bank.trim(), concept], |r| r.get(0)).optional()?;
+    Ok(match rule {
+        Some(true) => "confirmed",
+        Some(false) => "rejected",
+        None => "none",
+    })
+}
+
+/// Decide (o revierte) si un concepto es interés generado desde el detalle de un extracto: guarda la regla por banco + concepto
+/// exacto y deja la bitácora. NO toca movimientos, destino, PUC ni GMF: el 1007 se recalcula desde lo guardado.
+pub fn decide_bank_interest(conn: &mut Connection, input: &BankInterestDecisionInput) -> AppResult<BankInterestLogEntry> {
+    let bank = input.bank.trim();
+    let concept = input.concept.as_str();
+    if bank.is_empty() || concept.trim().is_empty() {
+        return Err(AppError::user("Falta el banco o el concepto."));
+    }
+    if !matches!(input.decision.as_str(), "confirm" | "reject" | "remove") {
+        return Err(AppError::user("La decisión sobre el interés no es válida."));
+    }
+    for id in &input.batch_ids {
+        let batch = load_bank_batch(conn, *id)?;
+        if batch.company_id != input.company_id {
+            return Err(AppError::user("El extracto no pertenece a esta empresa."));
+        }
+        if input.decision == "confirm" && payload_concepts(&batch, concept).iter().any(|c| c["dc"].as_str() == Some("D")) {
+            return Err(AppError::user("Una salida no puede clasificarse como interés generado: solo los abonos."));
+        }
+    }
+    let previous = interest_rule_of(conn, bank, concept)?;
+    let next = match input.decision.as_str() {
+        "confirm" => "confirmed",
+        "reject" => "rejected",
+        _ => "none",
+    };
+    if previous == next {
+        return Err(AppError::user("Esa decisión ya está guardada para este concepto."));
+    }
+    let decision = match (input.decision.as_str(), previous) {
+        ("remove", _) => "removed",
+        (_, "none") => next,
+        _ => "changed",
+    };
+    let tx = conn.transaction()?;
+    if next == "none" {
+        tx.execute("DELETE FROM fs_bank_interest_rules WHERE bank = ?1 AND concept = ?2", params![bank, concept])?;
+    } else {
+        let origin = if input.origin == "auto" { "auto" } else { "manual" };
+        save_interest_rule(&tx, bank, concept, next == "confirmed", origin)?;
+    }
+    let now = now_iso();
+    let ids = serde_json::to_string(&input.batch_ids).unwrap_or_else(|_| "[]".into());
+    tx.execute(
+        "INSERT INTO fs_bank_interest_log (company_id, bank, concept, decision, previous, next, amount_cents, batch_ids, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![input.company_id, bank, concept, decision, previous, next, input.amount_cents, ids, input.reason.trim(), now],
+    )?;
+    let id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(BankInterestLogEntry { id, company_id: input.company_id, bank: bank.into(), concept: concept.into(), decision: decision.into(), previous: previous.into(), next: next.into(), amount_cents: input.amount_cents, batch_ids: input.batch_ids.clone(), reason: input.reason.trim().into(), created_at: now })
+}
+
+pub fn list_bank_interest_log(conn: &Connection, company_id: i64) -> AppResult<Vec<BankInterestLogEntry>> {
+    Ok(conn
+        .prepare("SELECT id, company_id, bank, concept, decision, previous, next, amount_cents, batch_ids, reason, created_at FROM fs_bank_interest_log WHERE company_id = ?1 ORDER BY id")?
+        .query_map([company_id], |r| {
+            let ids: String = r.get(8)?;
+            Ok(BankInterestLogEntry { id: r.get(0)?, company_id: r.get(1)?, bank: r.get(2)?, concept: r.get(3)?, decision: r.get(4)?, previous: r.get(5)?, next: r.get(6)?, amount_cents: r.get(7)?, batch_ids: serde_json::from_str(&ids).unwrap_or_default(), reason: r.get(9)?, created_at: r.get(10)? })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
 /// Dígito de verificación de un NIT colombiano (módulo 11 con los primos de la DIAN).
 pub fn nit_dv(nit: &str) -> Option<String> {
     const PRIMES: [u32; 15] = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
@@ -3268,6 +3339,60 @@ mod tests {
         let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
         conn.execute("UPDATE fs_batches SET status = 'replaced' WHERE id = ?1", [batch_id]).unwrap();
         assert!(reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], false)).unwrap_err().0.contains("vigente"));
+    }
+
+    // --- Interés generado (1007) desde el detalle del extracto ---
+
+    fn interest_decision(company_id: i64, concept: &str, decision: &str, batch_ids: &[i64]) -> BankInterestDecisionInput {
+        BankInterestDecisionInput { company_id, bank: "Bancolombia".into(), concept: concept.into(), decision: decision.into(), origin: "auto".into(), reason: String::new(), amount_cents: 500, batch_ids: batch_ids.to_vec() }
+    }
+
+    #[test]
+    fn interest_decisions_persist_the_rule_and_leave_a_log_without_touching_the_statement() {
+        let mut conn = db();
+        let c = company(&conn, "920");
+        let id = edit_statement(&mut conn, c, false);
+        let movements_before = active(&conn, c);
+        let pending_before = list_bank_pending_edits(&conn, c).unwrap().len();
+        let gmf_before = list_gmf_rules(&conn).unwrap().len();
+
+        let confirmed = decide_bank_interest(&mut conn, &interest_decision(c, "INTERESES", "confirm", &[id])).unwrap();
+        assert_eq!((confirmed.decision.as_str(), confirmed.previous.as_str(), confirmed.next.as_str()), ("confirmed", "none", "confirmed"));
+        let rules = list_interest_rules(&conn).unwrap();
+        assert_eq!((rules.len(), rules[0].is_interest, rules[0].origin.as_str()), (1, true, "auto"));
+        // Cambiar la decisión reemplaza la regla y queda como «cambiado».
+        let rejected = decide_bank_interest(&mut conn, &interest_decision(c, "INTERESES", "reject", &[id])).unwrap();
+        assert_eq!((rejected.decision.as_str(), rejected.previous.as_str()), ("changed", "confirmed"));
+        assert!(!list_interest_rules(&conn).unwrap()[0].is_interest);
+        // Repetir la misma decisión no ensucia la bitácora.
+        assert!(decide_bank_interest(&mut conn, &interest_decision(c, "INTERESES", "reject", &[id])).is_err());
+        // Quitar borra la regla (vuelve a la sugerencia por texto).
+        let removed = decide_bank_interest(&mut conn, &interest_decision(c, "INTERESES", "remove", &[id])).unwrap();
+        assert_eq!((removed.decision.as_str(), removed.next.as_str()), ("removed", "none"));
+        assert!(list_interest_rules(&conn).unwrap().is_empty());
+
+        let log = list_bank_interest_log(&conn, c).unwrap();
+        assert_eq!(log.iter().map(|e| e.decision.as_str()).collect::<Vec<_>>(), ["confirmed", "changed", "removed"]);
+        assert_eq!((log[0].batch_ids.clone(), log[0].amount_cents, log[0].bank.as_str()), (vec![id], 500, "Bancolombia"));
+        // Ni movimientos (PUC/destino), ni cambios pendientes, ni reglas GMF se tocaron.
+        assert_eq!(active(&conn, c), movements_before);
+        assert_eq!(list_bank_pending_edits(&conn, c).unwrap().len(), pending_before);
+        assert_eq!(list_gmf_rules(&conn).unwrap().len(), gmf_before);
+    }
+
+    #[test]
+    fn an_outflow_can_never_be_classified_as_interest() {
+        let mut conn = db();
+        let c = company(&conn, "921");
+        let id = edit_statement(&mut conn, c, false);
+        let err = decide_bank_interest(&mut conn, &interest_decision(c, "IMPUESTO GMF", "confirm", &[id])).unwrap_err();
+        assert!(err.0.contains("salida"));
+        assert!(list_interest_rules(&conn).unwrap().is_empty());
+        assert!(list_bank_interest_log(&conn, c).unwrap().is_empty());
+        // Otra empresa, un extracto inexistente o una decisión inválida tampoco pasan.
+        let other = company(&conn, "922");
+        assert!(decide_bank_interest(&mut conn, &interest_decision(other, "INTERESES", "confirm", &[id])).is_err());
+        assert!(decide_bank_interest(&mut conn, &interest_decision(c, "INTERESES", "otra", &[id])).is_err());
     }
 
     // --- Edición por concepto con «Actualización pendiente» ---

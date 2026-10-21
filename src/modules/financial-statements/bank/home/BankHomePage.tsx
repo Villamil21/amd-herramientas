@@ -156,6 +156,8 @@ export default function BankHomePage({ bankId, bankName, focus }: Props) {
               statement={opened.statement}
               pending={h.stored.pending}
               log={h.stored.log}
+              interestLog={h.stored.interestLog}
+              statements={h.statements}
               periods={h.stored.periods}
               exoInput={h.exoInput}
               data={data}

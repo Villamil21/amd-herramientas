@@ -216,6 +216,8 @@ pub fn run() {
             commands::fs::list_fs_bank_profiles,
             commands::fs::save_fs_bank_profile,
             commands::fs::list_fs_bank_exo_reviews,
+            commands::fs::decide_fs_bank_interest,
+            commands::fs::list_fs_bank_interest_log,
             commands::fs::save_fs_bank_exo_review,
             commands::fs::save_fs_bank_gmf_rule,
             commands::fs::add_fs_employment,

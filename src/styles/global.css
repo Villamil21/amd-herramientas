@@ -907,7 +907,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 180px;
+  min-width: 120px;
 }
 
 .date-input__control {
@@ -6354,10 +6354,14 @@ body.is-reordering * {
 }
 
 .concept-table td:nth-child(5) {
-  min-width: 180px;
+  min-width: 120px;
 }
 
 .concept-table .concept-select {
   min-width: 0;
   width: 100%;
+}
+
+.concept-table td:nth-child(1) {
+  max-width: 170px;
 }

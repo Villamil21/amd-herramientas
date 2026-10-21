@@ -150,7 +150,10 @@ export interface ConceptRow {
   effective: Classification;
   state: ConceptState;
   gmfLabel: string;
+  /** Interés generado (1007) del concepto: solo cuenta lo que entra (abonos). */
   interest: InterestState;
+  /** Hay abonos en el concepto: solo así puede ser interés. */
+  canBeInterest: boolean;
   gmf: GmfState;
   ruleText: string;
   /** El extracto guarda el detalle suficiente para cambiar el destino o el GMF (no es de los enviados antes de Exógena). */
@@ -193,7 +196,8 @@ export function buildConceptRows(statement: ImportedStatement, pending: BankPend
       effective,
       state,
       gmfLabel: current.isGmf ? "GMF · 50 % del neto" : sample?.gmf === "suggested" ? "Posible GMF (sin confirmar)" : sample?.gmf === "rejected" ? "No es GMF" : sample?.gmf === "confirmed" ? "GMF confirmado (sin aplicar)" : "—",
-      interest: sample?.interest ?? "none",
+      interest: lines.find((l) => l.dc === "C")?.interest ?? "none",
+      canBeInterest: inn > 0,
       gmf: sample?.gmf ?? "none",
       ruleText,
       hasDetail: !statement.legacy,
