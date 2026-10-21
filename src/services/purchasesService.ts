@@ -4,6 +4,7 @@ import type {
   ExoAlias,
   RateVersion,
   DocFlagKind,
+  TotalChoice,
   LineClassInput,
   PucConcept1001,
   PurchaseRule,
@@ -40,6 +41,11 @@ export const purchasesService = {
   deleteLineClass: (documentId: number, lineIndex: number) => call<void>("delete_purchase_line_class", { documentId, lineIndex }),
   setFlag: (documentId: number, kind: DocFlagKind, value: string) => call<void>("set_purchase_doc_flag", { documentId, kind, value }),
   deleteFlag: (documentId: number, kind: DocFlagKind) => call<void>("delete_purchase_doc_flag", { documentId, kind }),
+  setTotalDecision: (documentId: number, choice: TotalChoice, reason: string, linesCents: number, grossCents: number) =>
+    call<void>("set_purchase_total_decision", { documentId, choice, reason, linesCents, grossCents }),
+  deleteTotalDecision: (documentId: number) => call<void>("delete_purchase_total_decision", { documentId }),
+  setLineOverride: (documentId: number, lineIndex: number, baseCents: number, reason: string) => call<void>("set_purchase_line_override", { documentId, lineIndex, baseCents, reason }),
+  deleteLineOverride: (documentId: number, lineIndex: number) => call<void>("delete_purchase_line_override", { documentId, lineIndex }),
   audit: (buyerNit: string, year: number | null, event: string, detail: Record<string, unknown>) => call<void>("append_purchase_audit", { buyerNit, year, event, detail }),
 
   rules: () => call<PurchaseRule[]>("list_purchase_rules"),

@@ -28,6 +28,7 @@ import { conceptProblem, isNotApplicablePuc, normalizeClassification, productKey
 import { regimeAt, regimeChanged, retentionExemption, vatResponsibleAt, vatYearCoverage, type RegimeAt } from "./history";
 import { computeRetention, ratesNear, type RetentionResult } from "./retention";
 import { ratesAt } from "./rateVersions";
+import { needsResolution, totalCheck, type TotalCheck } from "./totals";
 import { countByDest, DESTS, destStatus, emptyCounts, sortAlerts, type Alert, type AlertTarget, type Dest, type DestCounts, type DestStatus, type Severity } from "./status";
 import { resolveThird, thirdColumns, type ResolvedThird } from "./third";
 
@@ -95,6 +96,10 @@ export interface LineView {
   commonRetentionRateIds: number[];
   pucProblem?: string;
   conceptProblem?: string;
+  /** Ajuste (con signo) para que las líneas sumen el Total Bruto Factura; ya está incluido en `baseCents` y `eeffCents`. */
+  adjustmentCents: number;
+  /** La base de esta línea la corrigió el usuario (el valor leído del PDF se conserva en la auditoría). */
+  overridden: boolean;
 }
 
 export interface DocView {
@@ -120,6 +125,8 @@ export interface DocView {
   ready: Record<Dest, boolean>;
   /** Para una evidencia: diferencias frente a la versión vigente. */
   differences: string[];
+  /** Suma de líneas frente al Total Bruto Factura (nunca el Subtotal). */
+  totalCheck?: TotalCheck;
 }
 
 export interface MonthCoverage {
@@ -258,13 +265,26 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
   const referenceName = company?.razonSocial ?? majorityBuyerName;
   const vatCoverage = input.year === null ? undefined : vatYearCoverage(input.companyVat, input.year);
 
+  const since = state.totalsRuleSince ?? "";
+  const decisionByDoc = new Map((state.totalDecisions ?? []).map((d) => [d.documentId, d]));
+  const overridesByDoc = new Map<number, Map<number, number>>();
+  for (const o of state.lineOverrides ?? []) {
+    const m = overridesByDoc.get(o.documentId) ?? new Map<number, number>();
+    m.set(o.lineIndex, o.baseCents);
+    overridesByDoc.set(o.documentId, m);
+  }
+
   const docs: DocView[] = [];
   for (const doc of state.documents) {
     docs.push(buildDoc(doc));
   }
 
   function buildDoc(doc: PurchaseDocument): DocView {
-    const data = doc.data;
+    const overrides = overridesByDoc.get(doc.id);
+    // Una línea corregida por el usuario reemplaza la lectura del PDF (que no se modifica) y deja de estar «sin leer».
+    const data: ParsedPurchase = overrides?.size
+      ? { ...doc.data, lines: doc.data.lines.map((l) => (overrides.has(l.index) ? { ...l, baseCents: overrides.get(l.index), issue: undefined } : l)) }
+      : doc.data;
     const flags = flagsByDoc.get(doc.id) ?? new Map<string, DocFlag>();
     const kind = kindOfTitle(doc.titleKey);
     const sign = signOf(kind);
@@ -362,16 +382,36 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     const activeLines = data.lines.filter((l) => !isNaLine(l.index));
     const activeVatSum = activeLines.reduce((s, l) => s + (l.vatCents ?? 0), 0);
     const hasActive = activeLines.length > 0 || data.lines.length === 0;
-    if (!unread.length && data.subtotalCents !== undefined && Math.abs(baseSum - data.subtotalCents) > 100) {
-      add({
-        code: "base-mismatch",
-        severity: "review",
-        dests: [...DESTS],
-        title: `Factura ${label}: las líneas no suman el subtotal`,
-        why: `Las líneas suman ${formatMoneyCents(baseSum)} y el subtotal del documento es ${formatMoneyCents(data.subtotalCents)}.`,
-        how: "Revisa la lectura de las líneas contra el PDF antes de confiar en los totales.",
-        target: docTarget,
-      });
+    // La suma de las líneas se compara SOLO con «Total Bruto Factura» (el Subtotal es antes del descuento y no sirve para validar).
+    const legacy = Boolean(since) && (classesByDoc.get(doc.id) ?? []).some((c) => c.confirmedAt && c.confirmedAt < since);
+    const check = totalCheck({ linesCents: baseSum, grossCents: data.grossTotalCents, decision: decisionByDoc.get(doc.id), legacy });
+    if (!unread.length && check.grossCents !== undefined && (needsResolution(check.status) || check.status === "rounding-legacy")) {
+      const stale = check.status === "stale";
+      const dif = `Las líneas suman ${formatMoneyCents(check.linesCents)}, el Total Bruto Factura es ${formatMoneyCents(check.grossCents)} y la diferencia es ${formatMoneyCents(check.differenceCents)}.`;
+      if (check.status === "rounding-legacy") {
+        add({
+          code: "base-mismatch",
+          severity: "info",
+          dests: [],
+          title: `Factura ${label}: redondeo frente al Total Bruto Factura`,
+          why: `${dif} La factura ya estaba confirmada, así que no se ajusta sola.`,
+          how: "Si quieres que prevalezca el Total Bruto Factura, aplícalo desde el detalle de la factura.",
+          target: docTarget,
+          action: "Resolver diferencia",
+        });
+      } else {
+        add({
+          code: "base-mismatch",
+          // Una factura ya confirmada antes de la regla no se bloquea sola: queda para revisión.
+          severity: legacy ? "review" : "block",
+          dests: [...DESTS],
+          title: `Factura ${label}: las líneas no coinciden con el Total Bruto Factura`,
+          why: stale ? `${dif} La factura cambió desde que decidiste cómo resolverla.` : dif,
+          how: "Abre la factura y elige Usar Total Bruto Factura, Usar suma de líneas o Excluir factura; también puedes corregir las líneas mal leídas.",
+          target: docTarget,
+          action: "Resolver diferencia",
+        });
+      }
     }
     if (!unread.length && data.vatCents !== undefined && Math.abs(vatSum - data.vatCents) > 100) {
       add({
@@ -446,12 +486,17 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
     const year = doc.issueDate ? Number(doc.issueDate.slice(0, 4)) : null;
     const conceptsOfYear = input.concepts1001.filter((c) => year === null || c.year === year);
 
+    // El ajuste de redondeo (o la decisión «Usar Total Bruto Factura») va a la línea activa de mayor base: no se crea ninguna línea artificial.
+    const adjustLine = check.adjustmentCents
+      ? activeLines.reduce<(typeof activeLines)[number] | undefined>((best, l) => (!best || (l.baseCents ?? 0) > (best.baseCents ?? 0) ? l : best), undefined)?.index
+      : undefined;
     const lines: LineView[] = data.lines.map((line) => {
       const cls = classByLine.get(`${doc.id}:${line.index}`);
       // O-15 / O-47 en la fecha de la factura: nada propone ni arrastra retención (ni la de reglas ni la de una clasificación vieja).
       const proposed = proposeLine(line, proposalContext);
       const proposal = exemption ? { ...proposed, retention: [] } : proposed;
-      const rawBase = (line.baseCents ?? 0) * sign;
+      const adjustment = line.index === adjustLine ? check.adjustmentCents * sign : 0;
+      const rawBase = ((line.baseCents ?? 0) * sign) + adjustment;
       const rawVat = (line.vatCents ?? 0) * sign;
       const clean = cls ? normalizeClassification(cls) : undefined;
       const na = Boolean(clean && isNotApplicablePuc(clean.pucCode));
@@ -477,6 +522,8 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         practicedCents: 0,
         assumedCents: 0,
         commonRetentionRateIds: [],
+        adjustmentCents: na ? 0 : adjustment,
+        overridden: Boolean(overrides?.has(line.index)),
       };
       if (cls && !na) {
         view.pucProblem = cls.pucCode ? pucProblem(input.pucIndex, cls.pucCode) : "Falta el código PUC.";
@@ -610,6 +657,7 @@ export function buildPurchasesModel(input: PurchasesInput): PurchasesModel {
         alerts: list,
         ready: Object.fromEntries(DESTS.map((d) => [d, !stopped.has(d)])) as Record<Dest, boolean>,
         differences,
+        totalCheck: check,
       };
     }
 

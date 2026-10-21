@@ -1,5 +1,22 @@
 [
   {
+    "version": "1.42.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Compras, costos y exógena: la suma de las líneas se compara con el Total Bruto Factura del PDF (la base después de descuentos) y ya no con el Subtotal, así que las facturas con descuento dejan de alertar por error.",
+      "Diferencias de hasta $10 se tratan como redondeo: no bloquean, prevalece el Total Bruto Factura en Estados Financieros, 1001, 1005, 1006 y auditorías, sin crear líneas artificiales ni tocar el IVA.",
+      "Diferencias mayores bloquean con la acción «Resolver diferencia»: corrige las líneas mal leídas sin salir de Compras y elige Usar Total Bruto Factura, Usar suma de líneas o Excluir factura. La decisión queda con quién, cuándo y por qué, y se pide de nuevo si la factura cambia.",
+      "Las facturas ya confirmadas no se recalculan ni se bloquean solas; las que solo alertaban por el Subtotal quedan registradas en la auditoría. Las decisiones y correcciones viajan en las copias de seguridad."
+    ]
+  },
+  {
+    "version": "1.42.0",
+    "date": "2026-10-21",
+    "notes": [
+      "(Describe aquí las novedades de esta versión)"
+    ]
+  },
+  {
     "version": "1.41.0",
     "date": "2026-10-21",
     "notes": [

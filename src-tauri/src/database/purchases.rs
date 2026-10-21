@@ -93,6 +93,34 @@ pub struct PurchasesState {
     pub line_classes: Vec<LineClass>,
     pub flags: Vec<DocFlag>,
     pub audit: Vec<AuditEntry>,
+    pub total_decisions: Vec<TotalDecision>,
+    pub line_overrides: Vec<LineOverride>,
+    /// Desde cuándo rige la comparación con «Total Bruto Factura» (las facturas confirmadas antes no se recalculan solas).
+    pub totals_rule_since: String,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TotalDecision {
+    pub document_id: i64,
+    pub choice: String,
+    pub lines_cents: i64,
+    pub gross_cents: i64,
+    pub reason: String,
+    pub decided_by: String,
+    pub decided_at: String,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LineOverride {
+    pub document_id: i64,
+    pub line_index: i64,
+    pub base_cents: i64,
+    pub original_cents: Option<i64>,
+    pub reason: String,
+    pub decided_by: String,
+    pub decided_at: String,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -345,7 +373,22 @@ pub fn state(conn: &Connection, buyer_nit: &str, year: Option<i64>) -> AppResult
         .prepare(&format!("SELECT a.id, a.buyer_nit, a.year, a.event, a.detail, a.created_at FROM purchase_audit a WHERE a.buyer_nit = ?1 AND {a} ORDER BY a.id DESC LIMIT 300"))?
         .query_map(params![buyer_nit, mode, y], |r| Ok(AuditEntry { id: r.get(0)?, buyer_nit: r.get(1)?, year: r.get(2)?, event: r.get(3)?, detail: parse_json(r.get(4)?), created_at: r.get(5)? }))?
         .collect::<Result<_, _>>()?;
-    Ok(PurchasesState { uploads, documents, line_classes, flags, audit })
+    let total_decisions = conn
+        .prepare(&format!(
+            "SELECT t.document_id, t.choice, t.lines_cents, t.gross_cents, t.reason, t.decided_by, t.decided_at FROM purchase_total_decisions t JOIN purchase_documents d ON d.id = t.document_id
+             WHERE d.buyer_nit = ?1 AND {d} ORDER BY t.document_id"
+        ))?
+        .query_map(params![buyer_nit, mode, y], |r| Ok(TotalDecision { document_id: r.get(0)?, choice: r.get(1)?, lines_cents: r.get(2)?, gross_cents: r.get(3)?, reason: r.get(4)?, decided_by: r.get(5)?, decided_at: r.get(6)? }))?
+        .collect::<Result<_, _>>()?;
+    let line_overrides = conn
+        .prepare(&format!(
+            "SELECT o.document_id, o.line_index, o.base_cents, o.original_cents, o.reason, o.decided_by, o.decided_at FROM purchase_line_overrides o JOIN purchase_documents d ON d.id = o.document_id
+             WHERE d.buyer_nit = ?1 AND {d} ORDER BY o.document_id, o.line_index"
+        ))?
+        .query_map(params![buyer_nit, mode, y], |r| Ok(LineOverride { document_id: r.get(0)?, line_index: r.get(1)?, base_cents: r.get(2)?, original_cents: r.get(3)?, reason: r.get(4)?, decided_by: r.get(5)?, decided_at: r.get(6)? }))?
+        .collect::<Result<_, _>>()?;
+    let totals_rule_since = crate::database::get_setting(conn, "purchases.totals_rule_since")?.unwrap_or_default();
+    Ok(PurchasesState { uploads, documents, line_classes, flags, audit, total_decisions, line_overrides, totals_rule_since })
 }
 
 pub fn list_scopes(conn: &Connection) -> AppResult<Vec<PurchaseScope>> {
@@ -769,6 +812,71 @@ pub fn set_doc_flag(conn: &Connection, document_id: i64, kind: &str, value: &str
     audit(conn, &nit, year, "flag", &serde_json::json!({ "documentId": document_id, "kind": kind, "value": value }))
 }
 
+fn decided_by() -> String {
+    std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default()
+}
+
+fn document_scope(conn: &Connection, document_id: i64) -> AppResult<(String, Option<i64>, String)> {
+    conn.query_row("SELECT buyer_nit, year, file_name FROM purchase_documents WHERE id = ?1", [document_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()?
+        .ok_or_else(|| AppError::user("La factura no existe o fue eliminada."))
+}
+
+/// Decisión del usuario cuando las líneas no coinciden con el Total Bruto Factura (diferencia mayor a la tolerancia).
+/// Se guarda con los valores comparados, quién y cuándo; «excluir» además excluye la factura.
+pub fn set_total_decision(conn: &mut Connection, document_id: i64, choice: &str, reason: &str, lines_cents: i64, gross_cents: i64) -> AppResult<()> {
+    if !["gross", "lines", "exclude"].contains(&choice) {
+        return Err(AppError::user("La decisión no es válida."));
+    }
+    let (nit, year, file) = document_scope(conn, document_id)?;
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    let by = decided_by();
+    tx.execute(
+        "INSERT INTO purchase_total_decisions (document_id, choice, lines_cents, gross_cents, reason, decided_by, decided_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(document_id) DO UPDATE SET choice = excluded.choice, lines_cents = excluded.lines_cents, gross_cents = excluded.gross_cents, reason = excluded.reason, decided_by = excluded.decided_by, decided_at = excluded.decided_at",
+        params![document_id, choice, lines_cents, gross_cents, reason.trim(), by, now],
+    )?;
+    if choice == "exclude" {
+        tx.execute(
+            "INSERT INTO purchase_doc_flags (document_id, kind, value, decided_at) VALUES (?1, 'exclude', '1', ?2) ON CONFLICT(document_id, kind) DO UPDATE SET value = '1', decided_at = excluded.decided_at",
+            params![document_id, now],
+        )?;
+    }
+    audit(&tx, &nit, year, "Diferencia de totales resuelta", &serde_json::json!({ "documentId": document_id, "file": file, "choice": choice, "linesCents": lines_cents, "grossTotalCents": gross_cents, "differenceCents": gross_cents - lines_cents, "reason": reason.trim(), "decidedBy": by }))?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_total_decision(conn: &Connection, document_id: i64) -> AppResult<()> {
+    let (nit, year, file) = document_scope(conn, document_id)?;
+    conn.execute("DELETE FROM purchase_total_decisions WHERE document_id = ?1", [document_id])?;
+    audit(conn, &nit, year, "Decisión de totales retirada", &serde_json::json!({ "documentId": document_id, "file": file, "decidedBy": decided_by() }))
+}
+
+/// Corrige la base de una línea mal leída. El valor leído del PDF se conserva (`original_cents`) para auditoría.
+pub fn set_line_override(conn: &Connection, document_id: i64, line_index: i64, base_cents: i64, reason: &str) -> AppResult<()> {
+    let (nit, year, file) = document_scope(conn, document_id)?;
+    let original: Option<i64> = conn
+        .query_row("SELECT json_extract(l.value, '$.baseCents') FROM purchase_documents d, json_each(d.data, '$.lines') l WHERE d.id = ?1 AND json_extract(l.value, '$.index') = ?2", params![document_id, line_index], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let now = now_iso();
+    let by = decided_by();
+    conn.execute(
+        "INSERT INTO purchase_line_overrides (document_id, line_index, base_cents, original_cents, reason, decided_by, decided_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(document_id, line_index) DO UPDATE SET base_cents = excluded.base_cents, reason = excluded.reason, decided_by = excluded.decided_by, decided_at = excluded.decided_at",
+        params![document_id, line_index, base_cents, original, reason.trim(), by, now],
+    )?;
+    audit(conn, &nit, year, "Línea corregida", &serde_json::json!({ "documentId": document_id, "file": file, "lineIndex": line_index, "originalCents": original, "baseCents": base_cents, "reason": reason.trim(), "decidedBy": by }))
+}
+
+pub fn delete_line_override(conn: &Connection, document_id: i64, line_index: i64) -> AppResult<()> {
+    let (nit, year, file) = document_scope(conn, document_id)?;
+    conn.execute("DELETE FROM purchase_line_overrides WHERE document_id = ?1 AND line_index = ?2", params![document_id, line_index])?;
+    audit(conn, &nit, year, "Corrección de línea retirada", &serde_json::json!({ "documentId": document_id, "file": file, "lineIndex": line_index, "decidedBy": decided_by() }))
+}
+
 pub fn delete_doc_flag(conn: &Connection, document_id: i64, kind: &str) -> AppResult<()> {
     conn.execute("DELETE FROM purchase_doc_flags WHERE document_id = ?1 AND kind = ?2", params![document_id, kind])?;
     Ok(())
@@ -913,6 +1021,48 @@ mod tests {
 
     pub fn upload(c: &mut Connection, files: Vec<PurchaseDocFileInput>) -> SavePurchaseUploadOutcome {
         save_upload(c, &SavePurchaseUploadInput { folder_name: "Mayo".into(), buyer_nit: "901748281".into(), files, summary: serde_json::json!({}) }).unwrap()
+    }
+
+    #[test]
+    fn total_decisions_and_line_overrides_persist_with_audit() {
+        let mut c = db();
+        let mut f = file("a.pdf", "COFE1", "2026-05-10", 1000);
+        f.data = serde_json::json!({ "lines": [{ "index": 0, "baseCents": 900 }, { "index": 1, "baseCents": 50 }], "grossTotalCents": 1000 });
+        let id = upload(&mut c, vec![f]).documents[0].id;
+        set_line_override(&c, id, 0, 950, "mal leída").unwrap();
+        set_line_override(&c, id, 0, 960, "otra vez").unwrap();
+        set_total_decision(&mut c, id, "gross", "verificado", 1010, 1000).unwrap();
+        let st = state(&c, "901748281", Some(2026)).unwrap();
+        assert_eq!(st.line_overrides.len(), 1);
+        // El valor leído del PDF se conserva aunque se corrija dos veces.
+        assert_eq!((st.line_overrides[0].base_cents, st.line_overrides[0].original_cents), (960, Some(900)));
+        assert_eq!((st.total_decisions[0].choice.as_str(), st.total_decisions[0].lines_cents, st.total_decisions[0].gross_cents), ("gross", 1010, 1000));
+        assert!(!st.total_decisions[0].decided_at.is_empty());
+        assert!(!st.totals_rule_since.is_empty());
+        let events: Vec<&str> = st.audit.iter().map(|a| a.event.as_str()).collect();
+        assert!(events.contains(&"Línea corregida") && events.contains(&"Diferencia de totales resuelta"));
+        // Excluir también deja la factura excluida.
+        set_total_decision(&mut c, id, "exclude", "no es nuestra", 1010, 1000).unwrap();
+        assert!(state(&c, "901748281", Some(2026)).unwrap().flags.iter().any(|f| f.kind == "exclude"));
+        assert!(set_total_decision(&mut c, id, "otra", "x", 1, 1).is_err());
+        delete_total_decision(&c, id).unwrap();
+        delete_line_override(&c, id, 0).unwrap();
+        let st = state(&c, "901748281", Some(2026)).unwrap();
+        assert!(st.total_decisions.is_empty() && st.line_overrides.is_empty());
+    }
+
+    /// La migración deja trazabilidad de las facturas que solo estaban alertadas por compararse con el Subtotal.
+    #[test]
+    fn totals_rule_migration_audits_documents_only_alerted_by_subtotal() {
+        let mut c = db();
+        let mut ok = file("ok.pdf", "COFE1", "2026-05-10", 1000);
+        ok.data = serde_json::json!({ "lines": [{ "index": 0, "baseCents": 2217567 }], "subtotalCents": 16390000, "grossTotalCents": 2217567 });
+        let mut bad = file("bad.pdf", "COFE2", "2026-05-11", 1000);
+        bad.data = serde_json::json!({ "lines": [{ "index": 0, "baseCents": 1000000 }], "subtotalCents": 1000000, "grossTotalCents": 1500000 });
+        upload(&mut c, vec![ok, bad]);
+        c.execute_batch(include_str!("../../migrations/033_purchase_totals_rule.sql")).unwrap();
+        let detail: String = c.query_row("SELECT detail FROM purchase_audit WHERE event = 'Regla de totales corregida'", [], |r| r.get(0)).unwrap();
+        assert!(detail.contains("ok.pdf") && !detail.contains("bad.pdf"), "{detail}");
     }
 
     #[test]

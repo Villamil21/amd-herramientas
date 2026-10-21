@@ -339,6 +339,8 @@ const PURCHASE_TABLES: &[&str] = &[
     "purchase_documents",
     "purchase_line_class",
     "purchase_doc_flags",
+    "purchase_total_decisions",
+    "purchase_line_overrides",
     "purchase_audit",
     "company_vat_history",
     "supplier_fiscal_history",
@@ -1102,6 +1104,9 @@ pub fn restore(conn: &mut Connection, logos_dir: &Path, signatures_dir: &Path, d
                 crate::database::set_setting(&tx, k, v)?;
             }
         }
+        // Un respaldo anterior a la regla del Total Bruto Factura no trae la fecha desde la que rige: se fija ahora, así lo ya
+        // confirmado queda como «anterior a la regla» y no se recalcula solo.
+        tx.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('purchases.totals_rule_since', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))", [])?;
         if let Some(data) = &file.exogena {
             restore_tables(&tx, EXO_TABLES, data, "La información de Exógena del backup está dañada o incompleta.")?;
         } else if let Some(mut data) = kept_exogena {
@@ -1852,6 +1857,9 @@ mod tests {
         purchases::save_line_classes(&mut conn, &[purchases::LineClassInput { document_id: up.documents[0].id, line_index: 0, puc_code: "613505".into(), concept_1001: "5004".into(), retention: serde_json::json!([]), save_rule: true, supplier_nit: "900319753".into(), product_key: "p".into(), product_label: "P".into() }]).unwrap();
         tax_profiles::save_vat_entry(&conn, &tax_profiles::CompanyVatEntryInput { company_id: 5, effective_date: "2024-08-05".into(), responsible: true, source: "rut".into(), note: String::new() }).unwrap();
         tax_profiles::set_puc_concept(&conn, "613505", Some("5004")).unwrap();
+        // Decisiones de totales y correcciones de línea también viajan en el backup.
+        purchases::set_line_override(&conn, up.documents[0].id, 0, 777, "mal leída").unwrap();
+        purchases::set_total_decision(&mut conn, up.documents[0].id, "lines", "verificado", 777, 800).unwrap();
 
         let backup = build(&conn, &dir, &dir, &dir, "1.41.0").unwrap();
         let parsed = parse(&serde_json::to_vec(&backup).unwrap()).unwrap();
@@ -1863,6 +1871,8 @@ mod tests {
         restore(&mut target, &dir, &dir, &dir, &parsed).unwrap();
         let state = purchases::state(&target, "901748281", Some(2026)).unwrap();
         assert_eq!((state.documents.len(), state.line_classes.len()), (1, 1));
+        assert_eq!((state.total_decisions.len(), state.line_overrides.len()), (1, 1), "decisiones de totales y correcciones de línea");
+        assert_eq!(state.total_decisions[0].choice, "lines");
         assert_eq!(purchases::list_rules(&target).unwrap().len(), 1);
         let aliases = crate::database::catalog_extras::list_aliases(&target, None).unwrap();
         assert!(aliases.iter().any(|a| a.kind == "document_type" && a.alias_key == "CEDEXT" && a.target == "22"), "alias de tipo de documento");
@@ -1875,6 +1885,7 @@ mod tests {
         let older = BackupFile { purchases: None, ..parsed.clone() };
         restore(&mut target, &dir, &dir, &dir, &older).unwrap();
         assert_eq!(purchases::state(&target, "901748281", None).unwrap().documents.len(), 1, "se conserva");
+        assert_eq!(purchases::state(&target, "901748281", None).unwrap().total_decisions.len(), 1, "las decisiones se conservan con un respaldo anterior");
         assert_eq!(tax_profiles::list_vat_history(&target, None).unwrap().len(), 1, "el historial de IVA de la empresa devuelta se conserva");
         std::fs::remove_dir_all(&dir).unwrap();
     }

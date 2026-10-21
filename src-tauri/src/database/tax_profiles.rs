@@ -584,7 +584,7 @@ mod tests {
         }
         c.execute("INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at, fiscal_regime) VALUES ('1', 'A', 'purchase', 'x', 'x', 'O-15')", []).unwrap();
         c.execute("INSERT INTO suppliers (nit, business_name, vat_type, created_at, updated_at) VALUES ('2', 'B', 'purchase', 'x', 'x')", []).unwrap();
-        assert_eq!(migrations::run_pending(&mut c).unwrap(), vec!["027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string(), "030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string()]);
+        assert_eq!(migrations::run_pending(&mut c).unwrap(), vec!["027_purchases_costs_exogena".to_string(), "028_rate_versions_aliases".to_string(), "029_document_type_aliases".to_string(), "030_payroll_social_security".to_string(), "031_puc_group_mappings".to_string(), "032_einvoice_exogena".to_string(), "033_purchase_totals_rule".to_string()]);
         let h = list_fiscal_history(&c, None).unwrap();
         assert_eq!((h.len(), h[0].supplier_nit.as_str(), h[0].effective_date.as_str()), (1, "1", "1900-01-01"));
         let n: i64 = c.query_row("SELECT COUNT(*) FROM suppliers", [], |r| r.get(0)).unwrap();

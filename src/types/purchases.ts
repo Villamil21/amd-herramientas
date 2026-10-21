@@ -151,6 +151,33 @@ export interface PurchasesState {
   lineClasses: LineClass[];
   flags: DocFlag[];
   audit: AuditEntry[];
+  totalDecisions?: TotalDecision[];
+  lineOverrides?: LineOverride[];
+  /** Desde cuándo rige la comparación con «Total Bruto Factura»; las facturas confirmadas antes no se ajustan solas. */
+  totalsRuleSince?: string;
+}
+
+export type TotalChoice = "gross" | "lines" | "exclude";
+
+export interface TotalDecision {
+  documentId: number;
+  choice: TotalChoice;
+  /** Valores comparados al decidir; si cambian, la decisión deja de valer. */
+  linesCents: number;
+  grossCents: number;
+  reason: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+
+export interface LineOverride {
+  documentId: number;
+  lineIndex: number;
+  baseCents: number;
+  originalCents: number | null;
+  reason: string;
+  decidedBy: string;
+  decidedAt: string;
 }
 
 export interface PurchaseScope {

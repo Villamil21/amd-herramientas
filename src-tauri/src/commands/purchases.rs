@@ -170,3 +170,23 @@ pub fn copy_exo_year_concepts(db: State<'_, Db>, format_code: String, from_year:
 pub fn list_exo_year_concept_audit(db: State<'_, Db>, format_code: String, year: Option<i64>, limit: i64) -> AppResult<Vec<YearConceptAudit>> {
     db.with(|c| tax_profiles::list_year_concept_audit(c, &format_code, year, limit))
 }
+
+#[tauri::command]
+pub fn set_purchase_total_decision(db: State<'_, Db>, document_id: i64, choice: String, reason: String, lines_cents: i64, gross_cents: i64) -> AppResult<()> {
+    db.with(|c| purchases::set_total_decision(c, document_id, &choice, &reason, lines_cents, gross_cents))
+}
+
+#[tauri::command]
+pub fn delete_purchase_total_decision(db: State<'_, Db>, document_id: i64) -> AppResult<()> {
+    db.with(|c| purchases::delete_total_decision(c, document_id))
+}
+
+#[tauri::command]
+pub fn set_purchase_line_override(db: State<'_, Db>, document_id: i64, line_index: i64, base_cents: i64, reason: String) -> AppResult<()> {
+    db.with(|c| purchases::set_line_override(c, document_id, line_index, base_cents, &reason))
+}
+
+#[tauri::command]
+pub fn delete_purchase_line_override(db: State<'_, Db>, document_id: i64, line_index: i64) -> AppResult<()> {
+    db.with(|c| purchases::delete_line_override(c, document_id, line_index))
+}

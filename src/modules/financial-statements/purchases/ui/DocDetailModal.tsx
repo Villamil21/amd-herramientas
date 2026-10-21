@@ -9,7 +9,9 @@ import { PROPOSAL_SOURCE_LABEL, proposalSourceText } from "../domain/classify";
 import { lineLabel, type DocView, type LineView } from "../domain/model";
 import type { PurchasesData } from "../usePurchasesData";
 import { confirmProposalsLabel, proposableLines, PROPOSALS_INCLUDE, proposalInputs } from "../domain/lineDraft";
+import { needsResolution } from "../domain/totals";
 import { LineClassifyModal } from "./LineClassifyModal";
+import { TotalResolveModal } from "./TotalResolveModal";
 import { StatusChip } from "./StatusStrip";
 
 interface Props {
@@ -28,6 +30,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
   const toast = useToast();
   const [editing, setEditing] = useState<number | null>(null);
   const [excludeAsk, setExcludeAsk] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -74,7 +77,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
       title={`${parsed.title} ${parsed.number ?? ""}`.trim()}
       description={`${doc.issuerName} · NIT ${doc.issuerNit} · ${doc.issueDate ?? "sin fecha"} · ${view.kind === "return" ? "Devolución (resta)" : view.kind === "purchase" ? "Compra" : "Encabezado sin clasificar"} · ${doc.fileName}`}
       onClose={onClose}
-      locked={busy || editing !== null}
+      locked={busy || editing !== null || resolving}
       footer={<Button onClick={onClose}>Cerrar</Button>}
     >
       <div className="stack">
@@ -91,7 +94,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
 
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <span>
-            Comprador: <strong>{doc.buyerName}</strong> ({doc.buyerNit}) · Subtotal <strong>{formatMoneyCents(view.baseCents * view.sign)}</strong> · IVA <strong>{formatMoneyCents(view.vatCents * view.sign)}</strong> · Retención informada <strong>{formatMoneyCents(parsed.retefuenteCents ?? 0)}</strong>
+            Comprador: <strong>{doc.buyerName}</strong> ({doc.buyerNit}) · Base de las líneas <strong>{formatMoneyCents(view.baseCents * view.sign)}</strong> · IVA <strong>{formatMoneyCents(view.vatCents * view.sign)}</strong> · Retención informada <strong>{formatMoneyCents(parsed.retefuenteCents ?? 0)}</strong>
             {view.retention.invoiceLevelCents > 0 && (
               <>
                 {" "}· Retención común de la factura <strong>{formatMoneyCents(view.retention.invoiceLevelCents)}</strong> (una sola vez)
@@ -99,7 +102,17 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
             )}
           </span>
         </div>
+        {view.totalCheck && (view.totalCheck.status === "rounding" || (view.totalCheck.status === "resolved" && view.totalCheck.adjustmentCents !== 0)) && (
+          <div className="field__hint">
+            {view.totalCheck.status === "rounding" ? "Ajuste de redondeo aplicado: prevalece Total Bruto Factura" : "Se aplicó el Total Bruto Factura por decisión del usuario"} (líneas {formatMoneyCents(view.totalCheck.linesCents * view.sign)} · Total Bruto {formatMoneyCents((view.totalCheck.grossCents ?? 0) * view.sign)} · ajuste {formatMoneyCents(view.totalCheck.adjustmentCents * view.sign)}).
+          </div>
+        )}
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {view.totalCheck && (needsResolution(view.totalCheck.status) || view.totalCheck.status === "rounding-legacy" || view.totalCheck.status === "resolved") && (
+            <Button variant={needsResolution(view.totalCheck.status) ? "primary" : "secondary"} loading={busy} onClick={() => setResolving(true)}>
+              {view.totalCheck.status === "resolved" ? "Ver decisión de totales" : "Resolver diferencia"}
+            </Button>
+          )}
           {view.alerts.some((a) => a.code === "name-mismatch") && (
             <Button icon={<Check size={14} />} loading={busy} onClick={() => void flag("name_confirm")}>
               Confirmar que es de esta empresa
@@ -167,6 +180,7 @@ export function DocDetailModal({ data, view, focusLine, onClose }: Props) {
           </table>
         </div>
       </div>
+      {resolving && <TotalResolveModal data={data} view={view} run={run} busy={busy} onClose={() => setResolving(false)} />}
       <ConfirmDialog
         open={excludeAsk}
         title="Excluir factura"
