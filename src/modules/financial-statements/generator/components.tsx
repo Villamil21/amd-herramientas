@@ -38,6 +38,15 @@ export function StatementView({ title, rows, lines }: { title: string; rows: Sta
           {rows.map((r, i) => {
             if (r.kind === "gap") return <tr key={i} className="fs-row--gap"><td colSpan={3} /></tr>;
             // Títulos y encabezados usan todo el ancho; totales y resultados, el ancho de Concepto + NOTA. Solo las cuentas llevan NOTA.
+            // El encabezado de un grupo con nota lleva el número en la columna NOTA (una sola vez por grupo).
+            if (r.kind === "header" && r.note !== undefined)
+              return (
+                <tr key={i} className="fs-row--header">
+                  <td>{r.label}</td>
+                  <td style={{ textAlign: "center" }}>{r.note}</td>
+                  <td />
+                </tr>
+              );
             if (r.kind === "title" || r.kind === "header")
               return (
                 <tr key={i} className={`fs-row--${r.kind}`}>

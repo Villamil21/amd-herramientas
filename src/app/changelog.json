@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.48.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Notas Financieras: las notas específicas ahora son por grupo contable (Disponible, Propiedades planta y equipo, Pasivo corriente y no corriente, Capital social, Resultados, Ingresos, Gastos de administración, Gastos de ventas y Otros gastos) con numeración automática y consecutiva: un grupo que no aplica no consume número. El número aparece una sola vez, en el encabezado del grupo en los Estados Financieros, y es el mismo en las notas y en el PDF.",
+      "Notas Financieras: la presentación (incluida DR) es la misma de los Estados Financieros. Las notas de carácter general se leen de Empresas y ya no se editan aquí. El formulario de empresa y período se adapta al ancho sin superposiciones, y el contador se elige en esta pantalla.",
+      "PDF de notas: tablas con líneas finas, año sobre los valores, nombres en cursiva y fila TOTAL sombreada; párrafos justificados; las notas específicas inician en página nueva; las notas sin saldos muestran «Durante el período no se registraron saldos en esta partida.»; el logo queda igual que en los EEFF y se agrega al final la página «Certificación a los Estados Financieros». No cambian cifras ni clasificación contable."
+    ]
+  },
+  {
     "version": "1.47.4",
     "date": "2026-10-21",
     "notes": [

@@ -7,6 +7,7 @@ import {
   type BankBalance,
   type FsCatalog,
   type FsLine,
+  type FsLineRole,
   type FsPucMapping,
   type FsSectionKey,
   type FsSource,
@@ -106,6 +107,8 @@ export interface LineValue {
   contributions: Contribution[];
   /** Valor automático (capital, resultado del ejercicio, presentación Banco / OTC). */
   automatic?: string;
+  /** Solo lectura: el mismo valor repartido por año del movimiento («» = sin fecha). Lo usan las notas; no interviene en ningún cálculo. */
+  byYear: { year: string; cents: number }[];
 }
 
 export interface SectionValue {
@@ -312,6 +315,7 @@ const CASH_PUC = /^11/;
 interface Bucket {
   cents: number;
   byPuc: Map<string, Contribution>;
+  years: Map<string, number>;
   automatic: string[];
 }
 
@@ -326,7 +330,7 @@ export function buildStatements(input: EngineInput): Statements {
   const buckets = new Map<number, Bucket>();
   const bucket = (id: number) => {
     let b = buckets.get(id);
-    if (!b) buckets.set(id, (b = { cents: 0, byPuc: new Map(), automatic: [] }));
+    if (!b) buckets.set(id, (b = { cents: 0, byPuc: new Map(), years: new Map(), automatic: [] }));
     return b;
   };
   const unclassified = new Map<string, UnclassifiedPuc>();
@@ -405,6 +409,8 @@ export function buildStatements(input: EngineInput): Statements {
     const value = accounting(DEBIT_SECTIONS.has(line.section));
     const b = bucket(line.id);
     b.cents += value;
+    const yearKey = date ? date.slice(0, 4) : "";
+    b.years.set(yearKey, (b.years.get(yearKey) ?? 0) + value);
     if (reclassified && !b.automatic.includes(reclassified)) b.automatic.push(reclassified);
     // Los valores de obligaciones tributarias se detallan por declaración y periodo (`ref`), no solo por PUC.
     const contributionKey = opts.ref ? `${pucCode}|${opts.ref}` : pucCode;
@@ -638,6 +644,7 @@ export function buildStatements(input: EngineInput): Statements {
         cents: b?.cents ?? 0,
         contributions: b ? [...b.byPuc.values()].sort((x, y) => (x.pucCode < y.pucCode ? -1 : 1)) : [],
         automatic: b?.automatic.length ? b.automatic.join(" · ") : undefined,
+        byYear: b ? [...b.years.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([year, cents]) => ({ year, cents })) : [],
       };
     });
     sections[key] = { key, lines: values, totalCents: values.reduce((s, v) => s + v.cents, 0), representativeLineId: representative.get(key) ?? null };
@@ -738,11 +745,14 @@ export interface StatementRow {
   /** Pesos redondeados al millar (calculado desde el exacto). */
   pesos?: number;
   lineId?: number;
+  /** Sección y rol de la partida (solo en filas de partida): permiten agrupar las notas sin releer el catálogo. */
+  section?: FsSectionKey;
+  role?: FsLineRole | null;
   /** Número de la nota (columna NOTA): lo asigna `notes/model.ts`; no interviene en ningún cálculo. */
   note?: number;
 }
 
-const valueRow = (kind: RowKind, label: string, cents: number, lineId?: number): StatementRow => ({ kind, label, cents, pesos: roundThousands(cents), lineId });
+const valueRow = (kind: RowKind, label: string, cents: number, lineId?: number, line?: FsLine): StatementRow => ({ kind, label, cents, pesos: roundThousands(cents), lineId, ...(line && { section: line.section, role: line.role }) });
 
 /**
  * Líneas de una sección: se ocultan las que quedan en cero (al millar); si
@@ -750,9 +760,9 @@ const valueRow = (kind: RowKind, label: string, cents: number, lineId?: number):
  */
 function sectionRows(section: SectionValue): StatementRow[] {
   const visible = section.lines.filter((v) => roundThousands(v.cents) !== 0);
-  if (visible.length) return visible.map((v) => valueRow("line", v.line.name, v.cents, v.line.id));
+  if (visible.length) return visible.map((v) => valueRow("line", v.line.name, v.cents, v.line.id, v.line));
   const rep = section.lines.find((v) => v.line.id === section.representativeLineId) ?? section.lines[0];
-  return rep ? [valueRow("line", rep.line.name, rep.cents, rep.line.id)] : [];
+  return rep ? [valueRow("line", rep.line.name, rep.cents, rep.line.id, rep.line)] : [];
 }
 
 export function esfRows(s: Statements): StatementRow[] {

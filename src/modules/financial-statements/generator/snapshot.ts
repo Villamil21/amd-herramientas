@@ -79,7 +79,7 @@ export async function pdfModel(snapshot: StatementsSnapshot): Promise<Statements
     logo,
     startDate: snapshot.period.start,
     endDate: snapshot.period.end,
-    ...(({ esf, eerr }) => ({ esfRows: esf, eerrRows: eerr }))(withNoteNumbers(snapshot.esfRows, snapshot.eerrRows)),
+    ...(({ esf, eerr }) => ({ esfRows: esf, eerrRows: eerr }))(withNoteNumbers(snapshot.esfRows, snapshot.eerrRows, snapshot.catalog)),
     legalRep: { name: snapshot.company.legalRepName, document: snapshot.company.legalRepDocument, parts: snapshot.legalRepParts },
     accountant: { name: snapshot.accountant?.name ?? "", title: snapshot.accountant?.accountantTitle ?? "", professionalDocument: snapshot.accountant?.professionalDocument ?? "", signature },
   };

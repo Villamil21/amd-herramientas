@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BankBalance, FsCatalog, FsLine, FsPucMapping, FsSectionKey, Movement } from "../../../types/fs";
 import { formatStatementPesos, roundThousands, estimatedIncomeTax } from "../shared/money";
 import { TAX_PUC, type TaxReturn } from "../tax-obligations/types";
+import { buildNoteItems, noteTableTotal, withNoteNumbers } from "../notes/model";
+import { engineView } from "../shared/accountingPresentation";
 import { checklist, pendingBalanceText } from "./checks";
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, reclassificationAges, type EngineInput } from "./engine";
 
@@ -608,5 +610,41 @@ describe("reclasificación automática corriente → no corriente", () => {
   it("una línea corriente sin saldos de años anteriores no exige contraparte", () => {
     const without: FsCatalog = { ...catalog, lines: catalog.lines.filter((l) => l.id !== 35) };
     expect(run({ catalog: without, mappings: grouped, movements: [payable("2026-02-10", 1_000)] }).missingCounterparts).toHaveLength(0);
+  });
+});
+
+describe("notas por grupo sobre estados reales", () => {
+  const prior = (date: string, pesos: number) => mv(date, "370505", pesos, { dc: "C" });
+  const base = () => run({ movements: [mv("2026-03-01", "413595", 9_000_000, { dc: "C" }), mv("2026-03-02", "510506", 2_000_000, { dc: "D" }), prior("2024-12-31", 400_000), prior("2025-12-31", 600_000)], bankBalances: [balance("2026-08-31", 5_000_000, 1)] });
+
+  it("el motor reparte los resultados anteriores por año del movimiento sin cambiar el total", () => {
+    const line17 = base().sections.equity.lines.find((l) => l.line.id === 17)!;
+    expect(line17.byYear.map((y) => [y.year, y.cents])).toEqual([["2024", 40_000_000], ["2025", 60_000_000]]);
+    expect(line17.byYear.reduce((a, y) => a + y.cents, 0)).toBe(line17.cents);
+  });
+
+  it("las notas y la columna NOTA de los estados salen de los mismos grupos y cada total coincide con el estado", () => {
+    const s = base();
+    const esf = esfRows(s);
+    const eerr = eerrRows(s);
+    const items = buildNoteItems(esf, eerr, { catalog, statements: s, pucConcepts: new Map([["1110", "BANCOS"]]) });
+    const numbered = withNoteNumbers(esf, eerr, catalog);
+    expect([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note]))).toEqual(items.map((i) => i.number));
+    expect(items.map((i) => i.number)).toEqual(items.map((_, i) => i + 1));
+    const results = items.find((i) => i.id === "results")!;
+    if (results.body.kind !== "table") throw new Error("tabla");
+    expect(results.body.rows.filter((r) => r.indent).map((r) => [r.label, r.pesos])).toEqual([["2024", 400_000], ["2025", 600_000]]);
+    const line = (label: string) => esf.find((r) => r.kind === "line" && r.label === label)!.pesos!;
+    expect(noteTableTotal(results.body.rows)).toBe(line("Resultados del ejercicio") + line("Resultados de ejercicios anteriores"));
+    const cash = items.find((i) => i.id === "disponible")!;
+    expect(cash.body).toEqual({ kind: "table", rows: [{ label: "Bancos", pesos: 5_000_000 }] });
+  });
+
+  it("la presentación DR (vista bancaria, sin líneas de terceros) numera igual: los grupos sin saldo no se inventan", () => {
+    const s = run({ presentation: engineView("dr"), movements: [mv("2026-03-01", "413595", 9_000_000, { dc: "C" })] });
+    const items = buildNoteItems(esfRows(s), eerrRows(s), { catalog, statements: s });
+    expect(items.map((i) => i.number)).toEqual(items.map((_, i) => i + 1));
+    expect(items.find((i) => i.id === "income")!.body.kind).toBe("table");
+    expect(items.find((i) => i.id === "sales")!.body).toEqual({ kind: "empty" });
   });
 });

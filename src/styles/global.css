@@ -6060,6 +6060,72 @@ body.is-reordering * {
 }
 
 /* Notas Financieras: lista de notas y editor */
+/* Empresa, fechas, presentación y contador: una cuadrícula que se adapta al ancho sin superponer campos ni cortar texto. */
+.notes-config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+}
+
+.notes-config > * {
+  min-width: 0;
+}
+
+.notes-config__company {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 1100px) {
+  .notes-config__company {
+    grid-column: span 2;
+  }
+}
+
+/* El selector de empresa trae un ancho mínimo propio: aquí se ajusta a su celda en vez de invadir la vecina. */
+.notes-config select {
+  width: 100%;
+  min-width: 0 !important;
+  text-overflow: ellipsis;
+}
+
+.notes-config .date-input {
+  min-width: 0;
+}
+
+.notes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.notes-table th,
+.notes-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.notes-table th {
+  font-weight: 600;
+}
+
+.notes-table td:first-child {
+  font-style: italic;
+}
+
+.notes-table .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--color-border);
+}
+
+.notes-table tfoot td {
+  font-weight: 700;
+  font-style: italic;
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
 .notes-layout {
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);

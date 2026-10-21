@@ -81,7 +81,8 @@ export function splitPesos(pesos: number): { symbol: boolean; number: string } {
 
 export function labelWidth(row: StatementRow): number {
   const left = MARGIN_X + indentOf(row);
-  if (row.kind === "line") return NOTE_X - 18 - left;
+  // Las partidas y los encabezados de grupo con nota se detienen antes de la columna NOTA.
+  if (row.kind === "line" || (row.kind === "header" && row.note !== undefined)) return NOTE_X - 18 - left;
   if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") return DOLLAR_X - 10 - left;
   return VALUE_RIGHT - left;
 }
@@ -183,7 +184,7 @@ function table(pdf: JsPDF, rows: StatementRow[]): number {
       const bold = row.kind !== "line";
       const fontSize = rowFontSize(row, size);
       label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: fontSize, bold }));
-      if (row.kind === "line" && row.note !== undefined) text(pdf, String(row.note), NOTE_X, baseline, { size, align: "center", color: COLORS.muted });
+      if (row.note !== undefined) text(pdf, String(row.note), NOTE_X, baseline, { size, align: "center", color: COLORS.muted });
       if (row.pesos !== undefined) {
         const { symbol, number } = splitPesos(row.pesos);
         const color = row.pesos < 0 ? COLORS.negative : COLORS.text;
