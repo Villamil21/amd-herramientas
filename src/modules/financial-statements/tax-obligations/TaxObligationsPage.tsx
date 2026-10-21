@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarX2, FileUp, Settings2 } from "lucide-react";
 import { navigate, paths } from "../../../app/router";
 import { Alert, Button, Card, ConfirmDialog, EmptyState, Field, MetricBar, Modal, PageHeader, Select, Tabs, useToast } from "../../../components/ui";
@@ -9,6 +9,7 @@ import { extractPdfText } from "../../bank-analysis/shared/pdf/pdfExtractor";
 import { statementService } from "../../bank-analysis/shared/statementService";
 import { errorMessage } from "../../../services/tauri";
 import { formatInteger } from "../../../utils/format";
+import { clearOpenReturn, peekOpenReturn } from "./openReturn";
 import { ClassifyPucModal } from "../shared/components/ClassifyPucModal";
 import { PucSettingsModal } from "../shared/components/PucSettingsModal";
 import { formatExactCents, isIsoDate } from "../shared/money";
@@ -111,6 +112,21 @@ export function TaxObligationsPage({ taxType }: { taxType: TaxType }) {
   useEffect(() => {
     void load(companyId);
   }, [companyId, load]);
+
+  // Pedido desde otra pantalla (p. ej. el desglose del impuesto estimado): abre la empresa y su declaración.
+  const handoff = useRef(peekOpenReturn());
+  useEffect(() => {
+    if (handoff.current) setCompanyId(handoff.current.companyId);
+  }, []);
+  useEffect(() => {
+    const h = handoff.current;
+    const found = h && companyId === h.companyId ? returns.find((r) => r.id === h.returnId) : undefined;
+    if (found) {
+      handoff.current = null;
+      clearOpenReturn();
+      setDetail(found);
+    }
+  }, [returns, companyId]);
 
   const company = data.companies?.find((c) => c.id === companyId);
   const constitution = company?.constitutionDate || null;

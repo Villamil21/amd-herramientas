@@ -44,6 +44,8 @@ import { AdjustmentModal, BatchTable, CoverageTable, PdfPages, StatementView } f
 import { buildStatements, eerrRows, esfRows, isBalanced, pendingBankBalances, type LineValue, type StatementRow } from "./engine";
 import { withNoteNumbers } from "../notes/model";
 import { renderStatementsPdf } from "./pdf";
+import { EstimatedTaxCard } from "./EstimatedTaxCard";
+import { estimatedIncomeTaxNet } from "./estimatedTax";
 import { buildSnapshot, pdfModel, type StatementsSnapshot } from "./snapshot";
 import { formatDateTimeForDisplay } from "../../../utils/dates";
 
@@ -235,6 +237,19 @@ export default function GeneratorPage() {
   const pendingChecks = checks.filter((c) => !c.ok).length;
   const closed = period?.status === "closed";
   const closedSnapshot = closed ? (period?.closedSnapshot as StatementsSnapshot | null) : null;
+  // Indicador informativo: mismo año fiscal y fecha de corte que los EEFF; en un periodo cerrado el bruto sale del snapshot aprobado.
+  const estimatedTax = useMemo(() => {
+    if (!ledger || !s || !rangeOk) return null;
+    return estimatedIncomeTaxNet({
+      baseCents: closedSnapshot ? closedSnapshot.totals.beforeTax : s.eerr.beforeTax,
+      grossPesos: closedSnapshot ? closedSnapshot.totals.incomeTaxPesos : s.incomeTaxPesos,
+      returns: ledger.taxReturns,
+      empties: ledger.taxEmpty,
+      vatPeriodicity: ledger.vatPeriodicity,
+      cut: end,
+      constitutionDate: company?.constitutionDate,
+    });
+  }, [ledger, s, closedSnapshot, end, rangeOk, company?.constitutionDate]);
   const accountant = signers.find((x) => x.id === accountantId) ?? null;
   const validAccountants = signers.filter((x) => x.signatureAvailable && x.accountantTitle && !x.fsExcluded);
   /** Firmas sin «Contador Público» / «Contadora Pública» ni «No usar»: se listan bloqueadas hasta definirlas en Firmas. */
@@ -556,10 +571,14 @@ export default function GeneratorPage() {
             </Card>
             <Card title="Estado de Resultados" description="Movimientos entre la fecha inicial y la final.">
               <StatementView title="" rows={shownRows.eerr} lines={closed ? new Map() : lines} />
-              <div className="fs-tax">
-                <span>Impuesto de renta estimado (solo en la app, no va en el PDF)</span>
-                <strong>{formatStatementPesos(closedSnapshot ? closedSnapshot.totals.incomeTaxPesos : s.incomeTaxPesos)}</strong>
-              </div>
+              {estimatedTax ? (
+                <EstimatedTaxCard tax={estimatedTax} companyId={companyId} />
+              ) : (
+                <div className="fs-tax">
+                  <span>Impuesto de renta estimado (solo en la app, no va en el PDF)</span>
+                  <strong>{formatStatementPesos(closedSnapshot ? closedSnapshot.totals.incomeTaxPesos : s.incomeTaxPesos)}</strong>
+                </div>
+              )}
             </Card>
           </div>
 

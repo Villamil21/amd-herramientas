@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.47.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Estados Financieros → Estado de Resultados: el indicador «Impuesto de renta estimado» ahora es neto de autorretenciones. Impuesto estimado bruto (35 % de la utilidad positiva) menos las autorretenciones netas de los Formularios 350 vigentes del mismo año fiscal y con periodo terminado a la fecha de corte; las declaraciones reemplazadas por una corrección no cuentan.",
+      "Autorretención neta de cada 350 = declarada − devoluciones de la casilla 129 clasificadas específicamente como autorretenciones. Las devoluciones de otros conceptos no la reducen y lo que no esté distribuido queda como pendiente (nunca se asigna). Si las autorretenciones superan el estimado se muestra «Saldo a favor estimado por autorretenciones».",
+      "Toda la tarjeta se abre con clic, Enter o Espacio y muestra el cálculo, los 350 incluidos (bruto, devoluciones, neto, otros conceptos excluidos, estado y enlace a la declaración), los meses sin 350 y los valores pendientes de distribuir. Si faltan declaraciones aparece «Estimado parcial», sin bloquear EEFF ni PDF. Es solo informativo: no genera movimientos, no modifica EEFF aprobados ni va en el PDF."
+    ]
+  },
+  {
     "version": "1.46.0",
     "date": "2026-10-21",
     "notes": [

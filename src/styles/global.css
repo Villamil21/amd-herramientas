@@ -3509,6 +3509,24 @@ button.stat--link {
   color: var(--color-text);
 }
 
+.fs-tax--button {
+  align-items: center;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fs-tax--button:hover,
+.fs-tax--button:focus-visible {
+  border-color: var(--color-primary, var(--color-border-strong));
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring, rgba(80, 120, 255, 0.35));
+}
+
+.fs-tax__warn {
+  color: var(--color-warning, #b45309);
+  font-size: var(--text-sm);
+}
+
 .fs-checklist {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
