@@ -169,6 +169,7 @@ pub fn run() {
             commands::fs::list_fs_batches,
             commands::fs::list_fs_movements,
             commands::fs::reclassify_fs_movements,
+            commands::fs::reclassify_fs_bank_transactions,
             commands::fs::edit_fs_movement,
             commands::fs::list_fs_movement_edits,
             commands::fs::list_fs_bank_balances,

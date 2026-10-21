@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.44.0",
+    "date": "2026-10-21",
+    "notes": [
+      "Extractos bancarios → Extractos importados: consulta todo lo ya subido con filtros por banco, cuenta, mes, estado y texto, y abre el detalle guardado (saldos, movimientos, PUC, regla aplicada, intereses, GMF, estado de envío a EEFF e historial) sin volver a cargar el PDF.",
+      "Reclasifica transacciones ya enviadas a Estados Financieros desde esa vista: resumen previo (clasificación anterior y nueva, valor, movimientos y periodo afectado) y confirmación explícita. Se actualiza el mismo lote, sin duplicar valores ni tocar otros movimientos o cuentas.",
+      "Auditoría completa de cada cambio (fecha, valor anterior y nuevo, motivo y extracto de origen). Un periodo cerrado bloquea el cambio; uno cuadrado o con PDF pide confirmación, pasa a «Requiere nueva revisión» y conserva sus versiones anteriores.",
+      "Tras reclasificar se recalculan cobertura, alertas y los formatos de Exógena 1012, 1007 y 1011 que dependen de los extractos. El GMF se reclasifica completo, no por transacciones."
+    ]
+  },
+  {
     "version": "1.43.0",
     "date": "2026-10-21",
     "notes": [

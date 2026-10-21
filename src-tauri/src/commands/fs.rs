@@ -94,6 +94,11 @@ pub fn reclassify_fs_movements(db: State<'_, Db>, company_id: Option<i64>, ids: 
 }
 
 #[tauri::command]
+pub fn reclassify_fs_bank_transactions(db: State<'_, Db>, input: BankReclassInput) -> AppResult<BankReclassOutcome> {
+    db.with(|c| fs::reclassify_bank_transactions(c, &input))
+}
+
+#[tauri::command]
 pub fn edit_fs_movement(db: State<'_, Db>, input: MovementEditInput) -> AppResult<MovementEdit> {
     db.with(|c| fs::edit_movement(c, &input))
 }

@@ -1090,6 +1090,155 @@ pub fn reclassify_movements(conn: &mut Connection, company_id: Option<i64>, ids:
 }
 
 // ---------------------------------------------------------------------------
+// Reclasificación de transacciones de un extracto ya enviado
+// ---------------------------------------------------------------------------
+
+pub const REVIEW_BANK_RECLASS: &str = "Este periodo había sido conciliado, pero se reclasificaron transacciones de un extracto bancario después de su última validación.";
+
+fn tx_cents(tx: &Value) -> i64 {
+    tx.get("amountCents").and_then(Value::as_i64).unwrap_or(0).abs()
+}
+
+/// Reclasifica transacciones concretas de un extracto bancario vigente SIN reimportarlo ni crear otro lote: el movimiento
+/// enviado se reemplaza (queda «Ajustado») por uno nuevo del MISMO lote con el PUC nuevo; si solo se eligió una parte de las
+/// transacciones del concepto, el resto queda en otro movimiento con el PUC anterior, así el total del extracto no cambia.
+/// Cada cambio guarda auditoría (antes y después, motivo y origen del extracto) en fs_movement_edits. Un periodo cerrado se
+/// bloquea; uno «Cuadrado» o con PDF solo se toca con confirmación explícita y pasa a «Requiere nueva revisión».
+pub fn reclassify_bank_transactions(conn: &mut Connection, input: &BankReclassInput) -> AppResult<BankReclassOutcome> {
+    let reason = input.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::user("Escribe el motivo de la reclasificación."));
+    }
+    if input.items.is_empty() {
+        return Err(AppError::user("Selecciona al menos una transacción."));
+    }
+    let new_puc = input.puc_code.trim();
+    let new_concept = puc::assignable_concept(conn, new_puc)?.ok_or_else(|| AppError::user(format!("El código PUC «{new_puc}» no existe o no se puede asignar.")))?;
+    let batch = conn
+        .query_row(&format!("SELECT {BATCH_COLUMNS} FROM fs_batches WHERE id = ?1"), [input.batch_id], map_batch)
+        .optional()?
+        .ok_or_else(|| AppError::user("El extracto no existe."))?;
+    if batch.source != "bank" {
+        return Err(AppError::user("Solo se reclasifican extractos bancarios."));
+    }
+    if batch.status != "active" {
+        return Err(AppError::user("Solo se reclasifica un extracto vigente: este fue reemplazado o anulado."));
+    }
+
+    struct Plan {
+        old: Movement,
+        selected: Vec<Value>,
+        rest: Vec<Value>,
+    }
+    let mut plans: Vec<Plan> = Vec::new();
+    let mut seen = BTreeSet::new();
+    for item in &input.items {
+        if !seen.insert(item.movement_id) {
+            return Err(AppError::user("Un movimiento se repite en la selección."));
+        }
+        let old = conn
+            .query_row(&format!("SELECT {MOVEMENT_COLUMNS} FROM fs_movements WHERE id = ?1"), [item.movement_id], map_movement)
+            .optional()?
+            .ok_or_else(|| AppError::user("Un movimiento seleccionado no existe."))?;
+        if old.batch_id != batch.id || old.company_id != batch.company_id {
+            return Err(AppError::user("Un movimiento no pertenece a este extracto."));
+        }
+        if old.status != "active" {
+            return Err(AppError::user("Un movimiento seleccionado ya no está vigente (fue reclasificado o ajustado): recarga el extracto."));
+        }
+        if old.concept_key != "bank.concept" && old.concept_key != "bank.gmf" {
+            return Err(AppError::user("Un movimiento seleccionado no es una transacción bancaria."));
+        }
+        if old.puc_code == new_puc {
+            return Err(AppError::user(format!("«{}» ya está en el PUC {new_puc}.", old.description)));
+        }
+        let txs: Vec<Value> = old.detail.get("movements").and_then(Value::as_array).cloned().unwrap_or_default();
+        let wanted: BTreeSet<usize> = item.tx_indexes.iter().copied().collect();
+        if wanted.is_empty() || wanted.iter().any(|i| *i >= txs.len()) {
+            return Err(AppError::user("La selección de transacciones no coincide con el extracto guardado: recarga el extracto."));
+        }
+        let (selected, rest): (Vec<_>, Vec<_>) = txs.iter().cloned().enumerate().partition(|(i, _)| wanted.contains(i));
+        let (selected, rest): (Vec<Value>, Vec<Value>) = (selected.into_iter().map(|(_, v)| v).collect(), rest.into_iter().map(|(_, v)| v).collect());
+        if !rest.is_empty() {
+            if old.concept_key == "bank.gmf" {
+                return Err(AppError::user("El GMF se lleva como un solo valor (50 % del neto): reclasifícalo completo, no por transacciones."));
+            }
+            let total: i64 = txs.iter().map(tx_cents).sum();
+            if total != old.amount_cents {
+                return Err(AppError::user(format!("Las transacciones de «{}» no suman el valor enviado: reclasifica el concepto completo.", old.description)));
+            }
+        }
+        plans.push(Plan { old, selected, rest });
+    }
+
+    let dates: BTreeSet<String> = plans.iter().map(|p| p.old.accounting_date.clone()).collect();
+    ensure_open(conn, batch.company_id, &dates)?;
+    let approved: Vec<String> = conn
+        .prepare("SELECT start_date, end_date FROM fs_periods WHERE company_id = ?1 AND status IN ('ready', 'pdf_generated')")?
+        .query_map([batch.company_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|(s, e)| dates.iter().any(|d| d >= s && d <= e))
+        .map(|(s, e)| format!("{s} a {e}"))
+        .collect();
+    if !approved.is_empty() && !input.acknowledge_approved {
+        return Err(AppError::user(format!("El periodo de Estados Financieros ({}) está cuadrado o tiene PDF generado: confirma que pasará a «Requiere nueva revisión» y que la versión anterior se conserva.", approved.join("; "))));
+    }
+
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    let mut changes = Vec::new();
+    let (mut moved_total, mut tx_total) = (0i64, 0i64);
+    for plan in plans {
+        let old = &plan.old;
+        let whole = plan.rest.is_empty();
+        let moved_cents = if whole { old.amount_cents } else { plan.selected.iter().map(tx_cents).sum() };
+        let make = |tx: &Transaction, puc_code: &str, puc_concept: &str, cents: i64, txs: &[Value], extra: Value| -> AppResult<i64> {
+            let mut detail = if old.detail.is_object() { old.detail.clone() } else { serde_json::json!({}) };
+            if let Value::Object(map) = &mut detail {
+                map.insert("movements".into(), Value::Array(txs.to_vec()));
+                map.insert("count".into(), (txs.len() as i64).into());
+                map.insert("splitFrom".into(), old.id.into());
+                if !extra.is_null() {
+                    map.insert("reclassified".into(), extra);
+                }
+            }
+            let document_id = if puc_code == old.puc_code { old.document_id.clone() } else { format!("{}|reclass|{}|{}", old.document_id, old.id, puc_code) };
+            tx.execute(
+                "INSERT INTO fs_movements (company_id, batch_id, accounting_date, source, concept_key, document_id, document_number, document_type, supplier_id, supplier_nit, supplier_name, employee_id, employment_id, bank, account_number, puc_code, puc_concept, description, amount_cents, dc, settles_on, status, detail, created_at, updated_at)
+                 SELECT company_id, batch_id, accounting_date, source, concept_key, ?2, document_number, document_type, supplier_id, supplier_nit, supplier_name, employee_id, employment_id, bank, account_number, ?3, ?4, description, ?5, dc, settles_on, 'active', ?6, ?7, ?7
+                 FROM fs_movements WHERE id = ?1",
+                params![old.id, document_id, puc_code, puc_concept, cents, detail.to_string(), now],
+            )?;
+            Ok(tx.last_insert_rowid())
+        };
+        let trace = serde_json::json!({ "from": old.puc_code, "to": new_puc, "at": now, "movementId": old.id, "reason": reason });
+        let moved_id = make(&tx, new_puc, &new_concept, moved_cents, &plan.selected, trace)?;
+        let remainder_id = if whole { None } else { Some(make(&tx, &old.puc_code, &old.puc_concept, old.amount_cents - moved_cents, &plan.rest, Value::Null)?) };
+        tx.execute("UPDATE fs_movements SET status = 'adjusted', updated_at = ?1 WHERE id = ?2", params![now, old.id])?;
+        let origin = serde_json::json!({ "batchId": batch.id, "fileName": batch.file_name, "period": batch.period_label, "bank": old.bank, "accountNumber": old.account_number });
+        let snapshot = |code: &str, concept: &str, cents: i64, txs: &[Value], extra: Value| {
+            serde_json::json!({ "accountingDate": old.accounting_date, "pucCode": code, "pucConcept": concept, "description": old.description, "amountCents": cents, "status": "active", "transactions": txs, "statement": origin, "extra": extra })
+        };
+        let all_txs: Vec<Value> = plan.selected.iter().chain(plan.rest.iter()).cloned().collect();
+        let previous = snapshot(&old.puc_code, &old.puc_concept, old.amount_cents, &all_txs, Value::Null);
+        let next = snapshot(new_puc, &new_concept, moved_cents, &plan.selected, serde_json::json!({ "remainderMovementId": remainder_id, "remainderCents": old.amount_cents - moved_cents, "remainderPuc": old.puc_code }));
+        tx.execute(
+            "INSERT INTO fs_movement_edits (company_id, original_movement_id, new_movement_id, reason, origin, previous, next, created_at) VALUES (?1, ?2, ?3, ?4, 'bank_reclass', ?5, ?6, ?7)",
+            params![old.company_id, old.id, moved_id, reason, previous.to_string(), next.to_string(), now],
+        )?;
+        changes.push(BankReclassChange { edit_id: tx.last_insert_rowid(), original_movement_id: old.id, moved_movement_id: moved_id, remainder_movement_id: remainder_id, moved_cents, transactions: plan.selected.len() as i64 });
+        moved_total += moved_cents;
+        tx_total += plan.selected.len() as i64;
+    }
+    // El valor del lote no cambia; sí el número de movimientos vigentes si algún concepto se dividió.
+    tx.execute("UPDATE fs_batches SET record_count = (SELECT COUNT(*) FROM fs_movements WHERE batch_id = ?1 AND status = 'active'), updated_at = ?2 WHERE id = ?1", params![batch.id, now])?;
+    let invalidated = invalidate_periods(&tx, batch.company_id, &dates, REVIEW_BANK_RECLASS)?;
+    tx.commit()?;
+    Ok(BankReclassOutcome { batch_id: batch.id, moved_cents: moved_total, transactions: tx_total, changes, invalidated_periods: invalidated })
+}
+
+// ---------------------------------------------------------------------------
 // Edición individual de movimientos (siempre trazable)
 // ---------------------------------------------------------------------------
 
@@ -2649,5 +2798,179 @@ mod tests {
         let empty: i64 = conn.query_row("SELECT COUNT(*) FROM fs_batches WHERE dedupe_key = 'empty:2026-05' AND status = 'active'", [], |r| r.get(0)).unwrap();
         assert_eq!(empty, 1);
         assert_eq!(retire_legacy_purchases(&conn).unwrap(), 0);
+    }
+
+    // --- Reclasificación de transacciones de un extracto ya enviado ---
+
+    fn bank_movement(doc: &str, concept: &str, puc_code: &str, txs: &[i64]) -> MovementInput {
+        let list: Vec<Value> = txs.iter().enumerate().map(|(i, c)| serde_json::json!({ "date": format!("2026-03-{:02}", i + 1), "description": concept, "amountCents": -c })).collect();
+        MovementInput {
+            accounting_date: "2026-03-31".into(),
+            concept_key: "bank.concept".into(),
+            document_id: doc.into(),
+            bank: "Bancolombia".into(),
+            account_number: "111".into(),
+            puc_code: puc_code.into(),
+            description: concept.into(),
+            amount_cents: txs.iter().sum(),
+            dc: Some("D".into()),
+            detail: Some(serde_json::json!({ "count": txs.len(), "movements": list })),
+            ..Default::default()
+        }
+    }
+
+    fn sent_statement(conn: &mut Connection, company_id: i64) -> (i64, Vec<Movement>) {
+        let mut b = batch(company_id, "bank", "bank:Bancolombia:111:2026-03-01:2026-03-31", vec![bank_movement("d1", "COMPRA TIENDA", "513595", &[10_000, 20_000, 30_000]), bank_movement("d2", "PAGO PROVEEDOR", "513595", &[5_000]), bank_movement("d3", "OTRA CUENTA", "530505", &[7_000])]);
+        b.period_start = Some("2026-03-01".into());
+        b.period_end = Some("2026-03-31".into());
+        let SendOutcome::Sent { batch_id, .. } = send_batch(conn, &b).unwrap() else { panic!("debía enviarse") };
+        let moves = list_movements(conn, company_id).unwrap();
+        (batch_id, moves)
+    }
+
+    fn reclass(batch_id: i64, puc_code: &str, items: &[(i64, &[usize])], ack: bool) -> BankReclassInput {
+        BankReclassInput { batch_id, puc_code: puc_code.into(), reason: "Era un gasto de servicios".into(), acknowledge_approved: ack, items: items.iter().map(|(m, t)| BankReclassItem { movement_id: *m, tx_indexes: t.to_vec() }).collect() }
+    }
+
+    #[test]
+    fn reclassifying_part_of_a_sent_statement_keeps_one_batch_and_the_same_total() {
+        let mut conn = db();
+        let c = company(&conn, "900");
+        let (batch_id, moves) = sent_statement(&mut conn, c);
+        let before_total: i64 = moves.iter().filter(|m| m.status == "active").map(|m| m.amount_cents).sum();
+        let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
+        let d3 = moves.iter().find(|m| m.document_id == "d3").unwrap().clone();
+
+        let out = reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0, 2])], false)).unwrap();
+        assert_eq!((out.moved_cents, out.transactions, out.changes.len()), (40_000, 2, 1));
+
+        // Un solo lote; el total vigente no cambia y no se duplica nada.
+        assert_eq!(list_batches(&conn, c).unwrap().len(), 1);
+        let after = list_movements(&conn, c).unwrap();
+        let active: Vec<_> = after.iter().filter(|m| m.status == "active").collect();
+        assert_eq!(active.iter().map(|m| m.amount_cents).sum::<i64>(), before_total);
+        assert_eq!(active.len(), 4, "d1 se divide en dos; los demás quedan intactos");
+        let moved = active.iter().find(|m| m.puc_code == "530510").unwrap();
+        assert_eq!(moved.amount_cents, 40_000);
+        assert_eq!(moved.detail["movements"].as_array().unwrap().len(), 2);
+        let rest = active.iter().find(|m| m.puc_code == "513595" && m.document_id == "d1").unwrap();
+        assert_eq!(rest.amount_cents, 20_000);
+        // El original queda «Ajustado» (historial) y las demás transacciones del extracto no se tocan.
+        assert_eq!(after.iter().find(|m| m.id == d1).unwrap().status, "adjusted");
+        let untouched = active.iter().find(|m| m.document_id == "d3").unwrap();
+        assert_eq!((untouched.id, untouched.puc_code.as_str(), untouched.amount_cents), (d3.id, "530505", 7_000));
+        assert_eq!(list_batches(&conn, c).unwrap()[0].record_count, 4);
+        assert_eq!(list_batches(&conn, c).unwrap()[0].total_cents, before_total);
+
+        // Auditoría: antes, después, motivo y origen del extracto.
+        let edits = list_movement_edits(&conn, c).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].origin, "bank_reclass");
+        assert_eq!(edits[0].reason, "Era un gasto de servicios");
+        assert_eq!((edits[0].previous["pucCode"].as_str(), edits[0].previous["amountCents"].as_i64()), (Some("513595"), Some(60_000)));
+        assert_eq!((edits[0].next["pucCode"].as_str(), edits[0].next["amountCents"].as_i64()), (Some("530510"), Some(40_000)));
+        assert_eq!(edits[0].next["statement"]["batchId"].as_i64(), Some(batch_id));
+        assert_eq!(edits[0].new_movement_id, Some(out.changes[0].moved_movement_id));
+    }
+
+    #[test]
+    fn reclassifying_a_whole_concept_and_then_again_applies_each_change_once() {
+        let mut conn = db();
+        let c = company(&conn, "901");
+        let (batch_id, moves) = sent_statement(&mut conn, c);
+        let d2 = moves.iter().find(|m| m.document_id == "d2").unwrap().id;
+        let out = reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d2, &[0])], false)).unwrap();
+        assert!(out.changes[0].remainder_movement_id.is_none(), "sin resto: es un cambio de PUC del concepto completo");
+        assert_eq!(active(&conn, c).iter().filter(|(p, _)| p == "530510").map(|(_, v)| v).sum::<i64>(), 5_000);
+        // El movimiento anterior ya no está vigente: repetir la misma selección no lo duplica.
+        assert!(reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530505", &[(d2, &[0])], false)).is_err());
+        // Mover de nuevo el movimiento nuevo es otra reclasificación auditada.
+        let moved = out.changes[0].moved_movement_id;
+        reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530505", &[(moved, &[0])], false)).unwrap();
+        assert_eq!(list_movement_edits(&conn, c).unwrap().len(), 2);
+        assert_eq!(active(&conn, c).iter().map(|(_, v)| v).sum::<i64>(), 10_000 + 20_000 + 30_000 + 5_000 + 7_000);
+        assert_eq!(list_batches(&conn, c).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn reclassification_rejects_bad_input_without_changing_anything() {
+        let mut conn = db();
+        let c = company(&conn, "902");
+        let other = company(&conn, "903");
+        let (batch_id, moves) = sent_statement(&mut conn, c);
+        let (other_batch, _) = sent_statement(&mut conn, other);
+        let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
+        let n = list_movements(&conn, c).unwrap().len();
+        let mut no_reason = reclass(batch_id, "530510", &[(d1, &[0])], false);
+        no_reason.reason = "  ".into();
+        for bad in [
+            no_reason,
+            reclass(batch_id, "999999", &[(d1, &[0])], false),
+            reclass(batch_id, "513595", &[(d1, &[0])], false),
+            reclass(batch_id, "530510", &[(d1, &[9])], false),
+            reclass(batch_id, "530510", &[(d1, &[])], false),
+            reclass(batch_id, "530510", &[], false),
+            reclass(other_batch, "530510", &[(d1, &[0])], false),
+        ] {
+            assert!(reclassify_bank_transactions(&mut conn, &bad).is_err());
+        }
+        assert_eq!(list_movements(&conn, c).unwrap().len(), n);
+        assert!(list_movement_edits(&conn, c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn gmf_is_only_reclassified_as_a_whole() {
+        let mut conn = db();
+        let c = company(&conn, "904");
+        let mut gmf = bank_movement("g1", "IMPUESTO GMF", "513595", &[1_000, 2_000]);
+        gmf.concept_key = "bank.gmf".into();
+        gmf.amount_cents = 1_500; // 50 % del neto: ya no suma las transacciones
+        let mut b = batch(c, "bank", "bank:Bancolombia:111:g", vec![gmf]);
+        b.period_start = Some("2026-03-01".into());
+        b.period_end = Some("2026-03-31".into());
+        let SendOutcome::Sent { batch_id, .. } = send_batch(&mut conn, &b).unwrap() else { panic!() };
+        let id = list_movements(&conn, c).unwrap()[0].id;
+        assert!(reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(id, &[0])], false)).unwrap_err().0.contains("GMF"));
+        reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(id, &[0, 1])], false)).unwrap();
+        assert_eq!(active(&conn, c), vec![("530510".to_string(), 1_500)]);
+    }
+
+    #[test]
+    fn closed_periods_block_and_approved_ones_need_an_explicit_confirmation_and_keep_their_pdf_versions() {
+        let mut conn = db();
+        let c = company(&conn, "905");
+        let (batch_id, moves) = sent_statement(&mut conn, c);
+        let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
+        let now = "2026-04-01T00:00:00Z";
+        conn.execute("INSERT INTO fs_periods (company_id, start_date, end_date, presentation, status, created_at, updated_at) VALUES (?1, '2026-03-01', '2026-03-31', 'bank', 'closed', ?2, ?2)", params![c, now]).unwrap();
+        let err = reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], true)).unwrap_err();
+        assert!(err.0.contains("periodo cerrado"), "{}", err.0);
+        assert_eq!(list_movement_edits(&conn, c).unwrap().len(), 0);
+
+        // Con PDF generado: sin confirmación se detiene; con confirmación se aplica y el periodo pasa a revisión.
+        conn.execute("UPDATE fs_periods SET status = 'pdf_generated'", []).unwrap();
+        let period_id: i64 = conn.query_row("SELECT id FROM fs_periods", [], |r| r.get(0)).unwrap();
+        conn.execute("INSERT INTO fs_statement_versions (period_id, version, file_name, snapshot, generated_at) VALUES (?1, 1, 'ef.pdf', '{\"total\":1}', ?2)", params![period_id, now]).unwrap();
+        let err = reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], false)).unwrap_err();
+        assert!(err.0.contains("PDF"), "{}", err.0);
+        assert_eq!(list_movement_edits(&conn, c).unwrap().len(), 0);
+        let out = reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], true)).unwrap();
+        assert_eq!(out.invalidated_periods, 1);
+        let status: (String, String) = conn.query_row("SELECT status, review_reason FROM fs_periods", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(status.0, "needs_review");
+        assert!(status.1.contains("reclasificaron"));
+        // La versión anterior del PDF sigue intacta.
+        let snapshot: String = conn.query_row("SELECT snapshot FROM fs_statement_versions WHERE period_id = ?1", [period_id], |r| r.get(0)).unwrap();
+        assert_eq!(snapshot, "{\"total\":1}");
+    }
+
+    #[test]
+    fn replaced_statements_cannot_be_reclassified() {
+        let mut conn = db();
+        let c = company(&conn, "906");
+        let (batch_id, moves) = sent_statement(&mut conn, c);
+        let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
+        conn.execute("UPDATE fs_batches SET status = 'replaced' WHERE id = ?1", [batch_id]).unwrap();
+        assert!(reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], false)).unwrap_err().0.contains("vigente"));
     }
 }

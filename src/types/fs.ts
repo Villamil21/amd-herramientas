@@ -107,6 +107,10 @@ export interface MovementEditSnapshot {
   description: string;
   amountCents: number;
   status: MovementStatus;
+  /** Solo en reclasificaciones de extractos: transacciones movidas, extracto de origen y resto que queda con el PUC anterior. */
+  transactions?: { date?: string; description?: string; amountCents: number }[];
+  statement?: { batchId: number; fileName: string; period: string; bank: string; accountNumber: string };
+  extra?: { remainderMovementId?: number | null; remainderCents?: number; remainderPuc?: string } | null;
 }
 
 export interface MovementEdit {
@@ -505,4 +509,27 @@ export interface Period extends PeriodKey {
   updatedAt: string;
   events: { action: string; note: string; createdAt: string }[];
   versions: StatementVersion[];
+}
+
+/** Transacciones de un movimiento bancario enviado (posiciones dentro de su detalle) que se reclasifican. */
+export interface BankReclassItem {
+  movementId: number;
+  txIndexes: number[];
+}
+
+export interface BankReclassInput {
+  batchId: number;
+  pucCode: string;
+  reason: string;
+  /** Confirma que un periodo «Cuadrado» o con PDF pasará a «Requiere nueva revisión». */
+  acknowledgeApproved: boolean;
+  items: BankReclassItem[];
+}
+
+export interface BankReclassOutcome {
+  batchId: number;
+  movedCents: number;
+  transactions: number;
+  changes: { editId: number; originalMovementId: number; movedMovementId: number; remainderMovementId: number | null; movedCents: number; transactions: number }[];
+  invalidatedPeriods: number;
 }

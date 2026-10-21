@@ -746,3 +746,44 @@ impl PeriodKey {
         Ok(self)
     }
 }
+
+/// Transacciones de un movimiento bancario enviado (posiciones dentro de `detail.movements`) que se reclasifican.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankReclassItem {
+    pub movement_id: i64,
+    pub tx_indexes: Vec<usize>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankReclassInput {
+    pub batch_id: i64,
+    pub puc_code: String,
+    pub reason: String,
+    /// El usuario vio que un periodo «Cuadrado» o con PDF generado pasará a «Requiere nueva revisión».
+    #[serde(default)]
+    pub acknowledge_approved: bool,
+    pub items: Vec<BankReclassItem>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankReclassChange {
+    pub edit_id: i64,
+    pub original_movement_id: i64,
+    pub moved_movement_id: i64,
+    pub remainder_movement_id: Option<i64>,
+    pub moved_cents: i64,
+    pub transactions: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankReclassOutcome {
+    pub batch_id: i64,
+    pub moved_cents: i64,
+    pub transactions: i64,
+    pub changes: Vec<BankReclassChange>,
+    pub invalidated_periods: i64,
+}
