@@ -1,5 +1,5 @@
 import type { jsPDF as JsPDF } from "jspdf";
-import { formatStatementPesos } from "../shared/money";
+import { formatPdfNit, formatStatementPesos } from "../shared/money";
 import type { PdfImage } from "../generator/pdf";
 import { headerPeriod, periodParagraph, type NoteEdit, type NoteItem } from "./model";
 import { POLICY_BLOCKS } from "./policies";
@@ -59,7 +59,7 @@ class Writer {
     }
     const cx = PAGE.width / 2;
     this.put(model.companyName.toUpperCase(), cx, 50, { size: 12, bold: true, align: "center", color: COLORS.title });
-    this.put(`NIT ${model.nit}${model.dv ? `-${model.dv}` : ""}`, cx, 64, { size: 9.5, align: "center", color: COLORS.muted });
+    this.put(`NIT ${formatPdfNit(model.nit, model.dv)}`, cx, 64, { size: 9.5, align: "center", color: COLORS.muted });
     this.put("NOTAS A LOS ESTADOS FINANCIEROS", cx, 92, { size: 12, bold: true, align: "center", color: COLORS.title });
     this.put(headerPeriod(model.startDate, model.endDate), cx, 107, { size: 9, align: "center", color: COLORS.muted });
     this.put("(CIFRAS EXPRESADAS EN PESOS COLOMBIANOS)", cx, 120, { size: 8, align: "center", color: COLORS.muted });

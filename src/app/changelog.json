@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.47.4",
+    "date": "2026-10-21",
+    "notes": [
+      "Estados Financieros → PDF: el NIT se imprime con puntos y el DV separado («NIT 901.795.718 - 9») en el Estado de Situación Financiera, el Estado de Resultados y el PDF de Notas Financieras. Los importes llevan el símbolo $ en una columna alineada y la cifra a la derecha; los ceros siguen como «-».",
+      "La columna NOTA queda junto a los valores y el bloque de firmas sube, dejando espacio para que el representante legal firme a mano. No cambian cálculos, notas ni numeración."
+    ]
+  },
+  {
     "version": "1.47.3",
     "date": "2026-10-21",
     "notes": [

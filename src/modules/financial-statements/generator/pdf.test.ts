@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StatementRow } from "./engine";
-import { accountantSignName, fitRows, isMajorTotal, labelWidth, legalRepSignName, notesBaseline, PAGE, renderStatementsPdf, rowFontSize, statementsFileName, type StatementsPdfModel } from "./pdf";
+import { formatPdfNit } from "../shared/money";
+import { accountantSignName, COLUMNS, FOOTER_HEIGHT, SIGN_LINE_Y, splitPesos, fitRows, isMajorTotal, labelWidth, legalRepSignName, notesBaseline, PAGE, renderStatementsPdf, rowFontSize, statementsFileName, type StatementsPdfModel } from "./pdf";
 
 const lines = (n: number): StatementRow[] => [
   { kind: "title", label: "ACTIVO" },
@@ -33,7 +34,7 @@ describe("PDF de Estados Financieros", () => {
   });
 
   it("reduce fuente y espaciado para que todo quepa en una página", () => {
-    const available = PAGE.height - 150 - 156;
+    const available = PAGE.height - FOOTER_HEIGHT - 156;
     const few = fitRows(lines(10), available);
     const many = fitRows(lines(120), available);
     expect(few.size).toBe(9.5);
@@ -52,7 +53,7 @@ describe("PDF de Estados Financieros", () => {
   });
 
   it("un texto partido en dos renglones ocupa más alto (y sigue cabiendo)", () => {
-    const available = PAGE.height - 150 - 156;
+    const available = PAGE.height - FOOTER_HEIGHT - 156;
     const one = fitRows(lines(10), available);
     const two = fitRows(lines(10), available, (r) => (r.kind === "header" ? 2 : 1));
     expect(two.height).toBeGreaterThan(one.height);
@@ -71,10 +72,13 @@ describe("PDF de Estados Financieros", () => {
       { kind: "total", label: "TOTAL ACTIVO", cents: 0, pesos: 1000 },
     ];
     expect(rows.filter((r) => r.note !== undefined).map((r) => [r.kind, r.note])).toEqual([["line", 3]]);
-    // La NOTA está más cerca del texto, pero deja espacio para el rótulo más largo.
+    // La NOTA queda pegada a los valores: a la derecha de los conceptos y sin tocar el «$» ni los importes.
     const line = labelWidth({ kind: "line", label: "x" });
-    expect(line).toBeGreaterThan(245);
-    expect(line).toBeLessThan(PAGE.width - 2 * 54 - 150);
+    expect(54 + 14 + line).toBeLessThan(COLUMNS.noteX);
+    expect(COLUMNS.noteX).toBeGreaterThan(COLUMNS.dollarX - 25);
+    expect(COLUMNS.noteX + 10).toBeLessThan(COLUMNS.dollarX);
+    expect(COLUMNS.dollarX).toBeLessThan(COLUMNS.numLeft);
+    expect(COLUMNS.numLeft).toBeLessThan(COLUMNS.valueRight);
   });
 
   it("los totales principales tienen fuente mayor que una línea ordinaria", () => {
@@ -93,7 +97,7 @@ describe("PDF de Estados Financieros", () => {
     expect(notesBaseline(300)).toBeCloseTo(316);
     for (const end of [160, 400, 642, 5000]) {
       const y = notesBaseline(end);
-      expect(y).toBeLessThan(PAGE.height - 150 + 30); // las firmas empiezan ≈ 688 pt
+      expect(y).toBeLessThan(SIGN_LINE_Y - 50); // sobre la firma del contador y el espacio de firma del representante
     }
   });
 
@@ -104,5 +108,20 @@ describe("PDF de Estados Financieros", () => {
     expect(legalRepSignName("Daza Martinez Ana", null)).toBe("DAZA MARTINEZ ANA");
     expect(legalRepSignName("Ana Pérez", { firstName: "Ana" })).toBe("ANA PÉREZ");
     expect(accountantSignName("Leidy Villamil")).toBe("LEIDY VILLAMIL");
+  });
+
+  it("NIT con puntos y DV separado; importes con «$» aparte y ceros como «-»", () => {
+    expect(formatPdfNit("901795718", "9")).toBe("901.795.718 - 9");
+    expect(formatPdfNit("901.795.718", "9")).toBe("901.795.718 - 9");
+    expect(formatPdfNit("901795718", "")).toBe("901.795.718");
+    expect(splitPesos(1234000)).toEqual({ symbol: true, number: "1.234.000" });
+    expect(splitPesos(-2000000)).toEqual({ symbol: true, number: "(2.000.000)" });
+    expect(splitPesos(0)).toEqual({ symbol: false, number: "-" });
+  });
+
+  it("firmas más arriba que antes, con espacio para firmar y dentro de la página", () => {
+    expect(SIGN_LINE_Y).toBeLessThan(740);
+    expect(SIGN_LINE_Y + 12 + 2 * 10.5).toBeLessThan(PAGE.height - 30);
+    expect(SIGN_LINE_Y - notesBaseline(PAGE.height)).toBeGreaterThanOrEqual(48);
   });
 });

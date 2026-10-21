@@ -1,5 +1,5 @@
 import type { jsPDF as JsPDF } from "jspdf";
-import { formatStatementPesos, statementDate } from "../shared/money";
+import { formatPdfNit, formatStatementPesos, statementDate } from "../shared/money";
 import type { StatementRow } from "./engine";
 
 /**
@@ -39,17 +39,18 @@ export interface StatementsPdfModel {
 export const PAGE = { width: 612, height: 792 };
 const MARGIN_X = 54;
 const VALUE_RIGHT = PAGE.width - MARGIN_X;
-/**
- * Columna NOTA compacta: queda a continuación del rótulo más largo que convive
- * con esa zona («TOTAL GASTOS OPERACIONALES ADMINISTRACIÓN», ≈245 pt en
- * Helvetica negrita 9,5 pt, con su sangría) y es la misma en las dos páginas.
- */
-const LONGEST_LABEL_RIGHT = MARGIN_X + 6 + 245;
-const LABEL_NOTE_GAP = 18;
-const NOTE_X = LONGEST_LABEL_RIGHT + 13 + LABEL_NOTE_GAP;
+/** Importes: raya y cifra alineadas a la derecha en [NUM_LEFT, VALUE_RIGHT]; el «$» en su propia columna a la izquierda. */
+const NUM_WIDTH = 83;
+const NUM_LEFT = VALUE_RIGHT - NUM_WIDTH;
+const DOLLAR_X = NUM_LEFT - 12;
+/** Columna NOTA pegada a los valores (a la izquierda del «$»), igual en las dos páginas. */
+const NOTE_X = DOLLAR_X - 16;
+export const COLUMNS = { dollarX: DOLLAR_X, numLeft: NUM_LEFT, noteX: NOTE_X, valueRight: VALUE_RIGHT };
 const COLORS = { text: "#222222", muted: "#555555", line: "#9a9a9a", negative: "#c62828", title: "#111111" };
 /** Bloque de notas y firmas al pie (alto fijo). */
-const FOOTER_HEIGHT = 150;
+export const FOOTER_HEIGHT = 180;
+/** Línea de firmas: deja ≈64 pt libres bajo el texto de notas para firmar a mano. */
+export const SIGN_LINE_Y = PAGE.height - 100;
 const HEADER_BOTTOM = 150;
 
 /** Los totales principales se imprimen algo más grandes que una línea ordinaria. */
@@ -65,9 +66,6 @@ export function rowFontSize(row: StatementRow, size: number): number {
 
 const NOTES_TEXT = "Las notas descritas son parte integral de los Estados Financieros.";
 
-/** Ancho de la raya sobre el valor de subtotales, totales y resultados. */
-const VALUE_RULE = 95;
-
 const indentOf = (row: StatementRow) => (row.kind === "line" ? 14 : row.kind === "subtotal" ? 6 : 0);
 
 /**
@@ -75,10 +73,16 @@ const indentOf = (row: StatementRow) => (row.kind === "line" ? 14 : row.kind ===
  * NOTA ni Valor: usan todo el ancho. Totales y resultados llegan hasta su
  * valor (la columna NOTA está vacía). Solo las cuentas se detienen antes de NOTA.
  */
+/** Importe separado en símbolo y cifra: el «$» va en su columna; el cero («-») no lleva símbolo. */
+export function splitPesos(pesos: number): { symbol: boolean; number: string } {
+  const value = formatStatementPesos(pesos);
+  return value === "-" ? { symbol: false, number: "-" } : { symbol: true, number: value.replace("$", "") };
+}
+
 export function labelWidth(row: StatementRow): number {
   const left = MARGIN_X + indentOf(row);
   if (row.kind === "line") return NOTE_X - 18 - left;
-  if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") return VALUE_RIGHT - VALUE_RULE - 10 - left;
+  if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") return DOLLAR_X - 10 - left;
   return VALUE_RIGHT - left;
 }
 
@@ -146,7 +150,7 @@ function header(pdf: JsPDF, model: StatementsPdfModel, title: string) {
   }
   const cx = PAGE.width / 2;
   text(pdf, model.companyName.toUpperCase(), cx, 50, { size: 12, bold: true, align: "center", color: COLORS.title });
-  text(pdf, `NIT ${model.nit}${model.dv ? `-${model.dv}` : ""}`, cx, 64, { size: 9.5, align: "center", color: COLORS.muted });
+  text(pdf, `NIT ${formatPdfNit(model.nit, model.dv)}`, cx, 64, { size: 9.5, align: "center", color: COLORS.muted });
   text(pdf, title, cx, 92, { size: 12, bold: true, align: "center", color: COLORS.title });
   text(pdf, `DE ${statementDate(model.startDate)} A ${statementDate(model.endDate)}`, cx, 107, { size: 9, align: "center", color: COLORS.muted });
   text(pdf, "(CIFRAS EXPRESADAS EN PESOS COLOMBIANOS)", cx, 120, { size: 8, align: "center", color: COLORS.muted });
@@ -181,12 +185,14 @@ function table(pdf: JsPDF, rows: StatementRow[]): number {
       label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: fontSize, bold }));
       if (row.kind === "line" && row.note !== undefined) text(pdf, String(row.note), NOTE_X, baseline, { size, align: "center", color: COLORS.muted });
       if (row.pesos !== undefined) {
-        const value = formatStatementPesos(row.pesos);
-        text(pdf, value, VALUE_RIGHT, baseline, { size: fontSize, bold, align: "right", color: row.pesos < 0 ? COLORS.negative : COLORS.text });
+        const { symbol, number } = splitPesos(row.pesos);
+        const color = row.pesos < 0 ? COLORS.negative : COLORS.text;
+        if (symbol) text(pdf, "$", DOLLAR_X, baseline, { size: fontSize, bold, color });
+        text(pdf, number, VALUE_RIGHT, baseline, { size: fontSize, bold, align: "right", color });
         if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") {
           pdf.setDrawColor(COLORS.line);
           pdf.setLineWidth(row.kind === "subtotal" ? 0.4 : 0.7);
-          pdf.line(VALUE_RIGHT - VALUE_RULE, y + size * 0.15, VALUE_RIGHT, y + size * 0.15);
+          pdf.line(NUM_LEFT, y + size * 0.15, VALUE_RIGHT, y + size * 0.15);
         }
       }
     }
@@ -212,15 +218,14 @@ export function legalRepSignName(registered: string, parts?: { firstName?: strin
 export const accountantSignName = upper;
 
 function footer(pdf: JsPDF, model: StatementsPdfModel, tableEnd: number) {
-  const top = PAGE.height - FOOTER_HEIGHT;
   text(pdf, NOTES_TEXT, MARGIN_X, notesBaseline(tableEnd), { size: 7.5, color: COLORS.muted });
-  const lineY = top + 98;
+  const lineY = SIGN_LINE_Y;
   const colW = 200;
   const left = { x: MARGIN_X + 10, center: MARGIN_X + 10 + colW / 2 };
   const right = { x: PAGE.width - MARGIN_X - 10 - colW, center: PAGE.width - MARGIN_X - 10 - colW / 2 };
   // Contador: firma PNG sobre la línea. Representante legal: espacio de firma vacío.
   if (model.accountant.signature) {
-    const r = fit(model.accountant.signature, { x: right.x, y: lineY - 52, w: colW, h: 48 }, "center");
+    const r = fit(model.accountant.signature, { x: right.x, y: lineY - 50, w: colW, h: 46 }, "center");
     pdf.addImage(model.accountant.signature.dataUrl, imageFormat(model.accountant.signature.dataUrl), r.x, r.y, r.w, r.h, undefined, "FAST");
   }
   pdf.setDrawColor(COLORS.text);

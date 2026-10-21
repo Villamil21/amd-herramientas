@@ -17,6 +17,13 @@ export function roundThousands(cents: number): number {
 
 const group = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
+/** NIT para los PDF: «901.795.718 - 9» (solo presentación; el almacenado no cambia). */
+export function formatPdfNit(nit: string, dv: string): string {
+  const digits = nit.replace(/\D/g, "");
+  const grouped = group(digits || nit.trim());
+  return dv.trim() ? `${grouped} - ${dv.trim()}` : grouped;
+}
+
 /** Pesos enteros para los estados: 3.566.000 · negativos entre paréntesis: ($2.000.000) · cero: «-». */
 export function formatStatementPesos(pesos: number): string {
   if (pesos === 0) return "-";
