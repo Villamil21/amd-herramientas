@@ -416,7 +416,7 @@ describe("cobertura por empresa, banco, cuenta y mes", () => {
     const r = run([statement({ month: `${YEAR}-11` })], { profiles: [] });
     const missing = r.alerts.find((a) => a.code === "december-missing")!;
     expect(missing.actions.map((a) => a.label)).toEqual(["Importar extracto de Bancolombia", "Abrir cuenta y mes"]);
-    expect(missing.actions[0].path).toBe("/herramientas/estados-financieros/extractos-bancarios/bancolombia");
+    expect(missing.actions[0].path).toBe("/herramientas/estados-financieros/extractos-bancarios/bancolombia/importar");
     const focus = parseBankExoFocus(missing.actions[1].path.split("/").pop());
     expect(focus).toEqual({ kind: "month", companyId: 1, year: YEAR, bank: "Bancolombia", account: "111", month: `${YEAR}-12` });
     const profileFocus = parseBankExoFocus(bankExoPath({ kind: "profile", bank: "BBVA" }).split("/").pop());

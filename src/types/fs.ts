@@ -533,3 +533,75 @@ export interface BankReclassOutcome {
   changes: { editId: number; originalMovementId: number; movedMovementId: number; remainderMovementId: number | null; movedCents: number; transactions: number }[];
   invalidatedPeriods: number;
 }
+
+/** Cambio guardado sobre un concepto de un extracto enviado que aún no se aplicó a Estados Financieros. */
+export interface BankPendingEdit {
+  id: number;
+  companyId: number;
+  batchId: number;
+  concept: string;
+  destination: "send" | "skip";
+  pucCode: string;
+  isGmf: boolean;
+  /** Cómo estaba el concepto al guardar el cambio. */
+  previous: { destination?: "send" | "skip"; pucCode?: string; pucConcept?: string; isGmf?: boolean; amountCents?: number; movementIds?: number[] };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BankPendingEditInput {
+  batchId: number;
+  concept: string;
+  destination: "send" | "skip";
+  pucCode?: string;
+  isGmf?: boolean;
+}
+
+export interface BankApplyInput {
+  batchId: number;
+  reason: string;
+  acknowledgeApproved: boolean;
+}
+
+export interface BankApplyOutcome {
+  batchId: number;
+  concepts: number;
+  invalidatedPeriods: number;
+  logIds: number[];
+}
+
+export interface BankEditLogState {
+  destination?: "send" | "skip";
+  pucCode?: string;
+  pucConcept?: string;
+  isGmf?: boolean;
+  amountCents?: number;
+}
+
+export interface BankEditLogEntry {
+  id: number;
+  companyId: number;
+  batchId: number;
+  concept: string;
+  reason: string;
+  previous: BankEditLogState;
+  next: BankEditLogState;
+  createdAt: string;
+}
+
+export interface BankMonthNa {
+  companyId: number;
+  bankKey: string;
+  accountNumber: string;
+  month: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface BankMonthNaInput {
+  companyId: number;
+  bank: string;
+  accountNumber?: string;
+  month: string;
+  reason: string;
+}

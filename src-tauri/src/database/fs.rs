@@ -1239,6 +1239,302 @@ pub fn reclassify_bank_transactions(conn: &mut Connection, input: &BankReclassIn
 }
 
 // ---------------------------------------------------------------------------
+// Edición por concepto de un extracto ya enviado («Actualización pendiente»)
+// ---------------------------------------------------------------------------
+
+/// Cómo está hoy un concepto del extracto en Estados Financieros (solo sus movimientos vigentes).
+struct ConceptState {
+    destination: &'static str,
+    puc_code: String,
+    puc_concept: String,
+    is_gmf: bool,
+    cents: i64,
+    movements: Vec<Movement>,
+}
+
+fn load_bank_batch(conn: &Connection, batch_id: i64) -> AppResult<BatchSummary> {
+    let batch = conn.query_row(&format!("SELECT {BATCH_COLUMNS} FROM fs_batches WHERE id = ?1"), [batch_id], map_batch).optional()?.ok_or_else(|| AppError::user("El extracto no existe."))?;
+    if batch.source != "bank" {
+        return Err(AppError::user("Solo se editan extractos bancarios."));
+    }
+    if batch.status != "active" {
+        return Err(AppError::user("Solo se edita un extracto vigente: este fue reemplazado o anulado."));
+    }
+    Ok(batch)
+}
+
+fn payload_concepts(batch: &BatchSummary, concept: &str) -> Vec<Value> {
+    batch.metadata["exogena"]["concepts"].as_array().map(|list| list.iter().filter(|c| c["description"].as_str() == Some(concept)).cloned().collect()).unwrap_or_default()
+}
+
+fn concept_state(conn: &Connection, batch_id: i64, concept: &str) -> AppResult<ConceptState> {
+    let movements: Vec<Movement> = conn
+        .prepare(&format!("SELECT {MOVEMENT_COLUMNS} FROM fs_movements WHERE batch_id = ?1 AND status = 'active' AND description = ?2 AND concept_key IN ('bank.concept', 'bank.gmf') ORDER BY id"))?
+        .query_map(params![batch_id, concept], map_movement)?
+        .collect::<Result<_, _>>()?;
+    let first = movements.first();
+    Ok(ConceptState {
+        destination: if movements.is_empty() { "skip" } else { "send" },
+        puc_code: first.map(|m| m.puc_code.clone()).unwrap_or_default(),
+        puc_concept: first.map(|m| m.puc_concept.clone()).unwrap_or_default(),
+        is_gmf: movements.iter().any(|m| m.concept_key == "bank.gmf"),
+        cents: movements.iter().map(|m| if m.dc.as_deref() == Some("C") { -m.amount_cents } else { m.amount_cents }).sum(),
+        movements,
+    })
+}
+
+fn state_json(s: &ConceptState) -> Value {
+    serde_json::json!({ "destination": s.destination, "pucCode": s.puc_code, "pucConcept": s.puc_concept, "isGmf": s.is_gmf, "amountCents": s.cents, "movementIds": s.movements.iter().map(|m| m.id).collect::<Vec<_>>() })
+}
+
+const LEGACY_EDIT: &str = "Este extracto se envió antes de guardar su detalle: reimpórtalo con «Reemplazar» para cambiar su destino o el GMF. El cambio de cuenta PUC sí es posible.";
+
+/// ¿Cambiar a este destino / PUC / GMF necesita el detalle del extracto (conceptos y transacciones guardados)?
+fn edit_needs_payload(state: &ConceptState, destination: &str, is_gmf: bool) -> bool {
+    (state.destination == "skip" && destination == "send") || (destination == "send" && state.destination == "send" && state.is_gmf != is_gmf)
+}
+
+fn pending_from_row(r: &Row) -> rusqlite::Result<BankPendingEdit> {
+    Ok(BankPendingEdit { id: r.get(0)?, company_id: r.get(1)?, batch_id: r.get(2)?, concept: r.get(3)?, destination: r.get(4)?, puc_code: r.get(5)?, is_gmf: r.get(6)?, previous: json(r.get(7)?), created_at: r.get(8)?, updated_at: r.get(9)? })
+}
+
+const PENDING_COLUMNS: &str = "id, company_id, batch_id, concept, destination, puc_code, is_gmf, previous, created_at, updated_at";
+
+pub fn list_bank_pending_edits(conn: &Connection, company_id: i64) -> AppResult<Vec<BankPendingEdit>> {
+    Ok(conn.prepare(&format!("SELECT {PENDING_COLUMNS} FROM fs_bank_pending_edits WHERE company_id = ?1 ORDER BY id"))?.query_map([company_id], pending_from_row)?.collect::<Result<_, _>>()?)
+}
+
+pub fn list_bank_edit_log(conn: &Connection, company_id: i64) -> AppResult<Vec<BankEditLogEntry>> {
+    Ok(conn
+        .prepare("SELECT id, company_id, batch_id, concept, reason, previous, next, created_at FROM fs_bank_edit_log WHERE company_id = ?1 ORDER BY id")?
+        .query_map([company_id], |r| Ok(BankEditLogEntry { id: r.get(0)?, company_id: r.get(1)?, batch_id: r.get(2)?, concept: r.get(3)?, reason: r.get(4)?, previous: json(r.get(5)?), next: json(r.get(6)?), created_at: r.get(7)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Guarda (o actualiza) el cambio de un concepto SIN tocar Estados Financieros. Si el cambio deja el concepto como está, se borra.
+pub fn save_bank_pending_edit(conn: &mut Connection, input: &BankPendingEditInput) -> AppResult<Option<BankPendingEdit>> {
+    let batch = load_bank_batch(conn, input.batch_id)?;
+    let concept = input.concept.as_str();
+    if !matches!(input.destination.as_str(), "send" | "skip") {
+        return Err(AppError::user("El destino elegido no es válido."));
+    }
+    let state = concept_state(conn, batch.id, concept)?;
+    let skipped = batch.metadata["skipped"].as_array().is_some_and(|l| l.iter().any(|v| v.as_str() == Some(concept)));
+    if state.movements.is_empty() && !skipped && payload_concepts(&batch, concept).is_empty() {
+        return Err(AppError::user("El concepto no existe en este extracto."));
+    }
+    let send = input.destination == "send";
+    let puc_code = if send { input.puc_code.trim().to_string() } else { String::new() };
+    if send {
+        puc::assignable_concept(conn, &puc_code)?.ok_or_else(|| AppError::user(format!("El código PUC «{puc_code}» no existe o no se puede asignar.")))?;
+    }
+    let is_gmf = send && input.is_gmf;
+    let unchanged = if send { state.destination == "send" && state.puc_code == puc_code && state.is_gmf == is_gmf && !state.movements.is_empty() } else { state.destination == "skip" };
+    if unchanged {
+        conn.execute("DELETE FROM fs_bank_pending_edits WHERE batch_id = ?1 AND concept = ?2", params![batch.id, concept])?;
+        return Ok(None);
+    }
+    if edit_needs_payload(&state, &input.destination, is_gmf) && payload_concepts(&batch, concept).is_empty() {
+        return Err(AppError::user(LEGACY_EDIT));
+    }
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO fs_bank_pending_edits (company_id, batch_id, concept, destination, puc_code, is_gmf, previous, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+         ON CONFLICT(batch_id, concept) DO UPDATE SET destination = excluded.destination, puc_code = excluded.puc_code, is_gmf = excluded.is_gmf, updated_at = excluded.updated_at",
+        params![batch.company_id, batch.id, concept, input.destination, puc_code, is_gmf, state_json(&state).to_string(), now],
+    )?;
+    Ok(conn.query_row(&format!("SELECT {PENDING_COLUMNS} FROM fs_bank_pending_edits WHERE batch_id = ?1 AND concept = ?2"), params![batch.id, concept], pending_from_row).optional()?)
+}
+
+/// Descarta los cambios guardados sin aplicar (todos los del extracto, o solo los de un concepto).
+pub fn discard_bank_pending_edits(conn: &Connection, batch_id: i64, concept: Option<&str>) -> AppResult<i64> {
+    let n = match concept {
+        Some(c) => conn.execute("DELETE FROM fs_bank_pending_edits WHERE batch_id = ?1 AND concept = ?2", params![batch_id, c])?,
+        None => conn.execute("DELETE FROM fs_bank_pending_edits WHERE batch_id = ?1", [batch_id])?,
+    };
+    Ok(n as i64)
+}
+
+struct NewMovement<'a> {
+    batch: &'a BatchSummary,
+    concept_key: &'a str,
+    document_id: String,
+    document_type: &'a str,
+    puc_code: &'a str,
+    puc_concept: &'a str,
+    description: &'a str,
+    cents: i64,
+    dc: &'a str,
+    detail: Value,
+}
+
+fn insert_bank_movement(tx: &Transaction, m: &NewMovement, now: &str) -> AppResult<i64> {
+    let bank = m.batch.metadata["bank"].as_str().unwrap_or_default();
+    let account = m.batch.metadata["accountNumber"].as_str().unwrap_or_default();
+    tx.execute(
+        "INSERT INTO fs_movements (company_id, batch_id, accounting_date, source, concept_key, document_id, document_type, bank, account_number, puc_code, puc_concept, description, amount_cents, dc, status, detail, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'bank', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'active', ?14, ?15, ?15)",
+        params![m.batch.company_id, m.batch.id, m.batch.period_end, m.concept_key, m.document_id, m.document_type, bank, account, m.puc_code, m.puc_concept, m.description, m.cents, m.dc, m.detail.to_string(), now],
+    )?;
+    Ok(tx.last_insert_rowid())
+}
+
+/// Aplica los cambios guardados de UN extracto a sus movimientos vigentes (mismo lote, sin duplicar): el movimiento anterior queda
+/// «Ajustado», nace el nuevo y la bitácora conserva antes, después, motivo y fecha. Un periodo cerrado bloquea; uno cuadrado o con PDF
+/// exige confirmación y pasa a «Requiere nueva revisión». Las marcas de GMF actualizan también la regla del banco para ese concepto.
+pub fn apply_bank_pending_edits(conn: &mut Connection, input: &BankApplyInput) -> AppResult<BankApplyOutcome> {
+    let reason = input.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::user("Escribe el motivo del cambio."));
+    }
+    let batch = load_bank_batch(conn, input.batch_id)?;
+    let pending: Vec<BankPendingEdit> = conn
+        .prepare(&format!("SELECT {PENDING_COLUMNS} FROM fs_bank_pending_edits WHERE batch_id = ?1 ORDER BY id"))?
+        .query_map([batch.id], pending_from_row)?
+        .collect::<Result<_, _>>()?;
+    if pending.is_empty() {
+        return Err(AppError::user("Este extracto no tiene cambios pendientes de aplicar."));
+    }
+    let mut plans = Vec::new();
+    let mut dates = BTreeSet::new();
+    if let Some(end) = &batch.period_end {
+        dates.insert(end.clone());
+    }
+    for p in &pending {
+        let state = concept_state(conn, batch.id, &p.concept)?;
+        let (send, gmf) = (p.destination == "send", p.is_gmf);
+        let concepts = payload_concepts(&batch, &p.concept);
+        if edit_needs_payload(&state, &p.destination, gmf) && concepts.is_empty() {
+            return Err(AppError::user(format!("«{}»: {LEGACY_EDIT}", p.concept)));
+        }
+        let concept_text = if send { puc::assignable_concept(conn, &p.puc_code)?.ok_or_else(|| AppError::user(format!("El código PUC «{}» ya no se puede asignar.", p.puc_code)))? } else { String::new() };
+        for m in &state.movements {
+            dates.insert(m.accounting_date.clone());
+        }
+        plans.push((p.clone(), state, concepts, concept_text));
+    }
+    ensure_open(conn, batch.company_id, &dates)?;
+    let approved: Vec<String> = conn
+        .prepare("SELECT start_date, end_date FROM fs_periods WHERE company_id = ?1 AND status IN ('ready', 'pdf_generated')")?
+        .query_map([batch.company_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|(s, e)| dates.iter().any(|d| d >= s && d <= e))
+        .map(|(s, e)| format!("{s} a {e}"))
+        .collect();
+    if !approved.is_empty() && !input.acknowledge_approved {
+        return Err(AppError::user(format!("El periodo de Estados Financieros ({}) está cuadrado o tiene PDF generado: confirma que pasará a «Requiere nueva revisión» y que la versión anterior se conserva.", approved.join("; "))));
+    }
+
+    let bank = batch.metadata["bank"].as_str().unwrap_or_default().to_string();
+    let account = batch.metadata["accountNumber"].as_str().unwrap_or_default().to_string();
+    let (from, to) = (batch.period_start.clone().unwrap_or_default(), batch.period_end.clone().unwrap_or_default());
+    let tx = conn.transaction()?;
+    let now = now_iso();
+    let mut log_ids = Vec::new();
+    for (p, state, concepts, concept_text) in &plans {
+        let send = p.destination == "send";
+        let mut created: Vec<i64> = Vec::new();
+        let mut created_cents = 0i64;
+        let base_detail = |extra: Value| {
+            let mut d = serde_json::json!({ "statement": batch.file_name, "period": format!("{from} a {to}"), "account": account });
+            if let (Value::Object(map), Value::Object(more)) = (&mut d, extra) {
+                map.extend(more);
+            }
+            d
+        };
+        for m in &state.movements {
+            tx.execute("UPDATE fs_movements SET status = 'adjusted', updated_at = ?1 WHERE id = ?2", params![now, m.id])?;
+        }
+        if send && !state.movements.is_empty() && state.is_gmf == p.is_gmf {
+            // Solo cambia la cuenta PUC: cada movimiento vigente se reemplaza por una copia con el PUC nuevo (el valor no cambia).
+            for m in &state.movements {
+                let mut detail = if m.detail.is_object() { m.detail.clone() } else { serde_json::json!({}) };
+                if let Value::Object(map) = &mut detail {
+                    map.insert("reclassified".into(), serde_json::json!({ "from": m.puc_code, "to": p.puc_code, "at": now, "movementId": m.id, "reason": reason }));
+                }
+                let id = insert_bank_movement(&tx, &NewMovement { batch: &batch, concept_key: &m.concept_key, document_id: m.document_id.clone(), document_type: &m.document_type, puc_code: &p.puc_code, puc_concept: concept_text, description: &m.description, cents: m.amount_cents, dc: m.dc.as_deref().unwrap_or("D"), detail }, &now)?;
+                created.push(id);
+                created_cents += if m.dc.as_deref() == Some("C") { -m.amount_cents } else { m.amount_cents };
+            }
+        } else if send {
+            let total = |dc: &str| concepts.iter().filter(|c| c["dc"].as_str() == Some(dc)).map(|c| c["totalCents"].as_i64().unwrap_or(0).abs()).sum::<i64>();
+            let txs = |dc: Option<&str>| -> Vec<Value> { concepts.iter().filter(|c| dc.is_none_or(|d| c["dc"].as_str() == Some(d))).flat_map(|c| c["movements"].as_array().cloned().unwrap_or_default()).collect() };
+            let count = |dc: Option<&str>| concepts.iter().filter(|c| dc.is_none_or(|d| c["dc"].as_str() == Some(d))).map(|c| c["count"].as_i64().unwrap_or(0)).sum::<i64>();
+            if p.is_gmf {
+                let (out, inn) = (total("D"), total("C"));
+                let net = out - inn;
+                let value = net.signum() * ((net.abs() * 50 + 50) / 100);
+                if value != 0 {
+                    let dc = if value > 0 { "D" } else { "C" };
+                    let detail = base_detail(serde_json::json!({ "direction": if value > 0 { "outflow" } else { "inflow" }, "count": count(None), "gmf": { "confirmed": true, "origin": "manual", "percent": 50, "outflowCents": out, "inflowCents": inn, "originalNetCents": net, "accountingCents": value }, "movements": txs(None) }));
+                    let id = insert_bank_movement(&tx, &NewMovement { batch: &batch, concept_key: "bank.gmf", document_id: format!("{bank}|{account}|{from}|{to}|gmf|{}|{}", p.concept, p.puc_code), document_type: "GMF", puc_code: &p.puc_code, puc_concept: concept_text, description: &p.concept, cents: value.abs(), dc, detail }, &now)?;
+                    created.push(id);
+                    created_cents += value;
+                }
+            } else {
+                for dc in ["D", "C"] {
+                    let cents = total(dc);
+                    if cents == 0 && count(Some(dc)) == 0 {
+                        continue;
+                    }
+                    let detail = base_detail(serde_json::json!({ "direction": if dc == "D" { "outflow" } else { "inflow" }, "count": count(Some(dc)), "movements": txs(Some(dc)) }));
+                    let id = insert_bank_movement(&tx, &NewMovement { batch: &batch, concept_key: "bank.concept", document_id: format!("{bank}|{account}|{from}|{to}|edit|{}|{dc}", p.concept), document_type: if dc == "D" { "Salida" } else { "Entrada" }, puc_code: &p.puc_code, puc_concept: concept_text, description: &p.concept, cents, dc, detail }, &now)?;
+                    created.push(id);
+                    created_cents += if dc == "C" { -cents } else { cents };
+                }
+            }
+        }
+        // Marcar o quitar el GMF actualiza la regla del banco para este concepto; «No enviar» no la toca.
+        if send && state.is_gmf != p.is_gmf {
+            save_gmf_rule(&tx, &bank, &p.concept, p.is_gmf, "manual")?;
+        }
+        let next = serde_json::json!({ "destination": p.destination, "pucCode": p.puc_code, "pucConcept": concept_text, "isGmf": send && p.is_gmf, "amountCents": created_cents, "movementIds": created });
+        tx.execute(
+            "INSERT INTO fs_bank_edit_log (company_id, batch_id, concept, reason, previous, next, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![batch.company_id, batch.id, p.concept, reason, state_json(state).to_string(), next.to_string(), now],
+        )?;
+        log_ids.push(tx.last_insert_rowid());
+        tx.execute("DELETE FROM fs_bank_pending_edits WHERE id = ?1", [p.id])?;
+    }
+    tx.execute("UPDATE fs_batches SET record_count = (SELECT COUNT(*) FROM fs_movements WHERE batch_id = ?1 AND status = 'active'), updated_at = ?2 WHERE id = ?1", params![batch.id, now])?;
+    let invalidated = invalidate_periods(&tx, batch.company_id, &dates, REVIEW_BANK_RECLASS)?;
+    tx.commit()?;
+    Ok(BankApplyOutcome { batch_id: batch.id, concepts: plans.len() as i64, invalidated_periods: invalidated, log_ids })
+}
+
+// --- Meses sin extracto registrados como «No aplica» --------------------------------------------------------------------
+
+pub fn list_bank_month_na(conn: &Connection, company_id: i64) -> AppResult<Vec<BankMonthNa>> {
+    Ok(conn
+        .prepare("SELECT company_id, bank_key, account_number, month, reason, created_at FROM fs_bank_month_na WHERE company_id = ?1 ORDER BY month, bank_key, account_number")?
+        .query_map([company_id], |r| Ok(BankMonthNa { company_id: r.get(0)?, bank_key: r.get(1)?, account_number: r.get(2)?, month: r.get(3)?, reason: r.get(4)?, created_at: r.get(5)? }))?
+        .collect::<Result<_, _>>()?)
+}
+
+pub fn save_bank_month_na(conn: &Connection, input: &BankMonthNaInput) -> AppResult<()> {
+    let reason = input.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::user("Escribe por qué este mes no aplica (cuenta cerrada, periodo sin extracto…)."));
+    }
+    let key = bank_key(&input.bank);
+    if key.is_empty() || input.month.len() != 7 || !input.month.chars().enumerate().all(|(i, c)| if i == 4 { c == '-' } else { c.is_ascii_digit() }) {
+        return Err(AppError::user("Banco o mes no válidos."));
+    }
+    conn.execute(
+        "INSERT INTO fs_bank_month_na (company_id, bank_key, account_number, month, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(company_id, bank_key, account_number, month) DO UPDATE SET reason = excluded.reason",
+        params![input.company_id, key, input.account_number.trim(), input.month, reason, now_iso()],
+    )?;
+    Ok(())
+}
+
+pub fn delete_bank_month_na(conn: &Connection, company_id: i64, bank: &str, account_number: &str, month: &str) -> AppResult<()> {
+    conn.execute("DELETE FROM fs_bank_month_na WHERE company_id = ?1 AND bank_key = ?2 AND account_number = ?3 AND month = ?4", params![company_id, bank_key(bank), account_number.trim(), month])?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Edición individual de movimientos (siempre trazable)
 // ---------------------------------------------------------------------------
 
@@ -2972,5 +3268,186 @@ mod tests {
         let d1 = moves.iter().find(|m| m.document_id == "d1").unwrap().id;
         conn.execute("UPDATE fs_batches SET status = 'replaced' WHERE id = ?1", [batch_id]).unwrap();
         assert!(reclassify_bank_transactions(&mut conn, &reclass(batch_id, "530510", &[(d1, &[0])], false)).unwrap_err().0.contains("vigente"));
+    }
+
+    // --- Edición por concepto con «Actualización pendiente» ---
+
+    fn concept_json(description: &str, dc: &str, txs: &[i64]) -> Value {
+        let list: Vec<Value> = txs.iter().enumerate().map(|(i, c)| serde_json::json!({ "date": format!("2026-03-{:02}", i + 1), "description": description, "amountCents": if dc == "D" { -c } else { *c } })).collect();
+        serde_json::json!({ "description": description, "dc": dc, "count": txs.len(), "totalCents": txs.iter().sum::<i64>(), "movements": list })
+    }
+
+    /// Extracto enviado: COMPRA TIENDA (513595), IMPUESTO GMF sin marcar (530505, valor completo), NOTA (no enviada) e INTERESES (421005).
+    fn edit_statement(conn: &mut Connection, company_id: i64, legacy: bool) -> i64 {
+        let concepts = vec![concept_json("COMPRA TIENDA", "D", &[10_000, 20_000]), concept_json("IMPUESTO GMF", "D", &[1_001, 2_000]), concept_json("NOTA", "D", &[700]), concept_json("INTERESES", "C", &[500])];
+        let mut b = batch(company_id, "bank", "bank:Bancolombia:111:2026-03", vec![bank_movement("c1", "COMPRA TIENDA", "513595", &[10_000, 20_000]), bank_movement("g1", "IMPUESTO GMF", "530505", &[1_001, 2_000]), {
+            let mut i = bank_movement("i1", "INTERESES", "421005", &[500]);
+            i.dc = Some("C".into());
+            i
+        }]);
+        b.period_start = Some("2026-03-01".into());
+        b.period_end = Some("2026-03-31".into());
+        b.file_name = "mar.pdf".into();
+        let mut meta = serde_json::json!({ "bank": "Bancolombia", "accountNumber": "111", "skipped": ["NOTA"] });
+        if !legacy {
+            meta["exogena"] = serde_json::json!({ "version": 1, "concepts": concepts });
+        }
+        b.metadata = Some(meta);
+        let SendOutcome::Sent { batch_id, .. } = send_batch(conn, &b).unwrap() else { panic!() };
+        batch_id
+    }
+
+    fn edit(batch_id: i64, concept: &str, destination: &str, puc_code: &str, is_gmf: bool) -> BankPendingEditInput {
+        BankPendingEditInput { batch_id, concept: concept.into(), destination: destination.into(), puc_code: puc_code.into(), is_gmf }
+    }
+
+    fn apply(batch_id: i64, ack: bool) -> BankApplyInput {
+        BankApplyInput { batch_id, reason: "Corrección del contador".into(), acknowledge_approved: ack }
+    }
+
+    #[test]
+    fn a_pending_edit_is_saved_without_touching_financial_statements() {
+        let mut conn = db();
+        let c = company(&conn, "910");
+        let id = edit_statement(&mut conn, c, false);
+        let before = active(&conn, c);
+        let saved = save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "530510", false)).unwrap().unwrap();
+        assert_eq!((saved.puc_code.as_str(), saved.destination.as_str()), ("530510", "send"));
+        assert_eq!(saved.previous["pucCode"], "513595");
+        assert_eq!(saved.previous["amountCents"], 30_000);
+        assert_eq!(active(&conn, c), before, "Estados Financieros no cambia hasta confirmar");
+        assert_eq!(list_bank_pending_edits(&conn, c).unwrap().len(), 1);
+        // Editar de nuevo el mismo concepto actualiza la misma fila y conserva la foto original.
+        let again = save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "530505", false)).unwrap().unwrap();
+        assert_eq!((again.id, again.puc_code.as_str(), again.previous["pucCode"].as_str()), (saved.id, "530505", Some("513595")));
+        // Volver a como estaba borra el cambio pendiente.
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "513595", false)).unwrap().is_none());
+        assert!(list_bank_pending_edits(&conn, c).unwrap().is_empty());
+        // Entradas inválidas.
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "NO EXISTE", "send", "530510", false)).is_err());
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "999999", false)).is_err());
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "otro", "530510", false)).is_err());
+        assert_eq!(discard_bank_pending_edits(&conn, id, None).unwrap(), 0);
+    }
+
+    #[test]
+    fn applying_changes_the_same_statement_once_with_a_full_audit_trail() {
+        let mut conn = db();
+        let c = company(&conn, "911");
+        let id = edit_statement(&mut conn, c, false);
+        let total_before: i64 = active(&conn, c).iter().map(|(_, v)| v).sum();
+        save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "530510", false)).unwrap();
+        save_bank_pending_edit(&mut conn, &edit(id, "INTERESES", "send", "421010", false)).unwrap();
+        let out = apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap();
+        assert_eq!((out.concepts, out.log_ids.len()), (2, 2));
+        // Mismo lote, mismo total, sin duplicados; lo no editado queda igual.
+        assert_eq!(list_batches(&conn, c).unwrap().len(), 1);
+        let now: Vec<_> = active(&conn, c);
+        assert_eq!(now.iter().map(|(_, v)| v).sum::<i64>(), total_before);
+        assert!(now.contains(&("530510".to_string(), 30_000)) && now.contains(&("421010".to_string(), 500)) && now.contains(&("530505".to_string(), 3_001)));
+        assert!(!now.iter().any(|(p, _)| p == "513595" || p == "421005"));
+        assert_eq!(list_batches(&conn, c).unwrap()[0].record_count, 3);
+        assert!(list_bank_pending_edits(&conn, c).unwrap().is_empty());
+        // Auditoría: antes, después, motivo, fecha.
+        let log = list_bank_edit_log(&conn, c).unwrap();
+        let compra = log.iter().find(|l| l.concept == "COMPRA TIENDA").unwrap();
+        assert_eq!((compra.reason.as_str(), compra.previous["pucCode"].as_str(), compra.next["pucCode"].as_str()), ("Corrección del contador", Some("513595"), Some("530510")));
+        assert_eq!((compra.previous["amountCents"].as_i64(), compra.next["amountCents"].as_i64()), (Some(30_000), Some(30_000)));
+        assert!(!compra.created_at.is_empty());
+        // Aplicar otra vez no hace nada ni duplica.
+        assert!(apply_bank_pending_edits(&mut conn, &apply(id, false)).is_err());
+        assert_eq!(active(&conn, c).iter().map(|(_, v)| v).sum::<i64>(), total_before);
+    }
+
+    #[test]
+    fn marking_gmf_applies_half_of_the_net_once_and_updates_the_bank_rule_and_removing_it_restores_the_full_value() {
+        let mut conn = db();
+        let c = company(&conn, "912");
+        let id = edit_statement(&mut conn, c, false);
+        save_bank_pending_edit(&mut conn, &edit(id, "IMPUESTO GMF", "send", "530505", true)).unwrap();
+        apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap();
+        // 1.001 + 2.000 = 3.001 → 50 % = 1.500,5 → 1.501 (mitad hacia arriba, una sola vez).
+        let gmf = list_movements(&conn, c).unwrap().into_iter().find(|m| m.status == "active" && m.concept_key == "bank.gmf").unwrap();
+        assert_eq!((gmf.amount_cents, gmf.puc_code.as_str()), (1_501, "530505"));
+        assert_eq!(gmf.detail["gmf"]["originalNetCents"], 3_001);
+        assert!(list_gmf_rules(&conn).unwrap().iter().any(|r| r.bank == "Bancolombia" && r.concept == "IMPUESTO GMF" && r.is_gmf));
+        // Quitar la marca vuelve al valor completo y a la regla «no es GMF».
+        save_bank_pending_edit(&mut conn, &edit(id, "IMPUESTO GMF", "send", "530505", false)).unwrap();
+        apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap();
+        assert!(active(&conn, c).contains(&("530505".to_string(), 3_001)));
+        assert!(list_gmf_rules(&conn).unwrap().iter().any(|r| r.concept == "IMPUESTO GMF" && !r.is_gmf));
+        assert_eq!(list_batches(&conn, c).unwrap().len(), 1);
+        assert_eq!(list_bank_edit_log(&conn, c).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn no_enviar_removes_the_concept_and_sending_a_skipped_one_creates_it_from_the_saved_detail() {
+        let mut conn = db();
+        let c = company(&conn, "913");
+        let id = edit_statement(&mut conn, c, false);
+        save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "skip", "", false)).unwrap();
+        save_bank_pending_edit(&mut conn, &edit(id, "NOTA", "send", "530510", false)).unwrap();
+        apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap();
+        let now = active(&conn, c);
+        assert!(!now.iter().any(|(p, _)| p == "513595"));
+        assert!(now.contains(&("530510".to_string(), 700)));
+        // «No enviar» sobre un concepto GMF no cambia su regla.
+        assert!(list_gmf_rules(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_statements_can_change_puc_but_not_gmf_or_destination() {
+        let mut conn = db();
+        let c = company(&conn, "914");
+        let id = edit_statement(&mut conn, c, true);
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "NOTA", "send", "530510", false)).unwrap_err().0.contains("Reemplazar"));
+        assert!(save_bank_pending_edit(&mut conn, &edit(id, "IMPUESTO GMF", "send", "530505", true)).unwrap_err().0.contains("Reemplazar"));
+        save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "530510", false)).unwrap();
+        apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap();
+        assert!(active(&conn, c).contains(&("530510".to_string(), 30_000)));
+    }
+
+    #[test]
+    fn approved_periods_need_an_explicit_confirmation_closed_ones_block_and_the_pending_edit_survives() {
+        let mut conn = db();
+        let c = company(&conn, "915");
+        let id = edit_statement(&mut conn, c, false);
+        let now = "2026-04-01T00:00:00Z";
+        conn.execute("INSERT INTO fs_periods (company_id, start_date, end_date, presentation, status, created_at, updated_at) VALUES (?1, '2026-03-01', '2026-03-31', 'bank', 'closed', ?2, ?2)", params![c, now]).unwrap();
+        save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "530510", false)).unwrap();
+        assert!(apply_bank_pending_edits(&mut conn, &apply(id, true)).unwrap_err().0.contains("periodo cerrado"));
+        conn.execute("UPDATE fs_periods SET status = 'pdf_generated'", []).unwrap();
+        let period_id: i64 = conn.query_row("SELECT id FROM fs_periods", [], |r| r.get(0)).unwrap();
+        conn.execute("INSERT INTO fs_statement_versions (period_id, version, file_name, snapshot, generated_at) VALUES (?1, 1, 'ef.pdf', '{\"v\":1}', ?2)", params![period_id, now]).unwrap();
+        assert!(apply_bank_pending_edits(&mut conn, &apply(id, false)).unwrap_err().0.contains("PDF"));
+        assert_eq!(list_bank_pending_edits(&conn, c).unwrap().len(), 1, "el cambio guardado sigue pendiente");
+        assert!(active(&conn, c).contains(&("513595".to_string(), 30_000)), "nada cambió");
+        let out = apply_bank_pending_edits(&mut conn, &apply(id, true)).unwrap();
+        assert_eq!(out.invalidated_periods, 1);
+        let status: String = conn.query_row("SELECT status FROM fs_periods", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "needs_review");
+        let snapshot: String = conn.query_row("SELECT snapshot FROM fs_statement_versions WHERE period_id = ?1", [period_id], |r| r.get(0)).unwrap();
+        assert_eq!(snapshot, "{\"v\":1}");
+        // Un motivo vacío no se acepta.
+        save_bank_pending_edit(&mut conn, &edit(id, "COMPRA TIENDA", "send", "513595", false)).unwrap();
+        let mut blank = apply(id, true);
+        blank.reason = " ".into();
+        assert!(apply_bank_pending_edits(&mut conn, &blank).is_err());
+        assert_eq!(discard_bank_pending_edits(&conn, id, Some("COMPRA TIENDA")).unwrap(), 1);
+    }
+
+    #[test]
+    fn months_without_a_statement_can_be_registered_as_not_applicable_with_a_reason() {
+        let conn = db();
+        let c = company(&conn, "916");
+        let input = BankMonthNaInput { company_id: c, bank: "Bancolombia  ".into(), account_number: "111".into(), month: "2026-02".into(), reason: "Cuenta sin movimiento".into() };
+        save_bank_month_na(&conn, &input).unwrap();
+        save_bank_month_na(&conn, &BankMonthNaInput { reason: "Otra razón".into(), ..input.clone() }).unwrap();
+        let list = list_bank_month_na(&conn, c).unwrap();
+        assert_eq!((list.len(), list[0].bank_key.as_str(), list[0].reason.as_str()), (1, "BANCOLOMBIA", "Otra razón"));
+        assert!(save_bank_month_na(&conn, &BankMonthNaInput { reason: " ".into(), ..input.clone() }).is_err());
+        assert!(save_bank_month_na(&conn, &BankMonthNaInput { month: "febrero".into(), ..input.clone() }).is_err());
+        delete_bank_month_na(&conn, c, "bancolombia", "111", "2026-02").unwrap();
+        assert!(list_bank_month_na(&conn, c).unwrap().is_empty());
     }
 }

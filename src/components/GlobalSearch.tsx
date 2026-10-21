@@ -23,7 +23,7 @@ function staticResults(): Result[] {
     out.push({ key: m.id, label: m.name, hint: "Módulo", icon: m.icon, path: paths.module(m.id) });
     for (const s of m.submodules.filter(isAvailable)) {
       out.push({ key: `${m.id}/${s.id}`, label: s.name, hint: m.name, icon: s.icon, path: paths.submodule(m.id, s.id) });
-      for (const p of (s.providers ?? []).filter(isAvailable)) {
+      for (const p of (s.providers ?? []).filter((p) => isAvailable(p) && !p.hidden)) {
         out.push({ key: `${m.id}/${s.id}/${p.id}`, label: p.name, hint: `${m.name} · ${s.name}`, icon: p.icon, path: paths.provider(m.id, s.id, p.id) });
       }
     }

@@ -99,6 +99,46 @@ pub fn reclassify_fs_bank_transactions(db: State<'_, Db>, input: BankReclassInpu
 }
 
 #[tauri::command]
+pub fn list_fs_bank_pending_edits(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankPendingEdit>> {
+    db.with(|c| fs::list_bank_pending_edits(c, company_id))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_pending_edit(db: State<'_, Db>, input: BankPendingEditInput) -> AppResult<Option<BankPendingEdit>> {
+    db.with(|c| fs::save_bank_pending_edit(c, &input))
+}
+
+#[tauri::command]
+pub fn discard_fs_bank_pending_edits(db: State<'_, Db>, batch_id: i64, concept: Option<String>) -> AppResult<i64> {
+    db.with(|c| fs::discard_bank_pending_edits(c, batch_id, concept.as_deref()))
+}
+
+#[tauri::command]
+pub fn apply_fs_bank_pending_edits(db: State<'_, Db>, input: BankApplyInput) -> AppResult<BankApplyOutcome> {
+    db.with(|c| fs::apply_bank_pending_edits(c, &input))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_edit_log(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankEditLogEntry>> {
+    db.with(|c| fs::list_bank_edit_log(c, company_id))
+}
+
+#[tauri::command]
+pub fn list_fs_bank_month_na(db: State<'_, Db>, company_id: i64) -> AppResult<Vec<BankMonthNa>> {
+    db.with(|c| fs::list_bank_month_na(c, company_id))
+}
+
+#[tauri::command]
+pub fn save_fs_bank_month_na(db: State<'_, Db>, input: BankMonthNaInput) -> AppResult<()> {
+    db.with(|c| fs::save_bank_month_na(c, &input))
+}
+
+#[tauri::command]
+pub fn delete_fs_bank_month_na(db: State<'_, Db>, company_id: i64, bank: String, account_number: String, month: String) -> AppResult<()> {
+    db.with(|c| fs::delete_bank_month_na(c, company_id, &bank, &account_number, &month))
+}
+
+#[tauri::command]
 pub fn edit_fs_movement(db: State<'_, Db>, input: MovementEditInput) -> AppResult<MovementEdit> {
     db.with(|c| fs::edit_movement(c, &input))
 }

@@ -907,7 +907,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 150px;
+  min-width: 180px;
 }
 
 .date-input__control {
@@ -6273,4 +6273,91 @@ body.is-reordering * {
   gap: 4px 14px;
   color: var(--color-muted);
   font-size: 12px;
+}
+
+/* Extractos bancarios · pantalla de un banco: tarjetas de cobertura por mes */
+.bank-months {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-3);
+}
+
+.bank-month {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bank-month:hover {
+  background: var(--color-surface-muted, var(--color-surface));
+}
+
+.bank-month__title {
+  font-weight: 600;
+}
+
+.bank-month__meta {
+  font-size: 0.85em;
+  color: var(--color-text-muted, inherit);
+}
+
+.bank-month--sent { border-left-color: var(--accent-green); }
+.bank-month--pending { border-left-color: var(--color-warning); }
+.bank-month--update-pending { border-left-color: var(--color-info); }
+.bank-month--review,
+.bank-month--missing { border-left-color: var(--color-danger); }
+.bank-month--na,
+.bank-month--not-ended { border-left-color: var(--color-status-off); opacity: 0.85; }
+
+.concept-row--pending td {
+  background: var(--color-info-soft);
+}
+
+.concept-change {
+  font-size: 0.85em;
+  color: var(--color-info);
+}
+
+.detail-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+
+.detail-facts dt {
+  font-size: 0.82em;
+}
+
+.detail-facts dd {
+  margin: 2px 0 0;
+  font-weight: 500;
+}
+
+.concept-table th,
+.concept-table td {
+  vertical-align: top;
+}
+
+.concept-table {
+  width: 100%;
+  min-width: 0;
+}
+
+.concept-table td:nth-child(5) {
+  min-width: 180px;
+}
+
+.concept-table .concept-select {
+  min-width: 0;
+  width: 100%;
 }

@@ -15,12 +15,19 @@ export type BankExoFocus =
 const SEP = "~";
 const enc = (v: string | number) => encodeURIComponent(String(v));
 
-/** Ruta que abre exactamente ese banco, cuenta y mes en «Cobertura y Exógena». */
+/** Id (segmento de URL) del banco dentro de Extractos bancarios, o null si no tiene lector propio. */
+export function bankProviderId(bank: string): string | null {
+  const key = normalizeKey(bank);
+  return bankAnalysisModule.submodules.find((s) => normalizeKey(s.name) === key)?.id ?? null;
+}
+
+/** Ruta que abre exactamente ese banco, cuenta y mes en la pantalla del banco (sin banco conocido, en la cobertura de todos). */
 export function bankExoPath(focus?: BankExoFocus): string {
   if (!focus) return BANK_EXO_PATH;
   const parts =
     focus.kind === "profile" ? ["ficha", focus.bank] : focus.kind === "bank" ? ["banco", focus.companyId, focus.year, focus.bank] : ["mes", focus.companyId, focus.year, focus.bank, focus.account, focus.month];
-  return `${BANK_EXO_PATH}/${parts.map(enc).join(SEP)}`;
+  const base = bankProviderId(focus.bank);
+  return `${base ? `${BANKS_PATH}/${base}` : BANK_EXO_PATH}/${parts.map(enc).join(SEP)}`;
 }
 
 export function parseBankExoFocus(segment: string | undefined): BankExoFocus | null {
@@ -41,9 +48,8 @@ export function parseBankExoFocus(segment: string | undefined): BankExoFocus | n
   return null;
 }
 
-/** Pantalla de importación del extracto de ese banco (la de su lector); sin lector propio, la lista de bancos. */
+/** Pantalla de importación del extracto de ese banco (la de su lector, dentro del banco); sin lector propio, la lista de bancos. */
 export function bankImportPath(bank: string): string {
-  const key = normalizeKey(bank);
-  const provider = bankAnalysisModule.submodules.find((s) => normalizeKey(s.name) === key);
-  return provider ? `${BANKS_PATH}/${provider.id}` : BANKS_PATH;
+  const id = bankProviderId(bank);
+  return id ? `${BANKS_PATH}/${id}/importar` : BANKS_PATH;
 }

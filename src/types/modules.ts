@@ -17,6 +17,8 @@ export interface SubmoduleDef {
   providers?: SubmoduleDef[];
   /** Texto de la pantalla de selección de proveedores (por defecto, el de planillas). */
   providersDescription?: string;
+  /** Sigue siendo una ruta válida, pero no aparece como tarjeta en la lista de proveedores ni en la búsqueda. */
+  hidden?: boolean;
   /** Prioridad de la tarjeta: menor va primero (0 = siempre primera). Sin definir = orden declarado, después de las prioritarias. */
   priority?: number;
 }

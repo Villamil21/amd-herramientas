@@ -71,6 +71,8 @@ export interface ImportedStatement {
   sentToEeff: boolean;
   /** Extracto enviado antes de guardar el detalle para Exógena (hay que reimportarlo para 1007 y 1011). */
   legacy: boolean;
+  /** Conceptos que el usuario eligió «No enviar» al importar. */
+  skipped: string[];
   interestCents: number;
   gmfGrossCents: number;
   gmfReportedCents: number;
@@ -201,6 +203,7 @@ export function buildImportedStatements(input: ImportedInput): ImportedStatement
       sentCents: sentMovements.reduce((s, m) => s + m.amountCents, 0),
       sentToEeff: sentMovements.length > 0 || input.movements.some((m) => m.batchId === batch.id && m.status === "adjusted"),
       legacy: st.payload === null,
+      skipped: (Array.isArray(batch.metadata?.skipped) ? (batch.metadata!.skipped as unknown[]) : []).map(String),
       interestCents,
       gmfGrossCents: gmfGross,
       gmfReportedCents: gmfReported,

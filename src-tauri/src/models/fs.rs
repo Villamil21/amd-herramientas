@@ -787,3 +787,85 @@ pub struct BankReclassOutcome {
     pub changes: Vec<BankReclassChange>,
     pub invalidated_periods: i64,
 }
+
+/// Cambio guardado sobre un concepto de un extracto enviado, todavía sin aplicar a Estados Financieros.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankPendingEdit {
+    pub id: i64,
+    pub company_id: i64,
+    pub batch_id: i64,
+    pub concept: String,
+    /// `send` | `skip`.
+    pub destination: String,
+    pub puc_code: String,
+    pub is_gmf: bool,
+    pub previous: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankPendingEditInput {
+    pub batch_id: i64,
+    pub concept: String,
+    pub destination: String,
+    #[serde(default)]
+    pub puc_code: String,
+    #[serde(default)]
+    pub is_gmf: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankApplyInput {
+    pub batch_id: i64,
+    pub reason: String,
+    #[serde(default)]
+    pub acknowledge_approved: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankApplyOutcome {
+    pub batch_id: i64,
+    pub concepts: i64,
+    pub invalidated_periods: i64,
+    pub log_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankEditLogEntry {
+    pub id: i64,
+    pub company_id: i64,
+    pub batch_id: i64,
+    pub concept: String,
+    pub reason: String,
+    pub previous: Value,
+    pub next: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankMonthNa {
+    pub company_id: i64,
+    pub bank_key: String,
+    pub account_number: String,
+    pub month: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BankMonthNaInput {
+    pub company_id: i64,
+    pub bank: String,
+    #[serde(default)]
+    pub account_number: String,
+    pub month: String,
+    pub reason: String,
+}
