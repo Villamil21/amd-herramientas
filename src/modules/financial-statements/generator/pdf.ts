@@ -31,7 +31,7 @@ export interface StatementsPdfModel {
   endDate: string;
   esfRows: StatementRow[];
   eerrRows: StatementRow[];
-  legalRep: { name: string; document: string };
+  legalRep: { name: string; document: string; parts?: { firstName?: string; otherNames?: string; firstSurname?: string; secondSurname?: string } | null };
   accountant: { name: string; title: string; professionalDocument: string; signature: PdfImage | null };
 }
 
@@ -39,11 +39,29 @@ export interface StatementsPdfModel {
 export const PAGE = { width: 612, height: 792 };
 const MARGIN_X = 54;
 const VALUE_RIGHT = PAGE.width - MARGIN_X;
-const NOTE_X = PAGE.width - MARGIN_X - 150;
+/**
+ * Columna NOTA compacta: queda a continuación del rótulo más largo que convive
+ * con esa zona («TOTAL GASTOS OPERACIONALES ADMINISTRACIÓN», ≈245 pt en
+ * Helvetica negrita 9,5 pt, con su sangría) y es la misma en las dos páginas.
+ */
+const LONGEST_LABEL_RIGHT = MARGIN_X + 6 + 245;
+const LABEL_NOTE_GAP = 18;
+const NOTE_X = LONGEST_LABEL_RIGHT + 13 + LABEL_NOTE_GAP;
 const COLORS = { text: "#222222", muted: "#555555", line: "#9a9a9a", negative: "#c62828", title: "#111111" };
 /** Bloque de notas y firmas al pie (alto fijo). */
 const FOOTER_HEIGHT = 150;
 const HEADER_BOTTOM = 150;
+
+/** Los totales principales se imprimen algo más grandes que una línea ordinaria. */
+export const MAJOR_SCALE = 1.15;
+const MAJOR_TOTALS = new Set(["TOTAL ACTIVO", "TOTAL PASIVOS", "TOTAL PATRIMONIO", "TOTAL PASIVOS Y PATRIMONIO", "RESULTADO BRUTO", "GASTOS OPERACIONALES", "RESULTADO ANTES DE IMPUESTOS"]);
+export const isMajorTotal = (row: StatementRow) => (row.kind === "total" || row.kind === "result") && MAJOR_TOTALS.has(row.label);
+
+/** Tamaño de fuente con que se imprime una fila (el rótulo y el valor usan el mismo). */
+export function rowFontSize(row: StatementRow, size: number): number {
+  if (row.kind === "title") return size + 1;
+  return isMajorTotal(row) ? size * MAJOR_SCALE : size;
+}
 
 const NOTES_TEXT = "Las notas descritas son parte integral de los Estados Financieros.";
 
@@ -67,6 +85,7 @@ export function labelWidth(row: StatementRow): number {
 /** Alto de una fila según su tipo, para un tamaño de fuente, un interlineado y sus renglones de texto. */
 function rowHeight(row: StatementRow, size: number, leading: number, lines = 1): number {
   const extra = (lines - 1) * size * leading;
+  if (isMajorTotal(row)) return size * MAJOR_SCALE * leading * 1.2 + extra;
   if (row.kind === "gap") return size * leading * 0.6;
   if (row.kind === "title") return size * leading * 1.45 + extra;
   if (row.kind === "header") return size * leading * 1.25 + extra;
@@ -122,7 +141,7 @@ const imageFormat = (dataUrl: string) => (dataUrl.startsWith("data:image/png") ?
 function header(pdf: JsPDF, model: StatementsPdfModel, title: string) {
   // Logo arriba a la izquierda, sin deformar.
   if (model.logo) {
-    const r = fit(model.logo, { x: MARGIN_X - 8, y: 24, w: 96, h: 64 });
+    const r = fit(model.logo, { x: MARGIN_X + 6, y: 32, w: 96, h: 64 });
     pdf.addImage(model.logo.dataUrl, imageFormat(model.logo.dataUrl), r.x, r.y, r.w, r.h, undefined, "FAST");
   }
   const cx = PAGE.width / 2;
@@ -142,11 +161,11 @@ function header(pdf: JsPDF, model: StatementsPdfModel, title: string) {
 function wrapLabel(pdf: JsPDF, row: StatementRow, size: number): string[] {
   if (row.kind === "gap") return [];
   pdf.setFont("helvetica", row.kind === "line" ? "normal" : "bold");
-  pdf.setFontSize(row.kind === "title" ? size + 1 : size);
+  pdf.setFontSize(rowFontSize(row, size));
   return pdf.splitTextToSize(row.label, labelWidth(row)) as string[];
 }
 
-function table(pdf: JsPDF, rows: StatementRow[]) {
+function table(pdf: JsPDF, rows: StatementRow[]): number {
   const top = HEADER_BOTTOM + 6;
   const available = PAGE.height - FOOTER_HEIGHT - top;
   const { size, leading } = fitRows(rows, available, (row, s) => Math.max(1, wrapLabel(pdf, row, s).length));
@@ -158,11 +177,12 @@ function table(pdf: JsPDF, rows: StatementRow[]) {
     const baseline = y + h - size * 0.35;
     if (row.kind !== "gap") {
       const bold = row.kind !== "line";
-      label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: row.kind === "title" ? size + 1 : size, bold }));
+      const fontSize = rowFontSize(row, size);
+      label.forEach((part, i) => text(pdf, part, MARGIN_X + indentOf(row), baseline - (label.length - 1 - i) * size * leading, { size: fontSize, bold }));
       if (row.kind === "line" && row.note !== undefined) text(pdf, String(row.note), NOTE_X, baseline, { size, align: "center", color: COLORS.muted });
       if (row.pesos !== undefined) {
         const value = formatStatementPesos(row.pesos);
-        text(pdf, value, VALUE_RIGHT, baseline, { size, bold, align: "right", color: row.pesos < 0 ? COLORS.negative : COLORS.text });
+        text(pdf, value, VALUE_RIGHT, baseline, { size: fontSize, bold, align: "right", color: row.pesos < 0 ? COLORS.negative : COLORS.text });
         if (row.kind === "subtotal" || row.kind === "total" || row.kind === "result") {
           pdf.setDrawColor(COLORS.line);
           pdf.setLineWidth(row.kind === "subtotal" ? 0.4 : 0.7);
@@ -172,11 +192,28 @@ function table(pdf: JsPDF, rows: StatementRow[]) {
     }
     y += h;
   }
+  return y;
 }
 
-function footer(pdf: JsPDF, model: StatementsPdfModel) {
+/** Separación entre el final de la tabla y el texto de las notas. */
+const NOTES_GAP = 16;
+/** Línea base del texto de notas: pegado al final real de la tabla, siempre arriba de las firmas. */
+export const notesBaseline = (tableEnd: number) => Math.min(tableEnd + NOTES_GAP, PAGE.height - FOOTER_HEIGHT + NOTES_GAP);
+
+const upper = (value: string) => value.trim().toUpperCase();
+
+/** Nombre del representante: «NOMBRES APELLIDOS» si hay partes estructuradas confiables; si no, el nombre registrado. */
+export function legalRepSignName(registered: string, parts?: { firstName?: string; otherNames?: string; firstSurname?: string; secondSurname?: string } | null): string {
+  if (parts?.firstName?.trim() && parts.firstSurname?.trim()) {
+    return upper([parts.firstName, parts.otherNames, parts.firstSurname, parts.secondSurname].map((p) => p?.trim()).filter(Boolean).join(" "));
+  }
+  return upper(registered);
+}
+export const accountantSignName = upper;
+
+function footer(pdf: JsPDF, model: StatementsPdfModel, tableEnd: number) {
   const top = PAGE.height - FOOTER_HEIGHT;
-  text(pdf, NOTES_TEXT, MARGIN_X, top + 22, { size: 7.5, color: COLORS.muted });
+  text(pdf, NOTES_TEXT, MARGIN_X, notesBaseline(tableEnd), { size: 7.5, color: COLORS.muted });
   const lineY = top + 98;
   const colW = 200;
   const left = { x: MARGIN_X + 10, center: MARGIN_X + 10 + colW / 2 };
@@ -191,8 +228,8 @@ function footer(pdf: JsPDF, model: StatementsPdfModel) {
   pdf.line(left.x, lineY, left.x + colW, lineY);
   pdf.line(right.x, lineY, right.x + colW, lineY);
   const lines = (center: number, values: string[]) => values.filter(Boolean).forEach((v, i) => text(pdf, v, center, lineY + 12 + i * 10.5, { size: 8, bold: i === 0, align: "center" }));
-  lines(left.center, [model.legalRep.name, "Representante Legal", model.legalRep.document]);
-  lines(right.center, [model.accountant.name, model.accountant.title, model.accountant.professionalDocument ? `TP ${model.accountant.professionalDocument.replace(/^TP[\s-]*/i, "")}` : ""]);
+  lines(left.center, [legalRepSignName(model.legalRep.name, model.legalRep.parts), "Representante Legal", model.legalRep.document]);
+  lines(right.center, [accountantSignName(model.accountant.name), model.accountant.title, model.accountant.professionalDocument ? `TP ${model.accountant.professionalDocument.replace(/^TP[\s-]*/i, "")}` : ""]);
 }
 
 /** jsPDF se carga solo al generar, para no pesar en el inicio de la aplicación. */
@@ -201,12 +238,10 @@ export async function renderStatementsPdf(model: StatementsPdfModel): Promise<{ 
   const pdf = new jsPDF({ unit: "pt", format: [PAGE.width, PAGE.height], compress: true });
   pdf.setProperties({ title: `Estados Financieros ${model.companyName}`, creator: "AMD Módulos" });
   header(pdf, model, "ESTADO DE SITUACIÓN FINANCIERA");
-  table(pdf, model.esfRows);
-  footer(pdf, model);
+  footer(pdf, model, table(pdf, model.esfRows));
   pdf.addPage([PAGE.width, PAGE.height], "portrait");
   header(pdf, model, "ESTADO DE RESULTADOS");
-  table(pdf, model.eerrRows);
-  footer(pdf, model);
+  footer(pdf, model, table(pdf, model.eerrRows));
   return { bytes: new Uint8Array(pdf.output("arraybuffer")), pages: pdf.getNumberOfPages() };
 }
 

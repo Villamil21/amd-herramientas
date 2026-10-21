@@ -20,12 +20,21 @@ export interface StatementsSnapshot {
   /** Solo interna: nunca aparece en el PDF. */
   presentation: Presentation;
   company: Pick<Company, "id" | "razonSocial" | "nit" | "dv" | "logoFile" | "legalRepName" | "legalRepDocument" | "subscribedTotalShares" | "subscribedNominalValue" | "paidTotalShares" | "paidNominalValue">;
+  /** Partes estructuradas del socio que es el representante legal (si existen); solo para imprimir «NOMBRES APELLIDOS». */
+  legalRepParts?: { firstName?: string; otherNames?: string; firstSurname?: string; secondSurname?: string } | null;
   accountant: Pick<CertificateSigner, "id" | "name" | "professionalDocument" | "accountantTitle" | "signatureFile"> | null;
   esfRows: StatementRow[];
   eerrRows: StatementRow[];
   totals: Statements["esf"] & { beforeTax: number; incomeTaxPesos: number };
   catalog: FsCatalog;
   mappings: FsPucMapping[];
+}
+
+/** Partes del nombre del socio vinculado como representante principal, solo si coincide con el representante registrado. */
+function legalRepParts(c: Company): StatementsSnapshot["legalRepParts"] {
+  const sh = c.shareholders.find((s) => s.legalRole === "principal");
+  if (!sh || !sh.firstName?.trim() || !sh.firstSurname?.trim()) return null;
+  return { firstName: sh.firstName, otherNames: sh.otherNames, firstSurname: sh.firstSurname, secondSurname: sh.secondSurname };
 }
 
 export function buildSnapshot(s: Statements, args: { company: Company; accountant: CertificateSigner | null; start: string; end: string; presentation: Presentation; catalog: FsCatalog; mappings: FsPucMapping[] }): StatementsSnapshot {
@@ -37,6 +46,7 @@ export function buildSnapshot(s: Statements, args: { company: Company; accountan
     period: { start: args.start, end: args.end },
     presentation: args.presentation,
     company: { id: c.id, razonSocial: c.razonSocial, nit: c.nit, dv: c.dv, logoFile: c.logoFile, legalRepName: c.legalRepName, legalRepDocument: c.legalRepDocument, subscribedTotalShares: c.subscribedTotalShares, subscribedNominalValue: c.subscribedNominalValue, paidTotalShares: c.paidTotalShares, paidNominalValue: c.paidNominalValue },
+    legalRepParts: legalRepParts(c),
     accountant: a ? { id: a.id, name: a.name, professionalDocument: a.professionalDocument, accountantTitle: a.accountantTitle, signatureFile: a.signatureFile } : null,
     esfRows: esfRows(s),
     eerrRows: eerrRows(s),
@@ -70,7 +80,7 @@ export async function pdfModel(snapshot: StatementsSnapshot): Promise<Statements
     startDate: snapshot.period.start,
     endDate: snapshot.period.end,
     ...(({ esf, eerr }) => ({ esfRows: esf, eerrRows: eerr }))(withNoteNumbers(snapshot.esfRows, snapshot.eerrRows)),
-    legalRep: { name: snapshot.company.legalRepName, document: snapshot.company.legalRepDocument },
+    legalRep: { name: snapshot.company.legalRepName, document: snapshot.company.legalRepDocument, parts: snapshot.legalRepParts },
     accountant: { name: snapshot.accountant?.name ?? "", title: snapshot.accountant?.accountantTitle ?? "", professionalDocument: snapshot.accountant?.professionalDocument ?? "", signature },
   };
 }

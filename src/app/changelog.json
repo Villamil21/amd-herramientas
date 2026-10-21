@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.47.3",
+    "date": "2026-10-21",
+    "notes": [
+      "Estados Financieros → PDF: ajustes visuales. El logo se desplazó un poco a la derecha y hacia abajo, y la columna NOTA quedó más cerca del texto (misma posición en las dos páginas). Los totales principales (TOTAL ACTIVO, TOTAL PASIVOS, TOTAL PATRIMONIO, TOTAL PASIVOS Y PATRIMONIO, RESULTADO BRUTO, GASTOS OPERACIONALES y RESULTADO ANTES DE IMPUESTOS) se imprimen con letra algo mayor.",
+      "El texto «Las notas descritas son parte integral…» queda pegado al final de la tabla. El representante legal se firma como «NOMBRES APELLIDOS» (cuando el socio tiene nombres y apellidos estructurados) y tanto él como el contador aparecen en mayúsculas. No cambian cálculos, notas ni numeración."
+    ]
+  },
+  {
     "version": "1.47.2",
     "date": "2026-10-21",
     "notes": [
