@@ -7,13 +7,14 @@ interface Props {
   title: string;
   message: ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
   danger?: boolean;
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = "Confirmar", danger, loading, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ open, title, message, confirmLabel = "Confirmar", cancelLabel = "Cancelar", danger, loading, onConfirm, onCancel }: Props) {
   return (
     <Modal
       open={open}
@@ -24,7 +25,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = "Confirmar"
       footer={
         <>
           <Button variant="ghost" onClick={onCancel} disabled={loading}>
-            Cancelar
+            {cancelLabel}
           </Button>
           <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} loading={loading} autoFocus>
             {confirmLabel}

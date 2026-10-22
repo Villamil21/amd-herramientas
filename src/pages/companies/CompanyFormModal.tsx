@@ -59,8 +59,15 @@ export function CompanyFormModal({ open, company: companyProp, initial, keepOpen
   const [savedPeriodicity, setSavedPeriodicity] = useState<VatPeriodicity | "">("");
   const imports = useCompanyImport(values, setValues);
   const body = useRef<HTMLDivElement>(null);
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
 
   useEffect(() => {
+    // Todo lo derivado de una importación pertenece al borrador o empresa abiertos: al abrir, cambiar de empresa o cerrar
+    // se descarta (incluidos los PDF cargados sin guardar) para que nada pase a otra ficha.
+    void imports.reset();
+    // El RUT de un socio cargado y sin guardar tampoco sobrevive al borrador que lo cargó.
+    void Promise.allSettled(valuesRef.current.shareholders.flatMap((s) => (s.newDocuments ?? []).map((d) => companyService.discardDocument(d.storedFile))));
     if (!open) return;
     const start: CompanyInput = companyProp ? toInput(companyProp) : { ...EMPTY_COMPANY_INPUT, ...initial };
     setCompany(companyProp);
@@ -105,7 +112,7 @@ export function CompanyFormModal({ open, company: companyProp, initial, keepOpen
   }, [open, hasChanges]);
 
   const discardAndClose = useCallback(async () => {
-    await imports.discardPending();
+    await imports.reset();
     // El RUT de un socio cargado y aún sin guardar tampoco debe quedar huérfano al cancelar.
     await Promise.allSettled(values.shareholders.flatMap((s) => (s.newDocuments ?? []).map((d) => companyService.discardDocument(d.storedFile))));
     setConfirmClose(false);
@@ -248,7 +255,7 @@ export function CompanyFormModal({ open, company: companyProp, initial, keepOpen
           {hasChanges && dirty.length > 0 && <span>Cambios en: {COMPANY_TABS.filter((t) => dirty.includes(t.id)).map((t) => t.label).join(", ")}</span>}
         </footer>
       </div>
-      <ConfirmDialog open={confirmClose} danger title="Hay cambios sin guardar" confirmLabel="Descartar y cerrar" message="Si cierras ahora se pierden los cambios y los documentos cargados que no se han guardado." onCancel={() => setConfirmClose(false)} onConfirm={() => void discardAndClose()} />
+      <ConfirmDialog open={confirmClose} danger title="Hay cambios sin guardar" confirmLabel="Descartar borrador" cancelLabel="Seguir editando" message="Tienes cambios sin guardar. Si cierras, se descartarán los datos y documentos de esta empresa." onCancel={() => setConfirmClose(false)} onConfirm={() => void discardAndClose()} />
     </div>,
     document.body,
   );

@@ -4,6 +4,7 @@ import { companyService } from "../../../services/companyService";
 import type { CompanyDocumentKind, CompanyInput, LegalRole } from "../../../types/models";
 import { normalizeDocument, normalizePhone, upperText } from "../normalize";
 import { parseCamara, type CamaraData } from "./camaraParser";
+import { createImportSession, discardFiles } from "./importSession";
 import { base64ToBytes, type PendingDocument } from "./documentHistory";
 import { planImport, type ImportConflict, type ImportField, type ImportOption, type ImportSource, type ImportValue, type ImportableValues } from "./importPlan";
 import { assignRole, findShareholder, planRepresentatives, type Person, type RepOption, type RepProposal } from "./legalReps";
@@ -54,10 +55,12 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
   valuesRef.current = values;
   const pendingRef = useRef<PendingDocument[]>([]);
   pendingRef.current = pending;
+  /** Sesión de importación vigente: una lectura que termina tras un reinicio es de otro borrador y se ignora. */
+  const session = useRef(createImportSession());
 
   /** Lee el PDF, compara con el formulario y aplica solo lo que no pisa nada. */
   const processBytes = useCallback(
-    async (kind: CompanyDocumentKind, bytes: Uint8Array) => {
+    async (kind: CompanyDocumentKind, bytes: Uint8Array, token: number) => {
       let data: RutData | CamaraData | null = null;
       let failure: string | null = null;
       try {
@@ -68,6 +71,7 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
       } catch (e) {
         failure = `${(e as Error).message || "No fue posible leer el PDF."} Se guardó como versión, pero los campos quedan para llenar a mano.`;
       }
+      if (!session.current.isCurrent(token)) return;
       setNotes((n) => ({ ...n, [kind]: failure ? [failure] : (data as RutData | CamaraData).notes }));
       if (!data) return;
       if (kind === "rut") parsed.current.rut = data as RutData;
@@ -110,17 +114,24 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
 
   const importDocument = useCallback(
     async (kind: CompanyDocumentKind) => {
+      const token = session.current.current();
       setError(null);
       setBusy(kind);
       try {
         const picked = await companyService.pickDocument(kind);
         if (!picked) return;
-        setPending((p) => [...p, { kind, fileName: picked.fileName, storedFile: picked.storedFile, sizeBytes: picked.sizeBytes }]);
-        await processBytes(kind, base64ToBytes(picked.dataBase64));
+        if (!session.current.isCurrent(token)) {
+          // El formulario se cerró o cambió de empresa mientras se elegía el archivo: no pertenece a nadie.
+          await discardFiles([picked.storedFile], companyService.discardDocument);
+          return;
+        }
+        pendingRef.current = [...pendingRef.current, { kind, fileName: picked.fileName, storedFile: picked.storedFile, sizeBytes: picked.sizeBytes }];
+        setPending(pendingRef.current);
+        await processBytes(kind, base64ToBytes(picked.dataBase64), token);
       } catch (e) {
-        setError((e as Error).message);
+        if (session.current.isCurrent(token)) setError((e as Error).message);
       } finally {
-        setBusy(null);
+        if (session.current.isCurrent(token)) setBusy(null);
       }
     },
     [processBytes],
@@ -129,14 +140,16 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
   /** Vuelve a leer una versión ya guardada (para comparar sus datos con el formulario). */
   const rereadVersion = useCallback(
     async (kind: CompanyDocumentKind, storedFile: string) => {
+      const token = session.current.current();
       setError(null);
       setBusy(kind);
       try {
-        await processBytes(kind, base64ToBytes(await companyService.readDocument(storedFile)));
+        const bytes = base64ToBytes(await companyService.readDocument(storedFile));
+        if (session.current.isCurrent(token)) await processBytes(kind, bytes, token);
       } catch (e) {
-        setError((e as Error).message);
+        if (session.current.isCurrent(token)) setError((e as Error).message);
       } finally {
-        setBusy(null);
+        if (session.current.isCurrent(token)) setBusy(null);
       }
     },
     [processBytes],
@@ -161,15 +174,33 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
     }
   }, []);
 
-  /** Descarta los PDF cargados que no se guardaron (al cancelar el formulario). */
-  const discardPending = useCallback(async () => {
+  /**
+   * Reinicia por completo la importación (PDF leídos, orígenes, discrepancias, representantes propuestos, avisos) y borra
+   * los PDF cargados sin guardar. Los ya registrados en una empresa nunca se tocan: el backend no borra archivos referenciados.
+   */
+  const reset = useCallback(async () => {
+    session.current.next();
     const files = pendingRef.current.map((d) => d.storedFile);
+    pendingRef.current = [];
+    parsed.current = { rut: null, camara: null };
     setPending([]);
-    await Promise.allSettled(files.map((f) => companyService.discardDocument(f)));
+    setBusy(null);
+    setError(null);
+    setRut(null);
+    setCamara(null);
+    setOrigins({});
+    setConflicts([]);
+    setRepProposals([]);
+    setRepResolved({});
+    setNotes({});
+    await discardFiles(files, companyService.discardDocument);
   }, []);
 
   /** Tras guardar, las cargas ya son versiones registradas. */
-  const markSaved = useCallback(() => setPending([]), []);
+  const markSaved = useCallback(() => {
+    pendingRef.current = [];
+    setPending([]);
+  }, []);
 
   const resolveConflict = useCallback(
     (conflict: ImportConflict, option: ImportOption) => {
@@ -217,7 +248,7 @@ export function useCompanyImport(values: CompanyInput, setValues: Dispatch<SetSt
     if ((p.conflict || p.ambiguous) && !repResolved[p.role]) blockers.push(`Elige quién es el representante legal ${p.role === "principal" ? "principal" : "suplente"}: el RUT y la Cámara no coinciden.`);
   }
 
-  return { pending, busy, error, rut, camara, origins, conflicts, repProposals, repResolved, notes, blockers, importDocument, rereadVersion, removePending, discardPending, markSaved, resolveConflict, applyRep, keepRep };
+  return { pending, busy, error, rut, camara, origins, conflicts, repProposals, repResolved, notes, blockers, importDocument, rereadVersion, removePending, reset, markSaved, resolveConflict, applyRep, keepRep };
 }
 
 export type CompanyImport = ReturnType<typeof useCompanyImport>;
