@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.48.3",
+    "date": "2026-10-26",
+    "notes": [
+      "Notas Financieras: Activos intangibles ahora es una nota propia. Antes quedaba fuera del catálogo de grupos y la numeración empezaba en Pasivo corriente.",
+      "Notas Financieras: Deudores, corriente y no corriente, es una sola nota. Las dos filas del ESF muestran el mismo número y la nota discrimina «Deudores corriente» y «Deudores no corriente» y suma ambos valores.",
+      "La numeración es automática y consecutiva desde la primera línea con saldo y nota, en el orden contable del estado. Los encabezados sin líneas con saldo, los subtotales y los totales no consumen número. El ESF y el documento de Notas muestran la misma numeración."
+    ]
+  },
+  {
     "version": "1.48.2",
     "date": "2026-10-22",
     "notes": [

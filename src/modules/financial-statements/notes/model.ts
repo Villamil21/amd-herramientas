@@ -18,11 +18,13 @@ import { composeEntityNarrative } from "../../../pages/companies/import/registra
 
 export type NoteSection = "esf" | "eerr";
 
-export type NoteGroupId = "disponible" | "ppe" | "liab_current" | "liab_noncurrent" | "capital" | "results" | "income" | "admin" | "sales" | "other_expenses";
+export type NoteGroupId = "disponible" | "intangibles" | "deudores" | "ppe" | "liab_current" | "liab_noncurrent" | "capital" | "results" | "income" | "admin" | "sales" | "other_expenses";
 
 /** Título de cada grupo (el PDF lo imprime en mayúsculas). */
 export const NOTE_GROUP_TITLE: Record<NoteGroupId, string> = {
   disponible: "Disponible",
+  intangibles: "Activos intangibles",
+  deudores: "Deudores",
   ppe: "Propiedades, planta y equipo",
   liab_current: "Pasivo corriente",
   liab_noncurrent: "Pasivo no corriente",
@@ -82,9 +84,12 @@ function membershipOf(c: Classified): Membership | null {
   if (row.kind !== "line") return null;
   switch (section) {
     case "asset_current":
-      return name === "disponible" ? { id: "disponible", anchor: "first-line", member: true } : null;
+      if (name === "disponible") return { id: "disponible", anchor: "first-line", member: true };
+      if (name === "activos intangibles") return { id: "intangibles", anchor: "first-line", member: true };
+      return name === "deudores" ? { id: "deudores", anchor: "first-line", member: true } : null;
     case "asset_noncurrent":
-      return name.startsWith("propiedad") ? { id: "ppe", anchor: "first-line", member: true } : null;
+      if (name.startsWith("propiedad")) return { id: "ppe", anchor: "first-line", member: true };
+      return name === "deudores" ? { id: "deudores", anchor: "first-line", member: true } : null;
     case "liability_current":
       return { id: "liab_current", anchor: "header", member: true };
     case "liability_noncurrent":
@@ -136,7 +141,8 @@ export function buildNoteGroups(esf: StatementRow[], eerr: StatementRow[], catal
       if (c.row.kind === "header") g.headerIndex ??= c.index;
       else {
         g.firstLineIndex ??= c.index;
-        if (m.member) g.lines.push(c.row);
+        // Deudores reúne corriente y no corriente en una sola nota: la nota discrimina cada parte.
+        if (m.member) g.lines.push(m.id === "deudores" ? { ...c.row, label: c.section === "asset_noncurrent" ? "Deudores no corriente" : "Deudores corriente" } : c.row);
         // Sin encabezado propio (o fuera de él): la partida lleva el mismo número del grupo.
         if (m.member && (m.anchor === "first-line" || c.section === "other_income")) g.loose.push(c.index);
       }

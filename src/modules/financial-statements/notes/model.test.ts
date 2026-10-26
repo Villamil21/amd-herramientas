@@ -11,8 +11,8 @@ const fullEsf = (): StatementRow[] => [
   { kind: "title", label: "ACTIVO" },
   header("ACTIVO CORRIENTE"),
   line("Disponible", 5_026_000, 1, "asset_current"),
-  line("Activos intangibles", 0, 2, "asset_current"),
-  { kind: "subtotal", label: "TOTAL ACTIVO CORRIENTE", pesos: 5_026_000 },
+  line("Activos intangibles", 500_000, 2, "asset_current"),
+  { kind: "subtotal", label: "TOTAL ACTIVO CORRIENTE", pesos: 5_526_000 },
   header("ACTIVO NO CORRIENTE"),
   line("Propiedades, planta y equipo", 3_000_000, 3, "asset_noncurrent"),
   { kind: "total", label: "TOTAL ACTIVO", pesos: 8_026_000 },
@@ -55,19 +55,73 @@ const fullEerr = (): StatementRow[] => [
 ];
 
 describe("notas específicas por grupo contable", () => {
+  it("Activos intangibles es la Nota 1 y Deudores (corriente y no corriente) la Nota 2; el encabezado de Pasivo corriente no consume número", () => {
+    const esf: StatementRow[] = [
+      { kind: "title", label: "ACTIVO" },
+      header("ACTIVO CORRIENTE"),
+      line("Activos intangibles", 2_000_000, 2, "asset_current"),
+      line("Deudores", 700_000, 40, "asset_current"),
+      { kind: "subtotal", label: "TOTAL ACTIVO CORRIENTE", pesos: 2_700_000 },
+      header("ACTIVO NO CORRIENTE"),
+      line("Deudores", 300_000, 41, "asset_noncurrent"),
+      { kind: "total", label: "TOTAL ACTIVO", pesos: 3_000_000 },
+      header("PASIVO CORRIENTE"),
+      line("Cuentas por pagar", 1_000_000, 6, "liability_current"),
+      { kind: "subtotal", label: "TOTAL PASIVO CORRIENTE", pesos: 1_000_000 },
+    ];
+    const groups = buildNoteGroups(esf, []);
+    expect(groups.map((g) => [g.number, g.id])).toEqual([
+      [1, "intangibles"],
+      [2, "deudores"],
+      [3, "liab_current"],
+    ]);
+    const numbered = withNoteNumbers(esf, []);
+    expect(numbered.esf.filter((r) => r.note !== undefined).map((r) => [r.note, r.label, r.kind])).toEqual([
+      [1, "Activos intangibles", "line"],
+      [2, "Deudores", "line"],
+      [2, "Deudores", "line"],
+      [3, "PASIVO CORRIENTE", "header"],
+    ]);
+    const items = buildNoteItems(esf, []);
+    expect(items.map((i) => i.number)).toEqual([1, 2, 3]);
+    const deudores = items.find((i) => i.id === "deudores")!;
+    expect(deudores.body).toEqual({ kind: "table", rows: [{ label: "Deudores corriente", pesos: 700_000 }, { label: "Deudores no corriente", pesos: 300_000 }] });
+    expect(deudores.pesos).toBe(1_000_000);
+  });
+  it("Activos intangibles es nota cuando es la primera partida elegible: la numeración empieza en él y sigue sin saltos", () => {
+    const esf = fullEsf().filter((r) => !["Disponible", "Propiedades, planta y equipo"].includes(r.label)).map((r) => (r.label === "Activos intangibles" ? line("Activos intangibles", 2_000_000, 2, "asset_current") : r));
+    const eerr = fullEerr();
+    const groups = buildNoteGroups(esf, eerr);
+    expect(groups.slice(0, 6).map((g) => [g.number, g.id])).toEqual([
+      [1, "intangibles"],
+      [2, "liab_current"],
+      [3, "liab_noncurrent"],
+      [4, "capital"],
+      [5, "results"],
+      [6, "income"],
+    ]);
+    const numbered = withNoteNumbers(esf, eerr);
+    expect(numbered.esf.find((r) => r.label === "Activos intangibles")?.note).toBe(1);
+    expect(numbered.esf.find((r) => r.label === "PASIVO CORRIENTE")?.note).toBe(2);
+    // Misma numeración en el ESF y en el documento de Notas.
+    const items = buildNoteItems(esf, eerr);
+    expect(items.map((i) => i.number)).toEqual(groups.map((g) => g.number));
+    expect([...new Set([...numbered.esf, ...numbered.eerr].flatMap((r) => (r.note === undefined ? [] : [r.note])))]).toEqual(items.map((i) => i.number));
+  });
   it("construye primero los grupos y los numera de 1 en adelante en el orden contable, sin números fijos", () => {
     const groups = buildNoteGroups(fullEsf(), fullEerr());
     expect(groups.map((g) => [g.number, g.id])).toEqual([
       [1, "disponible"],
-      [2, "ppe"],
-      [3, "liab_current"],
-      [4, "liab_noncurrent"],
-      [5, "capital"],
-      [6, "results"],
-      [7, "income"],
-      [8, "admin"],
-      [9, "sales"],
-      [10, "other_expenses"],
+      [2, "intangibles"],
+      [3, "ppe"],
+      [4, "liab_current"],
+      [5, "liab_noncurrent"],
+      [6, "capital"],
+      [7, "results"],
+      [8, "income"],
+      [9, "admin"],
+      [10, "sales"],
+      [11, "other_expenses"],
     ]);
   });
   it("un grupo que no existe no reserva número: la numeración se reasigna sin huecos", () => {
@@ -75,12 +129,13 @@ describe("notas específicas por grupo contable", () => {
     const groups = buildNoteGroups(esf, fullEerr().filter((r) => r.section !== "sales_expenses" && r.label !== "GASTOS OPERACIONALES DE VENTAS"));
     expect(groups.map((g) => [g.number, g.id])).toEqual([
       [1, "disponible"],
-      [2, "liab_current"],
-      [3, "capital"],
-      [4, "results"],
-      [5, "income"],
-      [6, "admin"],
-      [7, "other_expenses"],
+      [2, "intangibles"],
+      [3, "liab_current"],
+      [4, "capital"],
+      [5, "results"],
+      [6, "income"],
+      [7, "admin"],
+      [8, "other_expenses"],
     ]);
   });
   it("el número va en el encabezado del grupo; las partidas sin encabezado propio (Resultados, Otros ingresos, Otros gastos) comparten el número de su grupo", () => {
@@ -88,18 +143,19 @@ describe("notas específicas por grupo contable", () => {
     const marked = [...numbered.esf, ...numbered.eerr].filter((r) => r.note !== undefined).map((r) => [r.note, r.label]);
     expect(marked).toEqual([
       [1, "Disponible"],
-      [2, "Propiedades, planta y equipo"],
-      [3, "PASIVO CORRIENTE"],
-      [4, "PASIVO NO CORRIENTE"],
-      [5, "Capital social"],
-      [6, "Resultados del ejercicio"],
-      [6, "Resultados de ejercicios anteriores"],
-      [7, "INGRESOS DE ACTIVIDADES ORDINARIAS"],
-      [8, "GASTOS OPERACIONALES DE ADMINISTRACIÓN"],
-      [9, "GASTOS OPERACIONALES DE VENTAS"],
-      [7, "Otros Ingresos"],
-      [10, "Otros Gastos"],
-      [10, "Otros Gastos financieros"],
+      [2, "Activos intangibles"],
+      [3, "Propiedades, planta y equipo"],
+      [4, "PASIVO CORRIENTE"],
+      [5, "PASIVO NO CORRIENTE"],
+      [6, "Capital social"],
+      [7, "Resultados del ejercicio"],
+      [7, "Resultados de ejercicios anteriores"],
+      [8, "INGRESOS DE ACTIVIDADES ORDINARIAS"],
+      [9, "GASTOS OPERACIONALES DE ADMINISTRACIÓN"],
+      [10, "GASTOS OPERACIONALES DE VENTAS"],
+      [8, "Otros Ingresos"],
+      [11, "Otros Gastos"],
+      [11, "Otros Gastos financieros"],
     ]);
     // Nunca repetido en las sublíneas ni en subtotales, totales o resultados.
     expect(numbered.esf.filter((r) => r.kind === "line" && r.label === "Impuestos, gravámenes y tasas")[0].note).toBeUndefined();
@@ -148,7 +204,7 @@ describe("notas específicas por grupo contable", () => {
     const item = buildNoteItems(esf, fullEerr()).find((i) => i.id === "liab_noncurrent")!;
     expect(item.body).toEqual({ kind: "empty" });
     // Sigue numerado: conserva su lugar porque aparece en los estados.
-    expect(item.number).toBe(4);
+    expect(item.number).toBe(5);
   });
   it("el Disponible se desglosa por cuenta principal con su nombre, no con el código PUC", () => {
     const statements = {
@@ -215,7 +271,7 @@ describe("notas específicas por grupo contable", () => {
     expect(pruneEdits(data, items).notes).toEqual({ "group:liab_current": { paragraphs: ["a", "b"] } });
   });
   it("Disponible no existe si los estados no tienen esa partida (no reserva número)", () => {
-    const esf = fullEsf().filter((r) => r.label !== "Disponible");
+    const esf = fullEsf().filter((r) => r.label !== "Disponible" && r.label !== "Activos intangibles");
     expect(buildNoteGroups(esf, fullEerr())[0].id).toBe("ppe");
     expect(buildNoteGroups(esf, fullEerr())[0].number).toBe(1);
   });
